@@ -1,0 +1,39 @@
+[ruleset]
+id = "opencheck.clash.mep-vs-architecture"
+name = "Clash: MEP vs architecture"
+description = "MEP components that run into walls, doors, windows, stairs, ceilings or roofs from the architectural model."
+version = "1"
+author = "OpenCheck"
+
+[[rule]]
+id = "mep-vs-doors-windows"
+name = "MEP components must not intersect doors or windows"
+type = "clash"
+severity = "critical"
+tolerance_mm = 10
+between = "different_models"
+
+[rule.a]
+disciplines = ["mechanical", "plumbing", "electrical", "fire_protection"]
+classes = ["IfcDistributionFlowElement", "IfcFlowSegment", "IfcFlowFitting", "IfcFlowTerminal", "IfcFlowController"]
+
+[rule.b]
+disciplines = ["architectural"]
+classes = ["IfcDoor", "IfcWindow", "IfcStair", "IfcStairFlight", "IfcRamp", "IfcRailing"]
+
+[[rule]]
+id = "mep-vs-walls-ceilings"
+name = "MEP components must not intersect walls, slabs, roofs or ceilings"
+description = "Penetrations of walls and slabs need a planned opening. Findings here are often accepted once the opening is coordinated."
+type = "clash"
+severity = "moderate"
+tolerance_mm = 10
+between = "different_models"
+
+[rule.a]
+disciplines = ["mechanical", "plumbing", "electrical", "fire_protection"]
+classes = ["IfcDistributionFlowElement", "IfcFlowSegment", "IfcFlowFitting", "IfcFlowTerminal", "IfcFlowController"]
+
+[rule.b]
+disciplines = ["architectural"]
+classes = ["IfcWall", "IfcSlab", "IfcRoof", "IfcCovering", "IfcCurtainWall", "IfcChimney"]

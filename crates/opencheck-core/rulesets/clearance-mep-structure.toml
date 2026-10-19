@@ -1,0 +1,22 @@
+[ruleset]
+id = "opencheck.clearance.mep-structure"
+name = "Clearance: MEP near structure"
+description = "Ducts and pipes need room for insulation, hangers and installation. Reports MEP components closer than 50 mm to structural elements."
+version = "1"
+author = "OpenCheck"
+
+[[rule]]
+id = "mep-structure-clearance"
+name = "Keep 50 mm between MEP and structure"
+type = "clearance"
+severity = "low"
+clearance_mm = 50
+between = "different_models"
+
+[rule.a]
+disciplines = ["mechanical", "plumbing", "fire_protection"]
+classes = ["IfcFlowSegment", "IfcFlowFitting"]
+
+[rule.b]
+disciplines = ["structural"]
+classes = ["IfcBeam", "IfcColumn", "IfcSlab", "IfcWall", "IfcMember"]

@@ -1,0 +1,17 @@
+[package]
+name = "opencheck-cli"
+description = "Command line interface for OpenCheck."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "opencheck"
+path = "src/main.rs"
+
+[dependencies]
+opencheck-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true

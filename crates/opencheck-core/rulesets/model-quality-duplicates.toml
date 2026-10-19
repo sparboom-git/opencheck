@@ -1,0 +1,17 @@
+[ruleset]
+id = "opencheck.quality.duplicates"
+name = "Model quality: duplicates"
+description = "The same element modelled twice in one model, for example two identical walls on top of each other. Duplicates inflate quantities and hide clashes."
+version = "1"
+author = "OpenCheck"
+
+[[rule]]
+id = "duplicate-elements"
+name = "Elements must not be modelled twice"
+type = "duplicates"
+severity = "moderate"
+tolerance_mm = 5
+between = "same_model"
+
+[rule.a]
+classes = ["IfcBuildingElement", "IfcDistributionElement", "IfcFurnishingElement"]

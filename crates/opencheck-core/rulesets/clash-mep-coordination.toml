@@ -1,0 +1,54 @@
+[ruleset]
+id = "opencheck.clash.mep-coordination"
+name = "Clash: MEP coordination"
+description = "Clashes between the MEP disciplines: ventilation, plumbing, electrical and fire protection."
+version = "1"
+author = "OpenCheck"
+
+[[rule]]
+id = "mechanical-vs-plumbing"
+name = "Ventilation must not intersect plumbing"
+type = "clash"
+severity = "moderate"
+tolerance_mm = 5
+between = "different_models"
+
+[rule.a]
+disciplines = ["mechanical"]
+classes = ["IfcDistributionElement"]
+
+[rule.b]
+disciplines = ["plumbing", "fire_protection"]
+classes = ["IfcDistributionElement"]
+
+[[rule]]
+id = "mechanical-vs-electrical"
+name = "Ventilation must not intersect electrical installations"
+type = "clash"
+severity = "moderate"
+tolerance_mm = 5
+between = "different_models"
+
+[rule.a]
+disciplines = ["mechanical"]
+classes = ["IfcDistributionElement"]
+
+[rule.b]
+disciplines = ["electrical"]
+classes = ["IfcDistributionElement"]
+
+[[rule]]
+id = "plumbing-vs-electrical"
+name = "Plumbing must not intersect electrical installations"
+type = "clash"
+severity = "moderate"
+tolerance_mm = 5
+between = "different_models"
+
+[rule.a]
+disciplines = ["plumbing", "fire_protection"]
+classes = ["IfcDistributionElement"]
+
+[rule.b]
+disciplines = ["electrical"]
+classes = ["IfcDistributionElement"]

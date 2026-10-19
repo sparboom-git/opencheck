@@ -1,0 +1,4 @@
+/target
+/testdata
+*.ifc
+!crates/**/tests/fixtures/*.ifc

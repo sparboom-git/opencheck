@@ -1,0 +1,25 @@
+[ruleset]
+id = "opencheck.clash.mep-vs-structure"
+name = "Clash: MEP vs structure"
+description = "Ducts, pipes, cable trays and other MEP components must not run through beams, columns, slabs, load-bearing walls or foundations without a planned opening."
+version = "1"
+author = "OpenCheck"
+
+[[rule]]
+id = "mep-vs-structure"
+name = "MEP components must not intersect structural elements"
+type = "clash"
+severity = "critical"
+tolerance_mm = 10
+between = "different_models"
+
+[rule.a]
+disciplines = ["mechanical", "plumbing", "electrical", "fire_protection"]
+classes = ["IfcDistributionFlowElement", "IfcFlowSegment", "IfcFlowFitting", "IfcFlowTerminal", "IfcFlowController", "IfcEnergyConversionDevice", "IfcFlowMovingDevice", "IfcFlowStorageDevice", "IfcFlowTreatmentDevice"]
+
+[rule.b]
+disciplines = ["structural"]
+# Everything built in the structural model, including chimneys and stairs.
+# Proxies are left out: exporters use them for markers such as survey points.
+classes = ["IfcBuildingElement"]
+exclude_classes = ["IfcBuildingElementProxy"]

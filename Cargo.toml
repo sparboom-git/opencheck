@@ -1,0 +1,38 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/sparboom-git/opencheck"
+rust-version = "1.88"
+
+[workspace.dependencies]
+opencheck-core = { path = "crates/opencheck-core" }
+
+# IFC parsing and geometry (MPL-2.0). Pinned: the ifc-lite API moves quickly.
+ifc-lite-core = "=20.4.0"
+ifc-lite-processing = "=20.4.0"
+ifc-lite-clash = "=20.4.0"
+
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+glam = "0.31"
+humantime = "2"
+rayon = "1"
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+thiserror = "2"
+toml = "1"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[profile.dev]
+# ifc-lite's geometry kernel is far too slow unoptimised; our own code stays debuggable.
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
