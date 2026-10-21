@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v0.1.0 (created on the selected branch if it does not exist)"
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check that the tag matches the workspace version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          if ("v$version" -ne $env:TAG) {
+            Write-Error "Tag $env:TAG does not match workspace version $version in Cargo.toml"
+            exit 1
+          }
+      - run: cargo build --release -p opencheck-app -p opencheck-cli
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "OpenCheck-$env:TAG-windows-x64"
+          New-Item -ItemType Directory -Path $name | Out-Null
+          Copy-Item target/release/opencheck-app.exe, target/release/opencheck.exe, README.md, LICENSE-MIT, LICENSE-APACHE -Destination $name
+          Copy-Item crates/opencheck-app/assets/fonts/OFL.txt -Destination "$name/OFL-fonts.txt"
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: OpenCheck ${{ env.TAG }}
+          files: OpenCheck-${{ env.TAG }}-windows-x64.zip
+          generate_release_notes: true
