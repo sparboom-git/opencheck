@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::ids::ids_path;
+use super::information::{builtin_standard, matches_pattern};
 use crate::{Discipline, Element, IfcModel, PropertyValue};
 
 /// How serious a finding is. Matches the three levels used by Solibri and BCF
@@ -49,6 +51,9 @@ pub enum RuleKind {
     Clearance,
     /// The same element must not be modelled twice.
     Duplicates,
+    /// Building parts must carry the information an information standard
+    /// requires at the chosen level (LOD).
+    Information,
 }
 
 /// A property condition, e.g. `Pset_WallCommon.LoadBearing = true`.
@@ -81,6 +86,13 @@ pub struct Selector {
     /// All filters must match.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<PropertyFilter>,
+    /// Patterns (regular expressions, ignoring case) for the element's name,
+    /// object type or type name; one must match. Empty means any name.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub names: Vec<String>,
+    /// Patterns for material names; one must match a material of the element.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub materials: Vec<String>,
 }
 
 impl Selector {
@@ -88,11 +100,42 @@ impl Selector {
         if !self.disciplines.is_empty() && !self.disciplines.contains(&model.discipline) {
             return false;
         }
-        let is_a = |class: &String| is_subtype(&model.schema, &element.ifc_class, class);
+        // IFC2x3 elements also match under the class their type gives them,
+        // so `IfcCableCarrierSegment` finds Revit's typed `IfcFlowSegment`s.
+        let occurrence = element.occurrence_class();
+        let is_a = |class: &String| {
+            is_subtype(&model.schema, &element.ifc_class, class)
+                || (occurrence != element.ifc_class && is_subtype(&model.schema, occurrence, class))
+        };
         if !self.classes.is_empty() && !self.classes.iter().any(is_a) {
             return false;
         }
         if self.exclude_classes.iter().any(is_a) {
+            return false;
+        }
+        if !self.names.is_empty() {
+            let type_name = element.type_object.as_ref().map(|(_, n)| n.as_str());
+            let candidates = [
+                Some(element.name.as_str()),
+                element.object_type.as_deref(),
+                type_name,
+            ];
+            let named = self.names.iter().any(|p| {
+                candidates
+                    .iter()
+                    .flatten()
+                    .any(|name| matches_pattern(p, name))
+            });
+            if !named {
+                return false;
+            }
+        }
+        if !self.materials.is_empty()
+            && !self
+                .materials
+                .iter()
+                .any(|p| element.materials.iter().any(|m| matches_pattern(p, m)))
+        {
             return false;
         }
         self.properties
@@ -164,6 +207,10 @@ pub struct Rule {
     /// Second group. Omitted: elements of group `a` are checked against each other.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub b: Option<Selector>,
+    /// Information: id of a built-in information standard, or `ids:<path>`
+    /// for an IDS file stored in the project, e.g. `ids:requirements/x.ids`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub standard: String,
 }
 
 fn is_zero(v: &f32) -> bool {
@@ -241,6 +288,15 @@ impl Ruleset {
             if rule.kind == RuleKind::Clearance && rule.clearance_mm <= 0.0 {
                 return invalid(format!("rule '{}': clearance_mm must be above 0", rule.id));
             }
+            if rule.kind == RuleKind::Information
+                && builtin_standard(&rule.standard).is_none()
+                && ids_path(&rule.standard).is_none()
+            {
+                return invalid(format!(
+                    "rule '{}': unknown information standard '{}'",
+                    rule.id, rule.standard
+                ));
+            }
             if rule.tolerance_mm < 0.0 {
                 return invalid(format!(
                     "rule '{}': tolerance_mm cannot be negative",
@@ -279,6 +335,10 @@ pub const BUILTIN_RULESETS: &[BuiltinRuleset] = &[
     BuiltinRuleset {
         file_name: "clearance-mep-structure.toml",
         toml: include_str!("../../rulesets/clearance-mep-structure.toml"),
+    },
+    BuiltinRuleset {
+        file_name: "information-lod-dk.toml",
+        toml: include_str!("../../rulesets/information-lod-dk.toml"),
     },
     BuiltinRuleset {
         file_name: "model-quality-duplicates.toml",

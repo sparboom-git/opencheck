@@ -56,6 +56,10 @@ pub struct ViewState {
     pub selection: Vec<ElementRef>,
     pub hover: Option<ElementRef>,
     pub hidden: FxHashSet<ElementRef>,
+    /// Outside the working area: not drawn and not picked.
+    pub outside: FxHashSet<ElementRef>,
+    /// Outside the area being drawn: shown faintly while editing it.
+    pub ghosted: FxHashSet<ElementRef>,
     /// When set, only these elements are shown.
     pub isolated: Option<FxHashSet<ElementRef>>,
     pub xray: bool,
@@ -63,8 +67,10 @@ pub struct ViewState {
     /// Show only elements on this storey (matched by name across models).
     pub storey_filter: Option<String>,
     pub section: Option<SectionPlane>,
-    /// Two elements of a finding shown in the checking colours.
-    pub focus: Option<(ElementRef, ElementRef)>,
+    /// Elements of the findings under review, shown in the checking colours.
+    pub focus: Option<Focus>,
+    /// While reviewing a finding: show the rest of the model normally instead of ghosted.
+    pub show_context: bool,
     /// Set whenever something that affects element modes changes.
     pub modes_dirty: bool,
 }
@@ -154,6 +160,7 @@ impl ViewState {
         self.models.retain(|m| m.id != id);
         self.selection.retain(|e| e.model != id);
         self.hidden.retain(|e| e.model != id);
+        self.outside.retain(|e| e.model != id);
         if let Some(iso) = &mut self.isolated {
             iso.retain(|e| e.model != id);
         }
@@ -182,15 +189,16 @@ impl ViewState {
             express_id: model.slot_elements[local_slot],
         };
         // A finding under review: its two elements in colour, everything else ghosted.
-        if let Some((a, b)) = self.focus {
-            if element == a {
+        if let Some(focus) = &self.focus {
+            if focus.a.contains(&element) {
                 return DisplayMode::FocusA;
             }
-            if element == b {
+            if focus.b.contains(&element) {
                 return DisplayMode::FocusB;
             }
         }
         let hidden = self.hidden.contains(&element)
+            || self.outside.contains(&element)
             || (model.slot_is_space[local_slot] && !self.show_spaces)
             || self
                 .isolated
@@ -202,7 +210,7 @@ impl ViewState {
                 .is_some_and(|s| model.slot_storey[local_slot].as_deref() != Some(s.as_str()));
         if hidden {
             DisplayMode::Hidden
-        } else if self.focus.is_some() {
+        } else if self.ghosted.contains(&element) || (self.focus.is_some() && !self.show_context) {
             DisplayMode::Ghost
         } else if self.selection.contains(&element) {
             DisplayMode::Selected
@@ -345,6 +353,19 @@ impl ViewState {
 
     fn inside_section(&self, p: Vec3) -> bool {
         self.section.is_none_or(|s| p.z <= s.height)
+    }
+}
+
+/// The two sides of one or more findings: side a in orange, side b in blue.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Focus {
+    pub a: FxHashSet<ElementRef>,
+    pub b: FxHashSet<ElementRef>,
+}
+
+impl Focus {
+    pub fn involves_model(&self, model: ModelId) -> bool {
+        self.a.iter().chain(&self.b).any(|e| e.model == model)
     }
 }
 

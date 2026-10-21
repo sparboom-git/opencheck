@@ -4,17 +4,55 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use opencheck_core::ModelId;
 use opencheck_core::check::{
-    BUILTIN_RULESETS, CheckJob, CheckReport, Finding, FindingElement, RuleResult, Ruleset,
-    RulesetResult,
+    BUILTIN_RULESETS, CheckJob, CheckReport, Finding, IDS_PREFIX, Ids, InformationStandard, Rule,
+    RuleKind, RuleResult, Ruleset, RulesetInfo, RulesetResult, Selector, Severity,
+    StandardOverrides, builtin_standard, ids_path,
 };
 use opencheck_core::project::RulesetFile;
+use opencheck_core::{Discipline, ModelId};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 /// The Markdown guide users can hand to a language model to write rulesets.
 pub const RULESET_GUIDE: &str = include_str!("../../../docs/ruleset-authoring.md");
+
+/// Built-in rulesets every project has; they can be switched off but not removed.
+pub const STANDARD_RULESETS: &[&str] = &[
+    "opencheck.quality.duplicates",
+    "opencheck.information.lod-dk",
+];
+
+/// The information standard whose levels the project chooses between.
+pub const INFORMATION_STANDARD: &str = "opencheck.information.lod-dk";
+
+/// Where the project's changes to the information standard are stored.
+pub fn overrides_path(standard: &str) -> String {
+    format!("requirements/{standard}.toml")
+}
+
+/// The project's changes to the information standard and the standard with
+/// them applied.
+pub struct Adapted {
+    pub overrides: StandardOverrides,
+    pub standard: Arc<InformationStandard>,
+}
+
+/// Display name of a level, e.g. "LOD 300 DK".
+pub fn level_label(level: &str) -> String {
+    format!("LOD {level} DK")
+}
+
+/// Levels of the information standard, lowest first.
+pub fn information_levels() -> Vec<String> {
+    builtin_standard(INFORMATION_STANDARD)
+        .map(|s| s.standard.levels.clone())
+        .unwrap_or_default()
+}
+
+pub fn is_standard(ruleset_id: &str) -> bool {
+    STANDARD_RULESETS.contains(&ruleset_id)
+}
 
 /// A reviewer's verdict on a finding. Undecided findings have none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +74,18 @@ pub struct ProjectRuleset {
     pub models: Option<Vec<ModelId>>,
 }
 
+/// An IDS file stored in the project (`requirements/*.ids`).
+pub struct ProjectIds {
+    pub path: String,
+    pub text: String,
+    pub ids: Arc<Ids>,
+}
+
+/// The rule checks against the built-in standard's levels (not an IDS file).
+pub fn uses_levels(rule: &Rule) -> bool {
+    rule.kind == RuleKind::Information && ids_path(&rule.standard).is_none()
+}
+
 /// The two lists on the right of the Checking tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ResultsTab {
@@ -44,96 +94,88 @@ pub enum ResultsTab {
     Issues,
 }
 
-/// Findings of one rule with the same pair of IFC classes, e.g. ducts against beams.
-pub struct Category<'a> {
-    pub a_class: &'a str,
-    pub b_class: &'a str,
-    pub components: Vec<Component<'a>>,
+/// Which findings the results list shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusFilter {
+    #[default]
+    All,
+    /// Not yet accepted or rejected.
+    Open,
+    Accepted,
+    Rejected,
+    /// Already turned into an issue.
+    Issues,
 }
 
-impl Category<'_> {
-    pub fn count(&self) -> usize {
-        self.components.iter().map(|c| c.findings.len()).sum()
-    }
+impl StatusFilter {
+    pub const ALL: [StatusFilter; 5] = [
+        StatusFilter::All,
+        StatusFilter::Open,
+        StatusFilter::Accepted,
+        StatusFilter::Rejected,
+        StatusFilter::Issues,
+    ];
 
-    pub fn ids(&self) -> Vec<String> {
-        self.components
-            .iter()
-            .flat_map(|c| &c.findings)
-            .map(|f| f.id.clone())
-            .collect()
-    }
-}
-
-/// Findings of one element from side a, e.g. one duct and every beam it hits.
-pub struct Component<'a> {
-    pub element: &'a FindingElement,
-    pub findings: Vec<&'a Finding>,
-}
-
-/// Groups findings by class pair, then by the element on side a. The most
-/// affected groups come first, so the worst problems are on top.
-pub fn group_findings<'a>(findings: impl IntoIterator<Item = &'a Finding>) -> Vec<Category<'a>> {
-    let mut categories: Vec<Category<'a>> = Vec::new();
-    for f in findings {
-        let category = match categories
-            .iter_mut()
-            .position(|c| c.a_class == f.a.ifc_class && c.b_class == f.b.ifc_class)
-        {
-            Some(i) => &mut categories[i],
-            None => {
-                categories.push(Category {
-                    a_class: &f.a.ifc_class,
-                    b_class: &f.b.ifc_class,
-                    components: Vec::new(),
-                });
-                categories.last_mut().expect("just pushed")
-            }
-        };
-        match category
-            .components
-            .iter_mut()
-            .find(|c| c.element.model == f.a.model && c.element.express_id == f.a.express_id)
-        {
-            Some(component) => component.findings.push(f),
-            None => category.components.push(Component {
-                element: &f.a,
-                findings: vec![f],
-            }),
+    pub fn label(self) -> &'static str {
+        match self {
+            StatusFilter::All => "Status: all",
+            StatusFilter::Open => "Open",
+            StatusFilter::Accepted => "Accepted",
+            StatusFilter::Rejected => "Rejected",
+            StatusFilter::Issues => "Issues",
         }
     }
-    for category in &mut categories {
-        for component in &mut category.components {
-            component
-                .findings
-                .sort_by(|x, y| y.magnitude.total_cmp(&x.magnitude));
-        }
-        category.components.sort_by(|x, y| {
-            y.findings
-                .len()
-                .cmp(&x.findings.len())
-                .then_with(|| x.element.name.cmp(&y.element.name))
-        });
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ResultFilter {
+    pub status: StatusFilter,
+    pub severity: Option<Severity>,
+    /// `ruleset id / rule id`, or None for every rule.
+    pub rule: Option<String>,
+    /// Ruleset id shown on its own, or None for all rulesets.
+    pub ruleset: Option<String>,
+}
+
+/// Disciplines of a pair in a fixed order, so "EL vs KON" and "KON vs EL" are one pair.
+pub type PairKey = (Discipline, Discipline);
+
+pub fn pair_key(a: Discipline, b: Discipline) -> PairKey {
+    if (a as u8) <= (b as u8) {
+        (a, b)
+    } else {
+        (b, a)
     }
-    categories.sort_by(|x, y| {
-        y.count()
-            .cmp(&x.count())
-            .then_with(|| (x.a_class, x.b_class).cmp(&(y.a_class, y.b_class)))
-    });
-    categories
+}
+
+pub fn rule_key(ruleset: &str, rule: &str) -> String {
+    format!("{ruleset} / {rule}")
 }
 
 #[derive(Default)]
 pub struct Checking {
     pub rulesets: Vec<ProjectRuleset>,
+    /// IDS files that information rules refer to.
+    pub requirements: Vec<ProjectIds>,
+    /// The project's changes to where the information standard looks.
+    pub adapted: Option<Adapted>,
+    /// The window that edits them, when open.
+    pub editor: Option<crate::standard_editor::EditorState>,
     pub report: Option<Arc<CheckReport>>,
+    /// Finding id -> (ruleset, rule, finding) positions in the report.
+    index: FxHashMap<String, (usize, usize, usize)>,
     pub decisions: FxHashMap<String, Decision>,
     /// Id of the finding shown in the 3D view.
     pub selected: Option<String>,
     /// Progress of a running check in thousandths; None when idle.
     pub progress: Option<Arc<AtomicU32>>,
-    pub show_decided: bool,
-    /// Findings picked in the results list (Ctrl/Shift+click), in pick order.
+    pub filter: ResultFilter,
+    /// Which side of each discipline pair its findings are grouped by.
+    pub group_by: FxHashMap<PairKey, Discipline>,
+    /// A pair to open and scroll to (ruleset id, pair), requested from an
+    /// overview matrix.
+    pub reveal_pair: Option<(String, PairKey)>,
+    /// Findings picked in the results list, in pick order.
     pub marked: Vec<String>,
     /// Where a Shift+click range starts.
     pub anchor: Option<String>,
@@ -142,6 +184,12 @@ pub struct Checking {
     pub stale: bool,
     /// `checking.json` waiting for the project's models to load.
     pending: Option<serde_json::Value>,
+    /// Information level (LOD) of the project; None: the standard's default.
+    pub level: Option<String>,
+    /// Models that use another level than the project.
+    pub model_levels: FxHashMap<ModelId, String>,
+    /// Working area: only elements touching it are shown and checked.
+    pub area: Option<opencheck_core::area::WorkArea>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -149,6 +197,21 @@ pub struct Checking {
 struct SavedChecking {
     rulesets: Vec<SavedRuleset>,
     decisions: Vec<SavedDecision>,
+    /// Information level of the project.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<String>,
+    /// Per-model levels, by model position in the manifest.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    model_levels: Vec<SavedLevel>,
+    /// Working area in world coordinates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    area: Option<opencheck_core::area::WorkArea>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SavedLevel {
+    model: usize,
+    level: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -213,14 +276,115 @@ impl Checking {
         Ok(())
     }
 
+    /// Adds an IDS file and a ruleset with one information rule that checks
+    /// it. Importing a file with the same name again replaces its content.
+    pub fn add_ids(&mut self, text: &str, file_name: &str) -> Result<(), String> {
+        let ids = Ids::from_xml(text).map_err(|e| e.to_string())?;
+        let stem = file_name
+            .trim_end_matches(".ids")
+            .trim_end_matches(".IDS")
+            .trim();
+        let stem = sanitize(if stem.is_empty() {
+            "requirements"
+        } else {
+            stem
+        });
+        let path = format!("requirements/{stem}.ids");
+        let title = ids.title().to_owned();
+        let description = ids.info.description.clone();
+        match self.requirements.iter_mut().find(|r| r.path == path) {
+            Some(existing) => {
+                existing.text = text.to_owned();
+                existing.ids = Arc::new(ids);
+            }
+            None => self.requirements.push(ProjectIds {
+                path: path.clone(),
+                text: text.to_owned(),
+                ids: Arc::new(ids),
+            }),
+        }
+        let standard = format!("{IDS_PREFIX}{path}");
+        let referenced = self
+            .rulesets
+            .iter()
+            .any(|r| r.ruleset.rules.iter().any(|rule| rule.standard == standard));
+        if !referenced {
+            let ruleset = Ruleset {
+                ruleset: RulesetInfo {
+                    id: format!("ids.{stem}"),
+                    name: format!("IDS: {title}"),
+                    description,
+                    version: "1".to_owned(),
+                    author: String::new(),
+                },
+                rules: vec![Rule {
+                    id: "ids".to_owned(),
+                    name: "Elements meet the IDS specifications".to_owned(),
+                    description: String::new(),
+                    kind: RuleKind::Information,
+                    severity: Severity::Moderate,
+                    tolerance_mm: 10.0,
+                    clearance_mm: 0.0,
+                    between: Default::default(),
+                    a: Selector::default(),
+                    b: None,
+                    standard,
+                }],
+            };
+            self.add_ruleset(&ruleset.to_toml(), Some(&format!("ids-{stem}")))?;
+        }
+        self.stale = true;
+        Ok(())
+    }
+
     pub fn add_builtin(&mut self, index: usize) {
         let builtin = &BUILTIN_RULESETS[index];
         self.add_ruleset(builtin.toml, Some(builtin.file_name))
             .expect("built-in rulesets are tested to parse");
     }
 
+    /// Adds the standard rulesets a project lacks, and replaces older
+    /// versions of them with the built-in one. Returns whether anything changed.
+    pub fn ensure_standard(&mut self) -> bool {
+        let stale = self.stale;
+        let mut changed = false;
+        for id in STANDARD_RULESETS {
+            let Some(builtin) = BUILTIN_RULESETS
+                .iter()
+                .find(|b| Ruleset::from_toml(b.toml).is_ok_and(|r| r.ruleset.id == *id))
+            else {
+                continue;
+            };
+            let version = |text: &str| {
+                Ruleset::from_toml(text)
+                    .ok()
+                    .and_then(|r| r.ruleset.version.parse::<u32>().ok())
+                    .unwrap_or(0)
+            };
+            let current = self.rulesets.iter().find(|r| r.ruleset.ruleset.id == *id);
+            if current.is_none_or(|r| version(&r.text) < version(builtin.toml)) {
+                self.add_ruleset(builtin.toml, Some(builtin.file_name))
+                    .expect("built-in rulesets are tested to parse");
+                changed = true;
+            }
+        }
+        // A project without results is not out of date.
+        if self.report.is_none() {
+            self.stale = stale;
+        }
+        changed
+    }
+
     pub fn remove_ruleset(&mut self, index: usize) {
         self.rulesets.remove(index);
+        // IDS files no rule refers to any more go with it.
+        let used: Vec<String> = self
+            .rulesets
+            .iter()
+            .flat_map(|r| &r.ruleset.rules)
+            .filter_map(|rule| ids_path(&rule.standard).map(str::to_owned))
+            .collect();
+        self.requirements.retain(|r| used.contains(&r.path));
         self.stale = true;
     }
 
@@ -229,38 +393,136 @@ impl Checking {
         self.rulesets
             .iter()
             .filter(|r| r.enabled)
-            .map(|r| CheckJob {
-                ruleset: r.ruleset.clone(),
-                models: match &r.models {
-                    Some(list) => list
-                        .iter()
-                        .filter(|m| all_models.contains(m))
-                        .copied()
-                        .collect(),
-                    None => all_models.to_vec(),
-                },
-            })
+            .map(|r| self.job(r, all_models))
             .filter(|job| !job.models.is_empty())
             .collect()
     }
 
-    pub fn finish_run(&mut self, report: CheckReport) {
-        self.report = Some(Arc::new(report));
-        let report = self.report.clone().expect("just set");
-        let exists = |id: &String| {
-            report
-                .rulesets
+    pub fn job(&self, r: &ProjectRuleset, all_models: &[ModelId]) -> CheckJob {
+        let models: Vec<ModelId> = match &r.models {
+            Some(list) => list
                 .iter()
-                .flat_map(|r| &r.rules)
-                .any(|r| r.findings.iter().any(|f| f.id == *id))
+                .filter(|m| all_models.contains(m))
+                .copied()
+                .collect(),
+            None => all_models.to_vec(),
         };
-        self.marked.retain(exists);
+        CheckJob {
+            ruleset: r.ruleset.clone(),
+            levels: models.iter().map(|m| (*m, self.level_of(*m))).collect(),
+            models,
+            ids: self
+                .requirements
+                .iter()
+                .map(|r| (r.path.clone(), r.ids.clone()))
+                .collect(),
+            standards: self.adapted.iter().map(|a| a.standard.clone()).collect(),
+        }
+    }
+
+    /// The information standard as the project uses it, with its changes.
+    pub fn information_standard(&self) -> Option<&InformationStandard> {
+        match &self.adapted {
+            Some(a) => Some(&a.standard),
+            None => builtin_standard(INFORMATION_STANDARD),
+        }
+    }
+
+    /// The project's changes, or none yet.
+    pub fn overrides(&self) -> StandardOverrides {
+        self.adapted
+            .as_ref()
+            .map(|a| a.overrides.clone())
+            .unwrap_or_else(|| StandardOverrides::new(INFORMATION_STANDARD))
+    }
+
+    /// Replaces the project's changes to the information standard. Returns
+    /// changes that no longer fit the standard.
+    pub fn set_overrides(&mut self, overrides: StandardOverrides) -> Vec<String> {
+        let Some(base) = builtin_standard(&overrides.base) else {
+            return vec![format!(
+                "Unknown information standard '{}'.",
+                overrides.base
+            )];
+        };
+        if overrides.is_empty() {
+            self.adapted = None;
+            self.information_changed();
+            return Vec::new();
+        }
+        let (standard, skipped) = overrides.apply(base);
+        self.adapted = Some(Adapted {
+            overrides,
+            standard: Arc::new(standard),
+        });
+        self.information_changed();
+        skipped
+    }
+
+    /// The project's information level.
+    pub fn project_level(&self) -> String {
+        self.level.clone().unwrap_or_else(|| {
+            builtin_standard(INFORMATION_STANDARD)
+                .map(|s| s.standard.default_level.clone())
+                .unwrap_or_default()
+        })
+    }
+
+    /// The information level a model is checked at.
+    pub fn level_of(&self, model: ModelId) -> String {
+        self.model_levels
+            .get(&model)
+            .cloned()
+            .unwrap_or_else(|| self.project_level())
+    }
+
+    pub fn set_project_level(&mut self, level: String) {
+        if self.project_level() != level {
+            self.level = Some(level);
+            self.information_changed();
+        }
+    }
+
+    /// None: follow the project.
+    pub fn set_model_level(&mut self, model: ModelId, level: Option<String>) {
+        let changed = match level {
+            Some(l) => self.model_levels.insert(model, l.clone()) != Some(l),
+            None => self.model_levels.remove(&model).is_some(),
+        };
+        if changed {
+            self.information_changed();
+        }
+    }
+
+    /// Results of information rules are out of date.
+    fn information_changed(&mut self) {
+        let has_information = self
+            .rulesets
+            .iter()
+            .any(|r| r.ruleset.rules.iter().any(uses_levels));
+        if has_information {
+            self.stale = true;
+        }
+    }
+
+    pub fn finish_run(&mut self, report: CheckReport) {
+        self.index.clear();
+        for (si, ruleset) in report.rulesets.iter().enumerate() {
+            for (ri, rule) in ruleset.rules.iter().enumerate() {
+                for (fi, f) in rule.findings.iter().enumerate() {
+                    self.index.insert(f.id.clone(), (si, ri, fi));
+                }
+            }
+        }
+        self.report = Some(Arc::new(report));
+        let index = &self.index;
+        self.marked.retain(|id| index.contains_key(id));
         self.progress = None;
         self.stale = false;
         if self
             .selected
             .as_ref()
-            .is_some_and(|id| self.find(id).is_none())
+            .is_some_and(|id| !self.index.contains_key(id))
         {
             self.selected = None;
         }
@@ -268,52 +530,33 @@ impl Checking {
 
     pub fn find(&self, id: &str) -> Option<(&RulesetResult, &RuleResult, &Finding)> {
         let report = self.report.as_ref()?;
-        report.rulesets.iter().find_map(|rs| {
-            rs.rules.iter().find_map(|rule| {
-                rule.findings
-                    .iter()
-                    .find(|f| f.id == id)
-                    .map(|f| (rs, rule, f))
-            })
-        })
-    }
-
-    /// Ids of the findings in the results list, in the order they are drawn.
-    pub fn ordered_shown(&self) -> Vec<String> {
-        let Some(report) = &self.report else {
-            return Vec::new();
-        };
-        let mut ids = Vec::new();
-        for rule in report.rulesets.iter().flat_map(|r| &r.rules) {
-            let shown = rule.findings.iter().filter(|f| self.is_shown(f));
-            for category in group_findings(shown) {
-                ids.extend(category.ids());
-            }
-        }
-        ids
+        let &(si, ri, fi) = self.index.get(id)?;
+        let ruleset = &report.rulesets[si];
+        let rule = &ruleset.rules[ri];
+        Some((ruleset, rule, &rule.findings[fi]))
     }
 
     /// Updates the picked findings for a click: plain replaces, Ctrl toggles,
-    /// Shift picks the range from the last click.
-    pub fn click(&mut self, id: &str, ctrl: bool, shift: bool) {
-        if shift && let Some(anchor) = self.anchor.clone() {
-            let order = self.ordered_shown();
-            if let (Some(a), Some(b)) = (
+    /// Shift picks the range from the last click in `order` (the list as drawn).
+    pub fn click(&mut self, id: &str, ctrl: bool, shift: bool, order: &[String]) {
+        if shift
+            && let Some(anchor) = self.anchor.clone()
+            && let (Some(a), Some(b)) = (
                 order.iter().position(|x| *x == anchor),
                 order.iter().position(|x| x == id),
-            ) {
-                let range = order[a.min(b)..=a.max(b)].to_vec();
-                if ctrl {
-                    for r in range {
-                        if !self.marked.contains(&r) {
-                            self.marked.push(r);
-                        }
+            )
+        {
+            let range = order[a.min(b)..=a.max(b)].to_vec();
+            if ctrl {
+                for r in range {
+                    if !self.marked.contains(&r) {
+                        self.marked.push(r);
                     }
-                } else {
-                    self.marked = range;
                 }
-                return;
+            } else {
+                self.marked = range;
             }
+            return;
         }
         if ctrl {
             if let Some(pos) = self.marked.iter().position(|m| m == id) {
@@ -327,14 +570,22 @@ impl Checking {
         self.anchor = Some(id.to_owned());
     }
 
-    /// Picks every finding in `ids` (a whole category or component).
-    pub fn mark_all(&mut self, ids: Vec<String>) {
-        self.anchor = ids.first().cloned();
-        self.marked = ids;
+    /// Ticks or unticks a finding, keeping the others.
+    pub fn toggle_mark(&mut self, id: &str, on: bool) {
+        let present = self.marked.iter().any(|m| m == id);
+        if on && !present {
+            self.marked.push(id.to_owned());
+        } else if !on && present {
+            self.marked.retain(|m| m != id);
+        }
+        self.anchor = Some(id.to_owned());
     }
 
-    pub fn is_shown(&self, finding: &Finding) -> bool {
-        self.show_decided || !self.decisions.contains_key(&finding.id)
+    /// Ticks or unticks a whole group.
+    pub fn mark_group(&mut self, ids: &[String], on: bool) {
+        for id in ids {
+            self.toggle_mark(id, on);
+        }
     }
 
     pub fn decide(&mut self, id: &str, decision: Option<Decision>) {
@@ -346,6 +597,7 @@ impl Checking {
 
     /// Forgets a removed model in ruleset scopes.
     pub fn forget_model(&mut self, model: ModelId) {
+        self.model_levels.remove(&model);
         for r in &mut self.rulesets {
             if let Some(list) = &mut r.models {
                 list.retain(|m| *m != model);
@@ -364,6 +616,24 @@ impl Checking {
                 text: r.text.clone(),
             })
             .collect()
+    }
+
+    pub fn requirement_files(&self) -> Vec<RulesetFile> {
+        let mut files: Vec<RulesetFile> = self
+            .requirements
+            .iter()
+            .map(|r| RulesetFile {
+                path: r.path.clone(),
+                text: r.text.clone(),
+            })
+            .collect();
+        if let Some(adapted) = &self.adapted {
+            files.push(RulesetFile {
+                path: overrides_path(&adapted.overrides.base),
+                text: adapted.overrides.to_toml(),
+            });
+        }
+        files
     }
 
     /// `checking.json`; model scopes are stored as positions in `model_order`.
@@ -394,6 +664,22 @@ impl Checking {
                 list.sort_by(|a, b| a.finding.cmp(&b.finding));
                 list
             },
+            level: self.level.clone(),
+            area: self.area,
+            model_levels: {
+                let mut list: Vec<SavedLevel> = self
+                    .model_levels
+                    .iter()
+                    .filter_map(|(m, level)| {
+                        Some(SavedLevel {
+                            model: model_order.iter().position(|o| o == m)?,
+                            level: level.clone(),
+                        })
+                    })
+                    .collect();
+                list.sort_by_key(|l| l.model);
+                list
+            },
         };
         serde_json::to_value(saved).expect("checking state always serialises")
     }
@@ -403,10 +689,35 @@ impl Checking {
     pub fn load(
         &mut self,
         files: Vec<RulesetFile>,
+        requirements: Vec<RulesetFile>,
         json: Option<serde_json::Value>,
     ) -> Vec<String> {
         *self = Checking::default();
         let mut errors = Vec::new();
+        for file in requirements {
+            if file.path.ends_with(".toml") {
+                match StandardOverrides::from_toml(&file.text) {
+                    Ok(overrides) => {
+                        for message in self.set_overrides(overrides) {
+                            errors.push(format!("Information requirements: {message}"));
+                        }
+                    }
+                    Err(e) => errors.push(format!(
+                        "The changes to the information requirements in {} could not be read: {e}",
+                        file.path
+                    )),
+                }
+                continue;
+            }
+            match Ids::from_xml(&file.text) {
+                Ok(ids) => self.requirements.push(ProjectIds {
+                    path: file.path,
+                    text: file.text,
+                    ids: Arc::new(ids),
+                }),
+                Err(e) => errors.push(format!("IDS file {} could not be read: {e}", file.path)),
+            }
+        }
         for file in files {
             match Ruleset::from_toml(&file.text) {
                 Ok(ruleset) => self.rulesets.push(ProjectRuleset {
@@ -445,6 +756,13 @@ impl Checking {
             .into_iter()
             .map(|d| (d.finding, d.decision))
             .collect();
+        self.level = saved.level;
+        self.area = saved.area;
+        self.model_levels = saved
+            .model_levels
+            .into_iter()
+            .filter_map(|l| Some((*model_order.get(l.model)?, l.level)))
+            .collect();
     }
 }
 
@@ -476,7 +794,7 @@ mod tests {
         let json = checking.to_json(&[a, b]);
 
         let mut loaded = Checking::default();
-        let errors = loaded.load(checking.ruleset_files(), Some(json));
+        let errors = loaded.load(checking.ruleset_files(), Vec::new(), Some(json));
         assert!(errors.is_empty());
         // Models get new ids when the project is opened again.
         let (a2, b2) = (ModelId(20), ModelId(21));
@@ -494,80 +812,171 @@ mod tests {
         checking.add_builtin(0);
         assert_eq!(checking.rulesets.len(), 1);
     }
+
+    #[test]
+    fn adapted_standard_is_saved_and_used_by_jobs() {
+        use opencheck_core::check::Source;
+        let mut checking = Checking::default();
+        checking.ensure_standard();
+        let mut overrides = checking.overrides();
+        overrides.parts.entry("wall".into()).or_default().insert(
+            "thickness".into(),
+            vec![Source {
+                property: Some("^Tykkelse$".into()),
+                ..Source::default()
+            }],
+        );
+        assert!(checking.set_overrides(overrides).is_empty());
+        let standard = checking.information_standard().unwrap();
+        let wall = standard.parts.iter().find(|p| p.id == "wall").unwrap();
+        assert!(wall.sources.contains_key("thickness"));
+        let files = checking.requirement_files();
+        assert_eq!(files[0].path, overrides_path(INFORMATION_STANDARD));
+
+        let mut loaded = Checking::default();
+        let errors = loaded.load(checking.ruleset_files(), files, None);
+        assert!(errors.is_empty(), "{errors:?}");
+        let job = loaded
+            .rulesets
+            .iter()
+            .find(|r| r.ruleset.ruleset.id == INFORMATION_STANDARD)
+            .map(|r| loaded.job(r, &[ModelId(1)]))
+            .unwrap();
+        assert_eq!(job.standards.len(), 1);
+
+        // Removing every change goes back to the built-in standard.
+        assert!(
+            loaded
+                .set_overrides(StandardOverrides::new(INFORMATION_STANDARD))
+                .is_empty()
+        );
+        assert!(loaded.adapted.is_none());
+        assert!(loaded.requirement_files().is_empty());
+    }
+
+    #[test]
+    fn imported_ids_gets_a_ruleset_and_is_saved_with_it() {
+        let ids = r#"<ids xmlns="http://standards.buildingsmart.org/IDS"><info><title>Delivery</title></info>
+            <specifications><specification name="Walls" ifcVersion="IFC4">
+            <applicability><entity><name><simpleValue>IFCWALL</simpleValue></name></entity></applicability>
+            </specification></specifications></ids>"#;
+        let mut checking = Checking::default();
+        assert!(checking.add_ids("<nope", "bad").is_err());
+        checking.add_ids(ids, "Delivery v2").unwrap();
+        checking.add_ids(ids, "Delivery v2").unwrap();
+        assert_eq!(checking.rulesets.len(), 1);
+        assert_eq!(checking.requirements.len(), 1);
+        let path = checking.requirements[0].path.clone();
+        assert_eq!(path, "requirements/Delivery-v2.ids");
+        let rule = &checking.rulesets[0].ruleset.rules[0];
+        assert_eq!(rule.standard, format!("ids:{path}"));
+        assert!(!uses_levels(rule));
+        let job = checking.job(&checking.rulesets[0], &[ModelId(1)]);
+        assert_eq!(job.ids[0].0, path);
+
+        let mut loaded = Checking::default();
+        let errors = loaded.load(checking.ruleset_files(), checking.requirement_files(), None);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(loaded.requirements[0].ids.title(), "Delivery");
+
+        // The file goes with the last ruleset that uses it.
+        checking.remove_ruleset(0);
+        assert!(checking.requirements.is_empty());
+    }
 }
 
 #[cfg(test)]
-mod grouping_tests {
+mod selection_tests {
     use super::*;
-    use glam::Vec3;
-    use opencheck_core::check::FindingKind;
-    use opencheck_core::{Aabb, ModelId};
-
-    fn finding(id: &str, a: (u32, &str), b: (u32, &str), depth: f32) -> Finding {
-        let element = |(express_id, class): (u32, &str)| FindingElement {
-            model: ModelId(0),
-            express_id,
-            global_id: format!("g{express_id}"),
-            name: format!("e{express_id}"),
-            ifc_class: class.to_owned(),
-        };
-        Finding {
-            id: id.to_owned(),
-            kind: FindingKind::Clash,
-            a: element(a),
-            b: element(b),
-            point: Vec3::ZERO,
-            region: Aabb::EMPTY,
-            magnitude: depth,
-        }
-    }
 
     #[test]
-    fn groups_by_class_pair_then_component() {
-        let findings = [
-            finding("1", (1, "IfcDuctSegment"), (10, "IfcBeam"), 0.1),
-            finding("2", (1, "IfcDuctSegment"), (11, "IfcBeam"), 0.3),
-            finding("3", (2, "IfcDuctSegment"), (10, "IfcBeam"), 0.2),
-            finding("4", (3, "IfcPipeSegment"), (12, "IfcSlab"), 0.2),
-        ];
-        let groups = group_findings(&findings);
-        assert_eq!(groups.len(), 2);
-        assert_eq!(
-            (groups[0].a_class, groups[0].b_class),
-            ("IfcDuctSegment", "IfcBeam")
-        );
-        assert_eq!(groups[0].count(), 3);
-        // The duct with two clashes first, deepest clash first.
-        assert_eq!(groups[0].components[0].element.express_id, 1);
-        assert_eq!(groups[0].ids(), vec!["2", "1", "3"]);
-    }
-
-    #[test]
-    fn shift_click_picks_a_range() {
+    fn clicks_pick_ranges_and_toggle() {
+        let order: Vec<String> = ["1", "2", "3", "4"].map(String::from).to_vec();
         let mut checking = Checking::default();
-        let report = CheckReport {
-            rulesets: vec![RulesetResult {
-                info: Ruleset::from_toml(BUILTIN_RULESETS[0].toml)
-                    .unwrap()
-                    .ruleset,
-                rules: vec![RuleResult {
-                    rule: Ruleset::from_toml(BUILTIN_RULESETS[0].toml).unwrap().rules[0].clone(),
-                    findings: vec![
-                        finding("1", (1, "IfcDuctSegment"), (10, "IfcBeam"), 0.3),
-                        finding("2", (2, "IfcDuctSegment"), (10, "IfcBeam"), 0.2),
-                        finding("3", (3, "IfcDuctSegment"), (10, "IfcBeam"), 0.1),
-                    ],
-                    pairs_tested: 3,
-                    duration: std::time::Duration::ZERO,
-                }],
-            }],
-            duration: std::time::Duration::ZERO,
-        };
-        checking.finish_run(report);
-        checking.click("1", false, false);
-        checking.click("3", false, true);
+        checking.click("1", false, false, &order);
+        checking.click("3", false, true, &order);
         assert_eq!(checking.marked, vec!["1", "2", "3"]);
-        checking.click("2", true, false);
+        checking.click("2", true, false, &order);
         assert_eq!(checking.marked, vec!["1", "3"]);
+        checking.mark_group(&order, true);
+        assert_eq!(checking.marked.len(), 4);
+        checking.mark_group(&order[..2], false);
+        assert_eq!(checking.marked, vec!["3", "4"]);
+    }
+
+    #[test]
+    fn pair_keys_ignore_order() {
+        assert_eq!(
+            pair_key(Discipline::Electrical, Discipline::Structural),
+            pair_key(Discipline::Structural, Discipline::Electrical)
+        );
+    }
+}
+
+#[cfg(test)]
+mod standard_tests {
+    use super::*;
+
+    #[test]
+    fn standard_rulesets_are_added_once_and_upgraded() {
+        let mut checking = Checking::default();
+        assert!(checking.ensure_standard());
+        assert!(!checking.ensure_standard());
+        assert_eq!(checking.rulesets.len(), STANDARD_RULESETS.len());
+        assert!(
+            checking
+                .rulesets
+                .iter()
+                .all(|r| is_standard(&r.ruleset.ruleset.id))
+        );
+        assert!(!checking.stale);
+
+        // A project saved with an older version gets the current one.
+        let duplicates = checking
+            .rulesets
+            .iter()
+            .position(|r| r.ruleset.ruleset.id == "opencheck.quality.duplicates")
+            .unwrap();
+        let old = checking.rulesets[duplicates]
+            .text
+            .replace("version = \"2\"", "version = \"1\"");
+        checking.rulesets[duplicates].ruleset = Ruleset::from_toml(&old).unwrap();
+        checking.rulesets[duplicates].text = old;
+        assert!(checking.ensure_standard());
+        assert_eq!(checking.rulesets.len(), STANDARD_RULESETS.len());
+        assert_eq!(checking.rulesets[duplicates].ruleset.ruleset.version, "2");
+    }
+
+    #[test]
+    fn levels_follow_the_project_unless_a_model_has_its_own() {
+        let mut checking = Checking::default();
+        checking.ensure_standard();
+        let (a, b) = (ModelId(1), ModelId(2));
+        assert_eq!(checking.level_of(a), "300");
+        checking.set_project_level("325".into());
+        checking.set_model_level(b, Some("200".into()));
+        assert_eq!(checking.level_of(a), "325");
+        assert_eq!(checking.level_of(b), "200");
+        let job = checking
+            .rulesets
+            .iter()
+            .find(|r| r.ruleset.ruleset.id == INFORMATION_STANDARD)
+            .map(|r| checking.job(r, &[a, b]))
+            .unwrap();
+        assert_eq!(
+            job.levels,
+            vec![(a, "325".to_owned()), (b, "200".to_owned())]
+        );
+
+        // Saved with the project and read back by model position.
+        let json = checking.to_json(&[a, b]);
+        let mut loaded = Checking::default();
+        loaded.load(checking.ruleset_files(), Vec::new(), Some(json));
+        loaded.apply_pending(&[ModelId(7), ModelId(8)]);
+        assert_eq!(loaded.level_of(ModelId(7)), "325");
+        assert_eq!(loaded.level_of(ModelId(8)), "200");
+
+        checking.set_model_level(b, None);
+        assert_eq!(checking.level_of(b), "325");
     }
 }

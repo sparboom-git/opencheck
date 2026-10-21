@@ -80,13 +80,19 @@ cargo run -p opencheck-app -- testdata/ifc4/Building-*.ifc
 
 The Checking tab runs rulesets against the loaded models, much like Solibri:
 
+- Every project checks for **duplicates**: elements of one model with the same
+  shape lying exactly on top of each other, whatever their class or
+  tessellation. This standard ruleset can be switched off but not removed.
 - Add built-in rulesets (MEP vs structure, MEP vs architecture, structure vs
-  architecture, MEP coordination, clearance, duplicates) or import your own.
+  architecture, MEP coordination, clearance) or import your own.
 - Choose per ruleset which models it runs on.
 - The **Ruleset Manager** creates and edits rulesets and rules in forms
   (check type, severity, tolerance, groups A and B by discipline, IFC class
   and property), shows how many elements each group matches, keeps a personal
-  library of rulesets for other projects, and runs checks.
+  library of rulesets for other projects, and runs checks. Classes, property
+  sets, properties and values are picked from what the loaded models contain;
+  "Try the rule" explains why the selected element is in a group or not, and
+  "Show matches in 3D" highlights everything a rule takes.
 - Results are grouped by rule, category (pair of IFC classes) and component.
   Selecting a finding shows its two elements in orange and blue with the rest
   ghosted. Accept real problems and reject the rest; decisions are kept
@@ -94,6 +100,36 @@ The Checking tab runs rulesets against the loaded models, much like Solibri:
 - Ctrl+click, Shift+click or right-click a group to select several findings
   and add them as **issues**. Issues follow the BCF topic model and are the
   material for reports.
+- **Information requirements**: building parts must carry the information
+  their level of development requires (LOD 200, 300, 325 or 400 DK). The
+  level is set for the project on the ruleset card and can be changed per
+  model in the model list. Results show the fill rate per building part and
+  every element with what it is missing. Classification and other values are
+  found wherever the project keeps them; see
+  [docs/information-requirements.md](docs/information-requirements.md).
+- **Responsibility and BCF Live (Dalux)**: every issue names the
+  disciplines responsible for it (by default those of the clashing models)
+  and can be assigned to a person. Issues are sent to a Dalux project as BCF
+  topics with their viewpoint; status and assignee changes made in Dalux and
+  comments come back. See [docs/bcf-live.md](docs/bcf-live.md).
+- **Criticality and exports**: issues are rated C1 (not critical), C2
+  (critical) or C3 (very critical) as Danish practice for consistency and
+  clash checks recommends, and are assigned by initials (initials used once
+  are offered again). *Export* in the Issues tab writes the ticked issues (or
+  all) as a **BCF 2.1 file** (`.bcfzip`, with pictures and viewpoints) or as an
+  illustrated **report** (one HTML file in Danish, printable to PDF) with
+  introduction, models, software and every issue with picture, criticality,
+  responsible disciplines and the IFC GlobalIds of its objects.
+- **Working area (Edit view)**: at the bottom of the model list, *Edit view*
+  switches to a top view where you drag a rectangle around the area you
+  want; drag inside to move it, drag its edges to resize, and *Align to
+  element* turns the view and the rectangle along an element such as a wall.
+  After *Save* only elements touching the area are shown and checked, so
+  clashes can be run for one area. *Reset view* brings everything back. The
+  IFC files are not changed.
+- Models change during a project: the update button on a model card loads a
+  newer version of that IFC file. The check runs again, and clashes in issues
+  that are gone are marked **Solved by update** instead of being deleted.
 
 Rulesets are TOML files; [docs/ruleset-authoring.md](docs/ruleset-authoring.md)
 describes the format and can be handed to a language model to write custom

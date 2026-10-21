@@ -38,10 +38,10 @@ impl Discipline {
         match self {
             Discipline::Architectural => "Architectural",
             Discipline::Structural => "Structural",
-            Discipline::Mechanical => "Mechanical (HVAC)",
+            Discipline::Mechanical => "Ventilation",
             Discipline::Plumbing => "Plumbing",
             Discipline::Electrical => "Electrical",
-            Discipline::FireProtection => "Fire protection",
+            Discipline::FireProtection => "Sprinkler",
             Discipline::Landscape => "Landscape",
             Discipline::Infrastructure => "Infrastructure",
             Discipline::Unknown => "Unknown",
@@ -53,10 +53,10 @@ impl Discipline {
         match self {
             Discipline::Architectural => "ARC",
             Discipline::Structural => "STR",
-            Discipline::Mechanical => "MEC",
+            Discipline::Mechanical => "VEN",
             Discipline::Plumbing => "PLU",
             Discipline::Electrical => "ELE",
-            Discipline::FireProtection => "FIR",
+            Discipline::FireProtection => "SPR",
             Discipline::Landscape => "LAN",
             Discipline::Infrastructure => "INF",
             Discipline::Unknown => "UNK",
@@ -81,18 +81,31 @@ impl Discipline {
             .next()
             .unwrap_or(file_name)
             .to_ascii_lowercase();
+        // Danish file names often prefix the discipline code with a Z, as in
+        // "P0001_K07_ZEL-model": both "zel" and "el" count as tokens.
         let tokens: Vec<&str> = stem
             .split(|c: char| !c.is_ascii_alphanumeric())
             .filter(|t| !t.is_empty())
+            .flat_map(|t| {
+                let without_z = t.strip_prefix('z').filter(|r| r.len() >= 2);
+                std::iter::once(t).chain(without_z)
+            })
             .collect();
         let has = |words: &[&str]| tokens.iter().any(|t| words.contains(t));
         let contains = |words: &[&str]| words.iter().any(|w| stem.contains(w));
 
         // Order matters: "hvac" must be checked before shorter tokens such as "el".
-        if contains(&["hvac", "mechanical", "ventilation"]) || has(&["mep", "vent", "ven", "mec"]) {
+        if contains(&["hvac", "mechanical", "ventilation"])
+            || has(&["mep", "vent", "ven", "mec", "ventilation"])
+        {
             return Some(Discipline::Mechanical);
         }
-        if contains(&["plumbing", "sanitary", "sprinkler"]) || has(&["vvs", "plu", "san"]) {
+        if has(&["spr", "sprinkler", "bra", "brand"]) {
+            return Some(Discipline::FireProtection);
+        }
+        if contains(&["plumbing", "sanitary", "sprinkler"])
+            || has(&["vvs", "plu", "san", "vand", "afl"])
+        {
             return Some(Discipline::Plumbing);
         }
         if contains(&["electrical"]) || has(&["el", "ele", "elec"]) {
@@ -173,6 +186,15 @@ mod tests {
 
     #[test]
     fn guesses_from_file_name() {
+        for (name, expected) in [
+            ("P0001_C07.02_K07_ZEL-model.ifc", Discipline::Electrical),
+            ("P0001_C07.02_K09_ZKON-model.ifc", Discipline::Structural),
+            ("P0001_C07.02_K01_ZARK-model.ifc", Discipline::Architectural),
+            ("P0001_C07.02_K08_ZVENT-model.ifc", Discipline::Mechanical),
+            ("Projekt_ZVVS.ifc", Discipline::Plumbing),
+        ] {
+            assert_eq!(Discipline::guess(name, []), expected, "{name}");
+        }
         assert_eq!(
             Discipline::guess("Building-Hvac.ifc", []),
             Discipline::Mechanical

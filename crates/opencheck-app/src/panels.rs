@@ -27,7 +27,7 @@ fn section_title(ui: &mut egui::Ui, text: &str) {
         RichText::new(text.to_uppercase())
             .small()
             .strong()
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
 }
 
@@ -38,11 +38,14 @@ pub fn model_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         .min_size(240.0)
         .frame(
             egui::Frame::new()
-                .fill(theme::PANEL)
+                .fill(theme::panel())
                 .inner_margin(egui::Margin::same(12))
-                .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+                .stroke(egui::Stroke::new(1.0, theme::border())),
         )
         .show(ui, |ui| {
+            if !app.federation.is_empty() {
+                area_controls(app, ui);
+            }
             section_title(ui, "Models");
             models_list(app, ui);
             ui.add_space(8.0);
@@ -73,7 +76,7 @@ pub fn model_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
 
 fn models_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     if app.federation.is_empty() {
-        ui.label(RichText::new("No models loaded yet.").color(theme::TEXT_MUTED));
+        ui.label(RichText::new("No models loaded yet.").color(theme::text_muted()));
         if ui
             .button(format!("{}  Add models…", icon::FOLDER_OPEN))
             .clicked()
@@ -85,18 +88,29 @@ fn models_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     let mut remove = None;
     let mut visibility_change = None;
     let mut discipline_change = None;
+    let mut update = None;
+    let mut level_change = None;
+    let project_level = app.checking.project_level();
+    let levels = crate::checking::information_levels();
     for id in app.federation.ids() {
+        let own_level = app.checking.model_levels.get(&id).cloned();
         let color = model_color(app, id);
         let visible = app.view.model(id).is_some_and(|m| m.visible);
         let Some(model) = app.federation.get(id) else {
             continue;
         };
         let mut discipline = model.discipline;
+        let (revision, updated) = app
+            .session
+            .records
+            .get(&id)
+            .map(|r| (r.entry.revision, r.entry.updated.clone()))
+            .unwrap_or((1, String::new()));
         egui::Frame::new()
             .fill(if visible {
-                theme::SURFACE
+                theme::surface()
             } else {
-                theme::PANEL
+                theme::panel()
             })
             .corner_radius(8)
             .inner_margin(egui::Margin::symmetric(8, 6))
@@ -104,9 +118,9 @@ fn models_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 ui.horizontal(|ui| {
                     let eye = if visible { icon::EYE } else { icon::EYE_CLOSED };
                     let eye_color = if visible {
-                        theme::TEXT
+                        theme::text()
                     } else {
-                        theme::TEXT_MUTED
+                        theme::text_muted()
                     };
                     if ui
                         .add(
@@ -126,7 +140,7 @@ fn models_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                         let name = if visible {
                             name
                         } else {
-                            name.color(theme::TEXT_MUTED)
+                            name.color(theme::text_muted())
                         };
                         ui.label(name).on_hover_text(
                             model
@@ -147,27 +161,97 @@ fn models_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                                 })
                                 .response
                                 .on_hover_text(discipline.label());
+                            let level = own_level
+                                .as_ref()
+                                .map(|l| format!(" · {}", crate::checking::level_label(l)))
+                                .unwrap_or_default();
                             ui.label(
                                 RichText::new(format!(
-                                    "{} · {} elements",
+                                    "rev {revision} · {} · {} elements{level}",
                                     model.schema,
                                     model.elements.len()
                                 ))
                                 .small()
-                                .color(theme::TEXT_MUTED),
-                            );
+                                .color(theme::text_muted()),
+                            )
+                            .on_hover_text(format!(
+                                "Revision {revision}, last updated {}",
+                                updated.replace('T', " ").trim_end_matches('Z')
+                            ));
                         });
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.menu_button(
+                            RichText::new(icon::DOTS_THREE_VERTICAL).color(theme::text_muted()),
+                            |ui| {
+                                ui.set_min_width(220.0);
+                                if ui
+                                    .button(format!("{}  Update model…", icon::ARROWS_CLOCKWISE))
+                                    .clicked()
+                                {
+                                    update = Some(id);
+                                    ui.close();
+                                }
+                                ui.menu_button(format!("{}  Information level", icon::STAIRS), |ui| {
+                                    ui.set_min_width(200.0);
+                                    let follow = format!(
+                                        "Same as project ({})",
+                                        crate::checking::level_label(&project_level)
+                                    );
+                                    if ui.selectable_label(own_level.is_none(), follow).clicked() {
+                                        level_change = Some((id, None));
+                                        ui.close();
+                                    }
+                                    ui.separator();
+                                    for level in &levels {
+                                        let on = own_level.as_ref() == Some(level);
+                                        if ui
+                                            .selectable_label(on, crate::checking::level_label(level))
+                                            .clicked()
+                                        {
+                                            level_change = Some((id, Some(level.clone())));
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                                ui.separator();
+                                if ui
+                                    .button(
+                                        RichText::new(format!("{}  Remove model", icon::TRASH))
+                                            .color(theme::danger()),
+                                    )
+                                    .clicked()
+                                {
+                                    remove = Some(id);
+                                    ui.close();
+                                }
+                            },
+                        )
+                        .response
+                        .on_hover_text("More: update, information level, remove");
                         if ui
                             .add(
-                                egui::Button::new(RichText::new(icon::X).color(theme::TEXT_MUTED))
+                                egui::Button::new(RichText::new(icon::X).color(theme::text_muted()))
                                     .frame(false),
                             )
                             .on_hover_text("Remove model")
                             .clicked()
                         {
                             remove = Some(id);
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new(icon::ARROWS_CLOCKWISE).color(theme::text_muted()),
+                                )
+                                .frame(false),
+                            )
+                            .on_hover_text(
+                                "Update model: load a newer version of this IFC file. Issues whose clashes are gone are marked \"Solved by update\".",
+                            )
+                            .clicked()
+                        {
+                            update = Some(id);
                         }
                     });
                 });
@@ -194,6 +278,13 @@ fn models_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     }
     if let Some(id) = remove {
         app.remove_model(id);
+    }
+    if let Some(id) = update {
+        app.update_model_dialog(id, &ui.ctx().clone());
+    }
+    if let Some((id, level)) = level_change {
+        app.checking.set_model_level(id, level);
+        app.session.dirty = true;
     }
 }
 
@@ -229,7 +320,7 @@ fn model_tree(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             .show(ui, |ui| match &model.spatial_root {
                 Some(root) => spatial_node(app, ui, id, model, root, &mut actions),
                 None => {
-                    ui.label(RichText::new("No spatial structure").color(theme::TEXT_MUTED));
+                    ui.label(RichText::new("No spatial structure").color(theme::text_muted()));
                 }
             });
     }
@@ -273,7 +364,7 @@ fn group_eye(ui: &mut egui::Ui, any_visible: bool) -> Option<bool> {
         icon::EYE_CLOSED
     };
     let color = if any_visible {
-        theme::TEXT_MUTED
+        theme::text_muted()
     } else {
         Color32::from_gray(190)
     };
@@ -339,7 +430,7 @@ fn spatial_node(
             ui.label(
                 RichText::new(count.to_string())
                     .small()
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             );
         })
         .body(|ui| {
@@ -370,7 +461,7 @@ fn spatial_node(
                         ui.label(
                             RichText::new(elements.len().to_string())
                                 .small()
-                                .color(theme::TEXT_MUTED),
+                                .color(theme::text_muted()),
                         );
                     })
                     .body(|ui| {
@@ -404,9 +495,9 @@ fn element_row(
         }
         let mut label = RichText::new(element.label());
         if !element.has_geometry() && element.parts.is_empty() {
-            label = label.color(theme::TEXT_MUTED);
+            label = label.color(theme::text_muted());
         } else if selected {
-            label = label.strong().color(theme::ACCENT);
+            label = label.family(theme::bold());
         }
         let response = ui.add(egui::Button::selectable(selected, label).frame_when_inactive(false));
         if response.double_clicked() {
@@ -440,7 +531,7 @@ fn search_results(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             if shown == MAX_SEARCH_RESULTS {
                 ui.label(
                     RichText::new("More results not shown; refine the search.")
-                        .color(theme::TEXT_MUTED),
+                        .color(theme::text_muted()),
                 );
                 break 'models;
             }
@@ -465,7 +556,7 @@ fn search_results(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         }
     }
     if shown == 0 {
-        ui.label(RichText::new("No matching elements.").color(theme::TEXT_MUTED));
+        ui.label(RichText::new("No matching elements.").color(theme::text_muted()));
     }
     actions.apply(app);
 }
@@ -477,11 +568,13 @@ pub fn properties_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         .min_size(260.0)
         .frame(
             egui::Frame::new()
-                .fill(theme::PANEL)
+                .fill(theme::panel())
                 .inner_margin(egui::Margin::same(12))
-                .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+                .stroke(egui::Stroke::new(1.0, theme::border())),
         )
         .show(ui, |ui| {
+            // Long values are cut (full text on hover), not allowed to widen the panel.
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
             if app.view.selection.len() > 1 {
                 multi_selection(app, ui);
                 return;
@@ -502,7 +595,7 @@ pub fn properties_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 ui.vertical(|ui| {
                     ui.label(RichText::new(element.label()).heading().strong());
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(&element.ifc_class).color(theme::TEXT_MUTED));
+                        ui.label(RichText::new(&element.ifc_class).color(theme::text_muted()));
                         ui.label(
                             RichText::new(format!("● {}", model.short_name))
                                 .small()
@@ -642,7 +735,7 @@ fn property_group(
                 .min_col_width(110.0)
                 .show(ui, |ui| {
                     for (k, v) in visible {
-                        ui.label(RichText::new(*k).color(theme::TEXT_MUTED));
+                        ui.label(RichText::new(*k).color(theme::text_muted()));
                         let value = ui.add(
                             egui::Label::new(v.as_str())
                                 .wrap()
@@ -683,10 +776,12 @@ fn empty_properties(ui: &mut egui::Ui) {
         ui.label(
             RichText::new(icon::CURSOR_CLICK)
                 .size(36.0)
-                .color(theme::BORDER),
+                .color(theme::border()),
         );
         ui.add_space(6.0);
-        ui.label(RichText::new("Select an element to see its properties").color(theme::TEXT_MUTED));
+        ui.label(
+            RichText::new("Select an element to see its properties").color(theme::text_muted()),
+        );
         ui.add_space(18.0);
         for (keys, action) in [
             ("Left drag", "Orbit around the point under the cursor"),
@@ -700,7 +795,7 @@ fn empty_properties(ui: &mut egui::Ui) {
             ("M", "Measure with the laser"),
         ] {
             ui.label(RichText::new(keys).small().strong());
-            ui.label(RichText::new(action).small().color(theme::TEXT_MUTED));
+            ui.label(RichText::new(action).small().color(theme::text_muted()));
             ui.add_space(4.0);
         }
     });
@@ -740,4 +835,56 @@ fn multi_selection(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     if let Some(r) = select {
         app.select(Some(r), false);
     }
+}
+
+/// "Edit view" and "Reset view" at the bottom of the model panel: limit what
+/// is shown and checked to a working area.
+fn area_controls(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
+    egui::Panel::bottom("area_controls")
+        .frame(egui::Frame::new().inner_margin(egui::Margin {
+            left: 0,
+            right: 0,
+            top: 8,
+            bottom: 0,
+        }))
+        .show(ui, |ui| {
+            ui.separator();
+            if let Some(_area) = app.checking.area {
+                let (inside, total) = app.area_counts();
+                ui.label(
+                    RichText::new(format!(
+                        "{}  Working area: {inside} of {total} elements are shown and checked",
+                        icon::CROP
+                    ))
+                    .small()
+                    .color(theme::accent()),
+                );
+            }
+            ui.horizontal(|ui| {
+                let editing = app.is_editing_area();
+                if ui
+                    .add_enabled(
+                        !editing,
+                        egui::Button::new(format!("{}  Edit view", icon::CROP)),
+                    )
+                    .on_hover_text(
+                        "Draw an area in a top view; only what touches it is shown here and checked in Checking",
+                    )
+                    .clicked()
+                {
+                    app.enter_area_edit();
+                }
+                if app.checking.area.is_some()
+                    && ui
+                        .add_enabled(
+                            !editing,
+                            egui::Button::new(format!("{}  Reset view", icon::ARROW_COUNTER_CLOCKWISE)),
+                        )
+                        .on_hover_text("Show and check everything again")
+                        .clicked()
+                {
+                    app.reset_area();
+                }
+            });
+        });
 }

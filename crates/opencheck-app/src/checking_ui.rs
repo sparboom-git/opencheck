@@ -2,30 +2,35 @@
 
 use eframe::egui::{self, Color32, RichText};
 use egui_phosphor::regular as icon;
-use opencheck_core::check::{BUILTIN_RULESETS, RuleKind, Ruleset, Severity};
+use opencheck_core::check::{
+    BUILTIN_RULESETS, RuleKind, Ruleset, Severity, builtin_standard, ids_path, standard_to_ids,
+};
 use opencheck_core::{Discipline, ModelId};
 
 use crate::app::OpenCheckApp;
-use crate::checking::RULESET_GUIDE;
+use crate::checking::{self, RULESET_GUIDE};
 use crate::theme;
 
 pub fn severity_color(severity: Severity) -> Color32 {
     match severity {
-        Severity::Critical => Color32::from_rgb(214, 69, 65),
-        Severity::Moderate => Color32::from_rgb(232, 140, 40),
-        Severity::Low => Color32::from_rgb(200, 170, 30),
+        Severity::Critical => theme::c3(),
+        Severity::Moderate => theme::c2(),
+        Severity::Low => theme::c1(),
     }
 }
 
-pub const FOCUS_A: Color32 = Color32::from_rgb(237, 92, 41);
-pub const FOCUS_B: Color32 = Color32::from_rgb(51, 115, 242);
-pub const ACCEPTED: Color32 = Color32::from_rgb(46, 160, 98);
+pub const FOCUS_A: Color32 = theme::CLASH_A;
+pub const FOCUS_B: Color32 = theme::CLASH_B;
+/// Accepted findings, as solved ones.
+pub fn accepted() -> Color32 {
+    theme::solved()
+}
 
 pub fn panel_frame() -> egui::Frame {
     egui::Frame::new()
-        .fill(theme::PANEL)
+        .fill(theme::panel())
         .inner_margin(egui::Margin::same(12))
-        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .stroke(egui::Stroke::new(1.0, theme::border()))
 }
 
 pub fn section_title(ui: &mut egui::Ui, text: &str) {
@@ -33,7 +38,7 @@ pub fn section_title(ui: &mut egui::Ui, text: &str) {
         RichText::new(text.to_uppercase())
             .small()
             .strong()
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
 }
 
@@ -47,6 +52,10 @@ pub fn rule_summary(rule: &opencheck_core::check::Rule) -> String {
         RuleKind::Clash => format!("Clash, tolerance {} mm", rule.tolerance_mm),
         RuleKind::Clearance => format!("Clearance {} mm", rule.clearance_mm),
         RuleKind::Duplicates => format!("Duplicates within {} mm", rule.tolerance_mm),
+        RuleKind::Information => match ids_path(&rule.standard) {
+            Some(path) => format!("IDS {}", path.trim_start_matches("requirements/")),
+            None => "Information per LOD level".to_owned(),
+        },
     };
     let sides = |d: &[Discipline]| {
         if d.is_empty() {
@@ -122,7 +131,7 @@ fn add_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         ui.label(
             RichText::new("Built-in rulesets")
                 .small()
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
         );
         for (index, ruleset) in builtin_list() {
             let added = app.checking.has_ruleset(&ruleset.ruleset.id);
@@ -145,6 +154,17 @@ fn add_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             import_ruleset(app);
         }
         if ui
+            .button(format!("{}  Import IDS…", icon::FILE_ARROW_UP))
+            .on_hover_text(
+                "A buildingSMART Information Delivery Specification (IDS 1.0). It is stored in \
+                 the project and checked as an information rule.",
+            )
+            .clicked()
+        {
+            ui.close();
+            import_ids(app);
+        }
+        if ui
             .button(format!(
                 "{}  Download ruleset guide for AI…",
                 icon::FILE_ARROW_DOWN
@@ -158,7 +178,64 @@ fn add_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             ui.close();
             download_guide(app);
         }
+        if ui
+            .button(format!(
+                "{}  Export LOD requirements as IDS…",
+                icon::FILE_ARROW_DOWN
+            ))
+            .on_hover_text(
+                "The built-in information requirements at the project's level, as an IDS 1.0 \
+                 file for other tools. Alternatives between kinds of information are reduced to \
+                 one, see the documentation.",
+            )
+            .clicked()
+        {
+            ui.close();
+            export_ids(app);
+        }
     });
+}
+
+fn import_ids(app: &mut OpenCheckApp) {
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Import IDS")
+        .add_filter("Information Delivery Specification", &["ids", "xml"])
+        .pick_file()
+    else {
+        return;
+    };
+    let name = path
+        .file_stem()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let result = std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|text| app.checking.add_ids(&text, &name));
+    match result {
+        Ok(()) => app.session.dirty = true,
+        Err(e) => app
+            .errors
+            .push(format!("{name} is not a valid IDS file: {e}")),
+    }
+}
+
+fn export_ids(app: &mut OpenCheckApp) {
+    let Some(standard) = builtin_standard(checking::INFORMATION_STANDARD) else {
+        return;
+    };
+    let level = app.checking.project_level();
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Export information requirements as IDS")
+        .add_filter("Information Delivery Specification", &["ids"])
+        .set_file_name(format!("information-lod-{level}.ids"))
+        .save_file()
+    else {
+        return;
+    };
+    let export = standard_to_ids(standard, std::slice::from_ref(&level));
+    if let Err(e) = std::fs::write(&path, export.ids.to_xml()) {
+        app.errors.push(format!("Could not save the IDS file: {e}"));
+    }
 }
 
 fn import_ruleset(app: &mut OpenCheckApp) {
@@ -198,12 +275,12 @@ fn download_guide(app: &mut OpenCheckApp) {
 fn library(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     ui.label(
         RichText::new("Add the rulesets you want to run. They are saved with the project.")
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
     ui.add_space(6.0);
     for (index, ruleset) in builtin_list() {
         egui::Frame::new()
-            .fill(theme::SURFACE)
+            .fill(theme::surface())
             .corner_radius(8)
             .inner_margin(egui::Margin::same(10))
             .show(ui, |ui| {
@@ -220,7 +297,7 @@ fn library(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 ui.label(
                     RichText::new(&ruleset.ruleset.description)
                         .small()
-                        .color(theme::TEXT_MUTED),
+                        .color(theme::text_muted()),
                 );
             });
         ui.add_space(4.0);
@@ -246,7 +323,21 @@ fn scope_label(app: &OpenCheckApp, models: &Option<Vec<ModelId>>) -> (String, bo
 fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     let mut remove = None;
     let mut changed = false;
+    let mut new_level = None;
+    let mut adapt = false;
+    let adapted = app.checking.adapted.is_some();
     let model_ids = app.federation.ids();
+    let project_level = app.checking.project_level();
+    let levels = checking::information_levels();
+    let overrides: Vec<String> = app
+        .checking
+        .model_levels
+        .iter()
+        .filter_map(|(id, level)| {
+            let name = app.federation.get(*id)?.short_name.clone();
+            Some(format!("{name}: {}", checking::level_label(level)))
+        })
+        .collect();
     for index in 0..app.checking.rulesets.len() {
         let (scope_text, scope_ok) = scope_label(app, &app.checking.rulesets[index].models);
         let model_names: Vec<(ModelId, String, &'static str)> = model_ids
@@ -260,11 +351,11 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         let entry = &mut app.checking.rulesets[index];
         egui::Frame::new()
             .fill(if entry.enabled {
-                theme::SURFACE
+                theme::surface()
             } else {
-                theme::PANEL
+                theme::panel()
             })
-            .stroke(egui::Stroke::new(1.0, theme::BORDER))
+            .stroke(egui::Stroke::new(1.0, theme::border()))
             .corner_radius(8)
             .inner_margin(egui::Margin::same(10))
             .show(ui, |ui| {
@@ -273,9 +364,18 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     changed |= ui.checkbox(&mut entry.enabled, "").changed();
                     ui.label(RichText::new(&entry.ruleset.ruleset.name).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
+                        if checking::is_standard(&entry.ruleset.ruleset.id) {
+                            ui.label(
+                                RichText::new("Standard")
+                                    .small()
+                                    .color(theme::accent()),
+                            )
+                            .on_hover_text(
+                                "Part of every project. Untick it to skip it; it cannot be removed.",
+                            );
+                        } else if ui
                             .add(
-                                egui::Button::new(RichText::new(icon::X).color(theme::TEXT_MUTED))
+                                egui::Button::new(RichText::new(icon::X).color(theme::text_muted()))
                                     .frame(false),
                             )
                             .on_hover_text("Remove from project")
@@ -289,7 +389,7 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     ui.label(
                         RichText::new(&entry.ruleset.ruleset.description)
                             .small()
-                            .color(theme::TEXT_MUTED),
+                            .color(theme::text_muted()),
                     );
                 }
                 ui.horizontal(|ui| {
@@ -298,7 +398,7 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     let text = if scope_ok {
                         text
                     } else {
-                        text.color(theme::DANGER)
+                        text.color(theme::danger())
                     };
                     ui.menu_button(text, |ui| {
                         ui.set_min_width(220.0);
@@ -325,6 +425,58 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                         }
                     });
                 });
+                let information = entry.ruleset.rules.iter().any(checking::uses_levels);
+                if information {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("{}  Level", icon::STAIRS)).small());
+                        egui::ComboBox::from_id_salt(("project_level", &entry.path))
+                            .selected_text(
+                                RichText::new(checking::level_label(&project_level)).small(),
+                            )
+                            .show_ui(ui, |ui| {
+                                for level in &levels {
+                                    if ui
+                                        .selectable_label(
+                                            *level == project_level,
+                                            checking::level_label(level),
+                                        )
+                                        .clicked()
+                                    {
+                                        new_level = Some(level.clone());
+                                    }
+                                }
+                            })
+                            .response
+                            .on_hover_text(
+                                "The level of development the whole project is checked at. A model can use another level: open its menu in the model list.",
+                            );
+                        if !overrides.is_empty() {
+                            ui.label(
+                                RichText::new(format!("{} models differ", overrides.len()))
+                                    .small()
+                                    .color(theme::text_muted()),
+                            )
+                            .on_hover_text(overrides.join("
+"));
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        let text = if adapted {
+                            format!("{}  Where to look (adapted)…", icon::SLIDERS_HORIZONTAL)
+                        } else {
+                            format!("{}  Where to look…", icon::SLIDERS_HORIZONTAL)
+                        };
+                        if ui
+                            .small_button(text)
+                            .on_hover_text(
+                                "Choose which properties, attributes and other sources each item is read from, for all building parts or for one",
+                            )
+                            .clicked()
+                        {
+                            adapt = true;
+                        }
+                    });
+                }
                 egui::CollapsingHeader::new(
                     RichText::new(format!("{} rules", entry.ruleset.rules.len())).small(),
                 )
@@ -338,7 +490,7 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                         ui.label(
                             RichText::new(rule_summary(rule))
                                 .small()
-                                .color(theme::TEXT_MUTED),
+                                .color(theme::text_muted()),
                         );
                         ui.add_space(2.0);
                     }
@@ -350,6 +502,13 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         app.checking.remove_ruleset(index);
         changed = true;
     }
+    if adapt {
+        crate::standard_editor::open(app, None, None);
+    }
+    if let Some(level) = new_level {
+        app.checking.set_project_level(level);
+        app.session.dirty = true;
+    }
     if changed {
         app.checking.stale = true;
         app.session.dirty = true;
@@ -357,6 +516,23 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
 }
 
 fn run_area_ui(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
+    if app.checking.area.is_some() {
+        let (inside, total) = app.area_counts();
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{}  Working area: {inside} of {total} elements are checked",
+                    icon::CROP
+                ))
+                .small()
+                .color(theme::accent()),
+            )
+            .on_hover_text("Set in the Model tab with Edit view");
+            if ui.small_button("Reset").clicked() {
+                app.reset_area();
+            }
+        });
+    }
     let ids = app.federation.ids();
     let jobs = app.checking.jobs(&ids);
     let rules: usize = jobs.iter().map(|j| j.ruleset.rules.len()).sum();
@@ -374,12 +550,12 @@ fn run_area_ui(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         RichText::new(format!("{}  Run check", icon::PLAY))
             .size(15.0)
             .strong()
-            .color(Color32::WHITE),
+            .color(theme::on_accent()),
     )
     .fill(if can_run {
-        theme::ACCENT
+        theme::accent()
     } else {
-        theme::TEXT_MUTED
+        theme::text_muted()
     })
     .min_size(egui::vec2(ui.available_width(), 36.0));
     if ui.add_enabled(can_run, button).clicked() {
@@ -392,5 +568,5 @@ fn run_area_ui(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     } else {
         format!("{} rulesets · {} rules", jobs.len(), rules)
     };
-    ui.label(RichText::new(hint).small().color(theme::TEXT_MUTED));
+    ui.label(RichText::new(hint).small().color(theme::text_muted()));
 }

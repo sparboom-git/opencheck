@@ -7,12 +7,14 @@ use opencheck_core::check::{
     BUILTIN_RULESETS, Between, PropertyFilter, Rule, RuleKind, Ruleset, RulesetInfo, Selector,
     Severity,
 };
-use opencheck_core::{Discipline, Federation};
+use opencheck_core::{Discipline, Element, Federation, IfcModel};
 use rustc_hash::FxHashMap;
 
 use crate::app::OpenCheckApp;
 use crate::checking_ui::{dot, rule_summary, severity_color};
 use crate::library::{self, LibraryRuleset};
+use crate::pickers::{self, Catalogue};
+use crate::scene::{ElementRef, Focus};
 use crate::theme;
 
 /// Classes offered while typing; any other IFC class name works too.
@@ -78,6 +80,10 @@ pub struct ManagerState {
     exclude_input: [String; 2],
     /// Matching element counts per selector, so they are not recounted every frame.
     counts: FxHashMap<String, (usize, usize)>,
+    /// Classes and properties of the loaded models, for the pickers.
+    catalogue: Catalogue,
+    /// Filter text of the open picker menu.
+    picker_filter: String,
 }
 
 impl ManagerState {
@@ -96,8 +102,16 @@ pub fn show(app: &mut OpenCheckApp, ctx: &egui::Context) {
     egui::Window::new(RichText::new(format!("{}  Ruleset Manager", icon::LIST_CHECKS)).strong())
         .id(egui::Id::new("ruleset_manager"))
         .open(&mut open)
-        .default_size([1120.0, 740.0])
-        .min_size([820.0, 480.0])
+        .default_size([
+            1120.0f32.min(ctx.content_rect().width() - 40.0),
+            740.0f32.min(ctx.content_rect().height() - 40.0),
+        ])
+        .min_size([
+            820.0f32.min(ctx.content_rect().width() - 40.0),
+            480.0f32.min(ctx.content_rect().height() - 40.0),
+        ])
+        .max_size(ctx.content_rect().size() - egui::vec2(20.0, 20.0))
+        .constrain(true)
         .resizable(true)
         .collapsible(false)
         .show(ctx, |ui| {
@@ -126,7 +140,7 @@ pub fn show(app: &mut OpenCheckApp, ctx: &egui::Context) {
                                         "{}  This file is not a valid ruleset",
                                         icon::WARNING
                                     ))
-                                    .color(theme::DANGER),
+                                    .color(theme::danger()),
                                 );
                                 ui.label(e);
                             }
@@ -137,7 +151,7 @@ pub fn show(app: &mut OpenCheckApp, ctx: &egui::Context) {
                         ui.vertical_centered(|ui| {
                             ui.label(
                                 RichText::new("Select a ruleset on the left, or create a new one.")
-                                    .color(theme::TEXT_MUTED),
+                                    .color(theme::text_muted()),
                             );
                         });
                     }
@@ -165,12 +179,12 @@ fn footer(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             let run = egui::Button::new(
                 RichText::new(format!("{}  Run check", icon::PLAY))
                     .strong()
-                    .color(Color32::WHITE),
+                    .color(theme::on_accent()),
             )
             .fill(if can_run {
-                theme::ACCENT
+                theme::accent()
             } else {
-                theme::TEXT_MUTED
+                theme::text_muted()
             });
             if ui
                 .add_enabled(can_run, run)
@@ -187,14 +201,14 @@ fn footer(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     format!("{} enabled rulesets · {rules} rules", jobs.len())
                 })
                 .small()
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
             );
             if let Some(report) = &app.checking.report {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         RichText::new(format!("Last run: {} findings", report.finding_count()))
                             .small()
-                            .color(theme::TEXT_MUTED),
+                            .color(theme::text_muted()),
                     );
                 });
             }
@@ -212,7 +226,7 @@ fn item_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-            ui.label(RichText::new("IN THIS PROJECT").small().strong().color(theme::TEXT_MUTED));
+            ui.label(RichText::new("IN THIS PROJECT").small().strong().color(theme::text_muted()));
             for i in 0..app.checking.rulesets.len() {
                 let name = app.checking.rulesets[i].ruleset.ruleset.name.clone();
                 let selected = app.manager.item == Item::Project(i);
@@ -232,7 +246,7 @@ fn item_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 new_ruleset(app);
             }
             ui.add_space(12.0);
-            ui.label(RichText::new("BUILT-IN").small().strong().color(theme::TEXT_MUTED));
+            ui.label(RichText::new("BUILT-IN").small().strong().color(theme::text_muted()));
             for (i, builtin) in BUILTIN_RULESETS.iter().enumerate() {
                 let name = Ruleset::from_toml(builtin.toml)
                     .map(|r| r.ruleset.name)
@@ -244,7 +258,7 @@ fn item_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             }
             ui.add_space(12.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("MY LIBRARY").small().strong().color(theme::TEXT_MUTED));
+                ui.label(RichText::new("MY LIBRARY").small().strong().color(theme::text_muted()));
                 if ui
                     .add(egui::Button::new(RichText::new(icon::FOLDER_OPEN).small()).frame(false))
                     .on_hover_text(library::folder().display().to_string())
@@ -260,12 +274,28 @@ fn item_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 {
                     app.manager.library = library::list();
                 }
+                if ui
+                    .add(egui::Button::new(RichText::new(icon::DOWNLOAD_SIMPLE).small()).frame(false))
+                    .on_hover_text("Import ruleset files (.toml) into the library")
+                    .clicked()
+                    && let Some(paths) = rfd::FileDialog::new()
+                        .set_title("Import rulesets into the library")
+                        .add_filter("OpenCheck ruleset", &["toml"])
+                        .pick_files()
+                {
+                    let (imported, errors) = library::import(&paths);
+                    app.errors.extend(errors);
+                    if imported > 0 {
+                        app.notify(format!("{imported} rulesets imported into the library."));
+                    }
+                    app.manager.library = library::list();
+                }
             });
             if app.manager.library.is_empty() {
                 ui.label(
                     RichText::new("Empty. Use \"Save to library\" on a project ruleset to reuse it in other projects.")
                         .small()
-                        .color(theme::TEXT_MUTED),
+                        .color(theme::text_muted()),
                 );
             }
             for i in 0..app.manager.library.len() {
@@ -277,7 +307,7 @@ fn item_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                         false,
                     ),
                 };
-                let text = if ok { RichText::new(name) } else { RichText::new(name).color(theme::DANGER) };
+                let text = if ok { RichText::new(name) } else { RichText::new(name).color(theme::danger()) };
                 let selected = app.manager.item == Item::Library(i);
                 if list_button(ui, selected, text).clicked() {
                     app.manager.item = Item::Library(i);
@@ -298,6 +328,7 @@ fn new_rule(n: usize) -> Rule {
         between: Between::DifferentModels,
         a: Selector::default(),
         b: Some(Selector::default()),
+        standard: String::new(),
     }
 }
 
@@ -330,14 +361,14 @@ fn read_only(
     let Some(ruleset) = ruleset else { return };
     ui.label(RichText::new(&ruleset.ruleset.name).heading().strong());
     if !ruleset.ruleset.description.is_empty() {
-        ui.label(RichText::new(&ruleset.ruleset.description).color(theme::TEXT_MUTED));
+        ui.label(RichText::new(&ruleset.ruleset.description).color(theme::text_muted()));
     }
     ui.add_space(6.0);
     let in_project = app.checking.has_ruleset(&ruleset.ruleset.id);
     ui.horizontal(|ui| {
         let label = if in_project { "Update the project copy" } else { "Add to project" };
-        let button = egui::Button::new(RichText::new(format!("{}  {label}", icon::PLUS)).strong().color(Color32::WHITE))
-            .fill(theme::ACCENT);
+        let button = egui::Button::new(RichText::new(format!("{}  {label}", icon::PLUS)).strong().color(theme::on_accent()))
+            .fill(theme::accent());
         if ui.add(button).clicked() {
             let _ = app.checking.add_ruleset(&ruleset.to_toml(), None);
             app.session.dirty = true;
@@ -350,11 +381,11 @@ fn read_only(
             ui.label(
                 RichText::new(format!("{}  Built-in rulesets cannot be changed. Add one to the project to edit a copy.", icon::LOCK_SIMPLE))
                     .small()
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             );
         }
         if let Some(i) = library_index
-            && ui.button(RichText::new(format!("{}  Delete from library", icon::TRASH)).color(theme::DANGER)).clicked()
+            && ui.button(RichText::new(format!("{}  Delete from library", icon::TRASH)).color(theme::danger())).clicked()
         {
             let path = app.manager.library[i].path.clone();
             match library::delete(&path) {
@@ -376,7 +407,7 @@ fn read_only(
         ui.label(
             RichText::new(rule_summary(rule))
                 .small()
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
         );
         if !rule.description.is_empty() {
             ui.label(RichText::new(&rule.description).small());
@@ -391,6 +422,7 @@ fn project_editor(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) {
     let mut run_this = false;
     let mut export = false;
     let mut save_library = false;
+    let mut duplicate = false;
 
     {
         let entry = &mut app.checking.rulesets[index];
@@ -405,7 +437,7 @@ fn project_editor(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) {
                 .changed();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
-                    .button(RichText::new(icon::TRASH).color(theme::DANGER))
+                    .button(RichText::new(icon::TRASH).color(theme::danger()))
                     .on_hover_text("Remove from project")
                     .clicked()
                 {
@@ -417,6 +449,15 @@ fn project_editor(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) {
                     .clicked()
                 {
                     export = true;
+                }
+                if ui
+                    .button(format!("{}  Duplicate", icon::COPY))
+                    .on_hover_text(
+                        "Make an editable copy with its own id, e.g. to vary a built-in ruleset",
+                    )
+                    .clicked()
+                {
+                    duplicate = true;
                 }
                 if ui
                     .button(format!("{}  Save to library", icon::BOOKMARK_SIMPLE))
@@ -434,15 +475,15 @@ fn project_editor(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) {
             });
         });
         egui::Grid::new("ruleset_info").num_columns(2).spacing([10.0, 4.0]).show(ui, |ui| {
-            ui.label(RichText::new("Description").color(theme::TEXT_MUTED));
+            ui.label(RichText::new("Description").color(theme::text_muted()));
             changed |= ui.add(egui::TextEdit::singleline(&mut info.description).desired_width(520.0)).changed();
             ui.end_row();
-            ui.label(RichText::new("Author").color(theme::TEXT_MUTED));
+            ui.label(RichText::new("Author").color(theme::text_muted()));
             ui.horizontal(|ui| {
                 changed |= ui.add(egui::TextEdit::singleline(&mut info.author).desired_width(240.0)).changed();
-                ui.label(RichText::new("Version").color(theme::TEXT_MUTED));
+                ui.label(RichText::new("Version").color(theme::text_muted()));
                 changed |= ui.add(egui::TextEdit::singleline(&mut info.version).desired_width(60.0)).changed();
-                ui.label(RichText::new("Id").color(theme::TEXT_MUTED));
+                ui.label(RichText::new("Id").color(theme::text_muted()));
                 changed |= ui
                     .add(egui::TextEdit::singleline(&mut info.id).desired_width(200.0))
                     .on_hover_text("Stable identifier. Changing it disconnects earlier decisions on findings.")
@@ -451,7 +492,7 @@ fn project_editor(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) {
             ui.end_row();
         });
         if let Err(e) = entry.ruleset.check() {
-            ui.label(RichText::new(format!("{}  {e}", icon::WARNING)).color(theme::DANGER));
+            ui.label(RichText::new(format!("{}  {e}", icon::WARNING)).color(theme::danger()));
         }
     }
     ui.separator();
@@ -474,7 +515,7 @@ fn project_editor(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) {
                         });
                 }
                 None => {
-                    ui.label(RichText::new("Select a rule to edit it.").color(theme::TEXT_MUTED));
+                    ui.label(RichText::new("Select a rule to edit it.").color(theme::text_muted()));
                 }
             }
         });
@@ -505,6 +546,17 @@ fn project_editor(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) {
     {
         app.errors.push(format!("Could not export: {e}"));
     }
+    if duplicate {
+        let mut copy = ruleset.clone();
+        let token: String = crate::issues::new_guid("ruleset").chars().take(8).collect();
+        copy.ruleset.id = format!("project.{token}");
+        copy.ruleset.name.push_str(" (copy)");
+        if app.checking.add_ruleset(&copy.to_toml(), None).is_ok() {
+            app.manager.item = Item::Project(app.checking.rulesets.len() - 1);
+            app.manager.rule = Some(0);
+            app.session.dirty = true;
+        }
+    }
     if run_this {
         let id = ruleset.ruleset.id.clone();
         app.run_check(ui.ctx(), Some(&id));
@@ -523,7 +575,7 @@ fn rule_list(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) -> bool {
         RichText::new(format!("RULES  {}", rules.len()))
             .small()
             .strong()
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
     egui::ScrollArea::vertical()
         .id_salt("rule_list")
@@ -596,7 +648,7 @@ fn rule_list(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) -> bool {
         if ui
             .add_enabled(
                 selected.is_some() && rules.len() > 1,
-                egui::Button::new(RichText::new(icon::TRASH).color(theme::DANGER)),
+                egui::Button::new(RichText::new(icon::TRASH).color(theme::danger())),
             )
             .on_hover_text("Delete rule (a ruleset needs at least one)")
             .clicked()
@@ -640,6 +692,24 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
             .map(|b| cached_count(&mut app.manager.counts, &app.federation, b));
         (a, b)
     };
+    app.manager.catalogue.refresh(&app.federation);
+    // How the rule sees the element selected in the 3D view.
+    let tried = app.view.selection.first().and_then(|e| {
+        let model = app.federation.get(e.model)?;
+        let element = model.element(e.express_id)?;
+        let rule = &app.checking.rulesets[index].ruleset.rules[r];
+        let name = if element.name.is_empty() {
+            element.ifc_class.clone()
+        } else {
+            element.name.clone()
+        };
+        Some((
+            format!("{name} ({}, {})", element.ifc_class, model.short_name),
+            explain(&rule.a, model, element),
+            rule.b.as_ref().map(|b| explain(b, model, element)),
+        ))
+    });
+    let mut show_matches = false;
     let manager = &mut app.manager;
     let rule = &mut app.checking.rulesets[index].ruleset.rules[r];
 
@@ -647,13 +717,13 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
-            ui.label(RichText::new("Name").color(theme::TEXT_MUTED));
+            ui.label(RichText::new("Name").color(theme::text_muted()));
             changed |= ui
                 .add(egui::TextEdit::singleline(&mut rule.name).desired_width(460.0))
                 .changed();
             ui.end_row();
 
-            ui.label(RichText::new("Description").color(theme::TEXT_MUTED));
+            ui.label(RichText::new("Description").color(theme::text_muted()));
             changed |= ui
                 .add(
                     egui::TextEdit::multiline(&mut rule.description)
@@ -663,7 +733,7 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
                 .changed();
             ui.end_row();
 
-            ui.label(RichText::new("Check").color(theme::TEXT_MUTED));
+            ui.label(RichText::new("Check").color(theme::text_muted()));
             changed |= segmented(
                 ui,
                 &mut rule.kind,
@@ -671,11 +741,16 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
                     (RuleKind::Clash, "Clash"),
                     (RuleKind::Clearance, "Clearance"),
                     (RuleKind::Duplicates, "Duplicates"),
+                    (RuleKind::Information, "Information"),
                 ],
             );
+            if rule.kind == RuleKind::Information && rule.standard.is_empty() {
+                rule.standard = crate::checking::INFORMATION_STANDARD.to_owned();
+                changed = true;
+            }
             ui.end_row();
 
-            ui.label(RichText::new("Severity").color(theme::TEXT_MUTED));
+            ui.label(RichText::new("Severity").color(theme::text_muted()));
             changed |= segmented(
                 ui,
                 &mut rule.severity,
@@ -689,7 +764,7 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
 
             match rule.kind {
                 RuleKind::Clearance => {
-                    ui.label(RichText::new("Clearance").color(theme::TEXT_MUTED));
+                    ui.label(RichText::new("Clearance").color(theme::text_muted()));
                     ui.horizontal(|ui| {
                         if rule.clearance_mm <= 0.0 {
                             rule.clearance_mm = 50.0;
@@ -706,12 +781,32 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
                         ui.label(
                             RichText::new("Report pairs closer than this")
                                 .small()
-                                .color(theme::TEXT_MUTED),
+                                .color(theme::text_muted()),
                         );
                     });
                 }
+                RuleKind::Information => {
+                    ui.label(RichText::new("Standard").color(theme::text_muted()));
+                    let name = opencheck_core::check::builtin_standard(&rule.standard)
+                        .map_or(rule.standard.as_str(), |s| s.standard.name.as_str());
+                    ui.horizontal(|ui| {
+                        ui.label(name).on_hover_text(
+                            "Group A limits which elements are checked. The LOD level is chosen for the project on the ruleset card, and per model in the model list.",
+                        );
+                        if opencheck_core::check::builtin_standard(&rule.standard).is_some()
+                            && ui
+                                .button(format!("{}  Where to look…", icon::SLIDERS_HORIZONTAL))
+                                .on_hover_text(
+                                    "Choose which properties, attributes and other sources each item is read from, for all building parts or for one",
+                                )
+                                .clicked()
+                        {
+                            crate::standard_editor::request_open(ui.ctx());
+                        }
+                    });
+                }
                 RuleKind::Clash | RuleKind::Duplicates => {
-                    ui.label(RichText::new("Tolerance").color(theme::TEXT_MUTED));
+                    ui.label(RichText::new("Tolerance").color(theme::text_muted()));
                     ui.horizontal(|ui| {
                         changed |= ui
                             .add(
@@ -726,13 +821,13 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
                         } else {
                             "Largest offset between two copies"
                         };
-                        ui.label(RichText::new(hint).small().color(theme::TEXT_MUTED));
+                        ui.label(RichText::new(hint).small().color(theme::text_muted()));
                     });
                 }
             }
             ui.end_row();
 
-            ui.label(RichText::new("Compare").color(theme::TEXT_MUTED));
+            ui.label(RichText::new("Compare").color(theme::text_muted()));
             changed |= segmented(
                 ui,
                 &mut rule.between,
@@ -786,16 +881,239 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
     });
 
     ui.add_space(8.0);
+    try_panel(ui, tried.as_ref(), &mut show_matches);
+
+    ui.add_space(8.0);
     ui.collapsing(RichText::new("Advanced").small(), |ui| {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Rule id").color(theme::TEXT_MUTED));
+            ui.label(RichText::new("Rule id").color(theme::text_muted()));
             changed |= ui
                 .add(egui::TextEdit::singleline(&mut rule.id).desired_width(240.0))
                 .on_hover_text("Keep stable: decisions on findings are linked to it")
                 .changed();
         });
     });
+    if show_matches {
+        let rule = app.checking.rulesets[index].ruleset.rules[r].clone();
+        show_rule_matches(app, &rule);
+    }
     changed
+}
+
+/// One line of an explanation: whether the condition holds, and how.
+type Reason = (bool, String);
+
+/// Whether a selector takes an element, condition by condition.
+fn explain(selector: &Selector, model: &IfcModel, element: &Element) -> (bool, Vec<Reason>) {
+    let mut reasons = Vec::new();
+    let only = |s: Selector| s.matches(model, element);
+    if !selector.disciplines.is_empty() {
+        let ok = selector.disciplines.contains(&model.discipline);
+        reasons.push((
+            ok,
+            if ok {
+                format!("Discipline {} is in the group", model.discipline.label())
+            } else {
+                format!(
+                    "Discipline {} is not one of {}",
+                    model.discipline.label(),
+                    selector
+                        .disciplines
+                        .iter()
+                        .map(|d| d.label())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            },
+        ));
+    }
+    if !selector.classes.is_empty() {
+        let hit = selector.classes.iter().find(|c| {
+            only(Selector {
+                classes: vec![(*c).clone()],
+                ..Default::default()
+            })
+        });
+        reasons.push(match hit {
+            Some(c) => (true, format!("{} counts as {c}", element.ifc_class)),
+            None => (
+                false,
+                format!(
+                    "{} is none of {}",
+                    element.ifc_class,
+                    selector.classes.join(", ")
+                ),
+            ),
+        });
+    }
+    for c in &selector.exclude_classes {
+        if only(Selector {
+            classes: vec![c.clone()],
+            ..Default::default()
+        }) {
+            reasons.push((
+                false,
+                format!("Left out: {} counts as {c}", element.ifc_class),
+            ));
+        }
+    }
+    for filter in &selector.properties {
+        let ok = only(Selector {
+            properties: vec![filter.clone()],
+            ..Default::default()
+        });
+        let what = match &filter.equals {
+            Some(v) => format!("{}.{} = {v}", filter.pset, filter.name),
+            None => format!("{}.{} exists", filter.pset, filter.name),
+        };
+        let what = what.trim_start_matches('.').to_owned();
+        reasons.push((ok, if ok { what } else { format!("Not: {what}") }));
+    }
+    if !selector.names.is_empty() {
+        let ok = only(Selector {
+            names: selector.names.clone(),
+            ..Default::default()
+        });
+        let verb = if ok { "matches" } else { "does not match" };
+        reasons.push((ok, format!("Name {verb} {}", selector.names.join(" | "))));
+    }
+    if !selector.materials.is_empty() {
+        let ok = only(Selector {
+            materials: selector.materials.clone(),
+            ..Default::default()
+        });
+        let verb = if ok { "matches" } else { "does not match" };
+        reasons.push((
+            ok,
+            format!("Material {verb} {}", selector.materials.join(" | ")),
+        ));
+    }
+    if reasons.is_empty() {
+        reasons.push((true, "The group takes every element".to_owned()));
+    }
+    (selector.matches(model, element), reasons)
+}
+
+/// The selected element's label and how groups A and B see it.
+type Tried = (String, (bool, Vec<Reason>), Option<(bool, Vec<Reason>)>);
+
+/// Explains the rule for the selected element and offers to show all matches.
+fn try_panel(ui: &mut egui::Ui, tried: Option<&Tried>, show_matches: &mut bool) {
+    egui::Frame::new()
+        .fill(theme::surface())
+        .corner_radius(8)
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!("{}  TRY THE RULE", icon::CURSOR_CLICK))
+                        .small()
+                        .strong()
+                        .color(theme::text_muted()),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .button(format!("{}  Show matches in 3D", icon::CUBE_FOCUS))
+                        .on_hover_text(
+                            "Highlights every element of group A (orange) and group B (blue) \
+                             in the 3D view behind this window",
+                        )
+                        .clicked()
+                    {
+                        *show_matches = true;
+                    }
+                });
+            });
+            let Some((label, a, b)) = tried else {
+                ui.label(
+                    RichText::new(
+                        "Select an element in the 3D view to see whether this rule includes it, and why.",
+                    )
+                    .small()
+                    .color(theme::text_muted()),
+                );
+                return;
+            };
+            ui.label(RichText::new(label).strong());
+            side_verdict(ui, "group A", crate::checking_ui::FOCUS_A, a);
+            match b {
+                Some(b) => side_verdict(ui, "group B", crate::checking_ui::FOCUS_B, b),
+                None => {
+                    ui.label(
+                        RichText::new("Group A is checked against itself.")
+                            .small()
+                            .color(theme::text_muted()),
+                    );
+                }
+            }
+        });
+}
+
+fn side_verdict(
+    ui: &mut egui::Ui,
+    title: &str,
+    color: Color32,
+    (ok, reasons): &(bool, Vec<Reason>),
+) {
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(10.0), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 2.0, color);
+        let verdict = if *ok {
+            RichText::new(format!("{}  In {title}", icon::CHECK)).color(theme::solved())
+        } else {
+            RichText::new(format!("{}  Not in {title}", icon::X)).color(theme::danger())
+        };
+        ui.label(verdict.strong());
+    });
+    for (ok, text) in reasons {
+        let (mark, color) = if *ok {
+            (icon::CHECK, theme::text_muted())
+        } else {
+            (icon::X, theme::danger())
+        };
+        ui.label(
+            RichText::new(format!("      {mark}  {text}"))
+                .small()
+                .color(color),
+        );
+    }
+}
+
+/// Highlights the elements the groups of a rule take, and frames them.
+fn show_rule_matches(app: &mut OpenCheckApp, rule: &Rule) {
+    let mut focus = Focus::default();
+    for (id, model) in app.federation.iter() {
+        for element in model.elements.iter().filter(|e| e.has_geometry()) {
+            let element_ref = ElementRef {
+                model: id,
+                express_id: element.express_id,
+            };
+            if rule.a.matches(model, element) {
+                focus.a.insert(element_ref);
+            }
+            if rule.b.as_ref().is_some_and(|b| b.matches(model, element)) {
+                focus.b.insert(element_ref);
+            }
+        }
+    }
+    if focus.a.is_empty() && focus.b.is_empty() {
+        app.errors
+            .push("No element in the loaded models matches the groups of this rule.".to_owned());
+        return;
+    }
+    let all: Vec<ElementRef> = focus.a.iter().chain(&focus.b).copied().collect();
+    let bounds = app.view.bounds_of(&all);
+    app.checking.selected = None;
+    app.issues.selected = None;
+    app.focus_marker = None;
+    app.view.selection.clear();
+    app.view.show_context = false;
+    app.view.focus = Some(focus);
+    app.view.modes_dirty = true;
+    if !bounds.is_empty() {
+        app.camera.fit(&bounds, app.nav.aspect);
+    }
 }
 
 fn group_header(ui: &mut egui::Ui, title: &str, color: Color32, count: (usize, usize)) {
@@ -807,9 +1125,9 @@ fn group_header(ui: &mut egui::Ui, title: &str, color: Color32, count: (usize, u
         let text = format!("matches {elements} elements in {models} models");
         let text = RichText::new(text).small();
         ui.label(if elements == 0 {
-            text.color(theme::DANGER)
+            text.color(theme::danger())
         } else {
-            text.color(theme::TEXT_MUTED)
+            text.color(theme::text_muted())
         });
     });
 }
@@ -851,7 +1169,7 @@ fn selector_editor(
     ui.label(
         RichText::new("Disciplines (none = any)")
             .small()
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
     ui.horizontal_wrapped(|ui| {
         for d in Discipline::ALL
@@ -873,59 +1191,96 @@ fn selector_editor(
     ui.label(
         RichText::new("IFC classes, subtypes included (none = any)")
             .small()
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
+    let disciplines = selector.disciplines.clone();
     changed |= class_list(
         ui,
         (id.0, id.1, id.2, "classes"),
         &mut selector.classes,
         &mut manager.class_input[side],
+        &manager.catalogue,
+        &disciplines,
+        &mut manager.picker_filter,
     );
     ui.add_space(4.0);
     ui.label(
         RichText::new("Except classes")
             .small()
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
     changed |= class_list(
         ui,
         (id.0, id.1, id.2, "exclude"),
         &mut selector.exclude_classes,
         &mut manager.exclude_input[side],
+        &manager.catalogue,
+        &disciplines,
+        &mut manager.picker_filter,
     );
     ui.add_space(4.0);
     ui.label(
         RichText::new("Property conditions (all must hold)")
             .small()
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
     let mut remove = None;
+    let catalogue = &manager.catalogue;
+    let picker_filter = &mut manager.picker_filter;
     for (i, filter) in selector.properties.iter_mut().enumerate() {
+        let salt = (id.0, id.1 * 1000 + id.2 * 100 + i);
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
             changed |= ui
                 .add(
                     egui::TextEdit::singleline(&mut filter.pset)
                         .hint_text("Property set")
-                        .desired_width(110.0),
+                        .desired_width(100.0),
                 )
                 .changed();
+            if let Some(pset) = pickers::pset_menu(ui, salt, catalogue, picker_filter) {
+                filter.pset = pset;
+                picker_filter.clear();
+                changed = true;
+            }
+            ui.add_space(4.0);
             changed |= ui
                 .add(
                     egui::TextEdit::singleline(&mut filter.name)
                         .hint_text("Property")
-                        .desired_width(100.0),
+                        .desired_width(90.0),
                 )
                 .changed();
+            if let Some(name) =
+                pickers::property_menu(ui, salt, catalogue, &filter.pset, picker_filter)
+            {
+                filter.name = name;
+                picker_filter.clear();
+                changed = true;
+            }
+            ui.add_space(4.0);
             let mut value = filter.equals.clone().unwrap_or_default();
             if ui
                 .add(
                     egui::TextEdit::singleline(&mut value)
                         .hint_text("= value (empty: exists)")
-                        .desired_width(110.0),
+                        .desired_width(100.0),
                 )
                 .changed()
             {
                 filter.equals = (!value.trim().is_empty()).then_some(value);
+                changed = true;
+            }
+            if let Some(value) = pickers::value_menu(
+                ui,
+                salt,
+                catalogue,
+                &filter.pset,
+                &filter.name,
+                picker_filter,
+            ) {
+                filter.equals = Some(value);
+                picker_filter.clear();
                 changed = true;
             }
             if ui.small_button(icon::X).clicked() {
@@ -957,6 +1312,9 @@ fn class_list(
     id: (&str, usize, usize, &str),
     classes: &mut Vec<String>,
     input: &mut String,
+    catalogue: &Catalogue,
+    disciplines: &[Discipline],
+    picker_filter: &mut String,
 ) -> bool {
     let mut changed = false;
     ui.horizontal_wrapped(|ui| {
@@ -965,7 +1323,7 @@ fn class_list(
             let chip = egui::Button::new(
                 RichText::new(format!("{}  {}", class.trim_start_matches("Ifc"), icon::X)).small(),
             )
-            .fill(theme::ACCENT_SOFT);
+            .fill(theme::accent_soft());
             if ui
                 .add(chip)
                 .on_hover_text(format!("{class} — click to remove"))
@@ -980,25 +1338,37 @@ fn class_list(
         }
     });
     let edit_id = ui.make_persistent_id(id);
-    let response = ui.add(
-        egui::TextEdit::singleline(input)
-            .id(edit_id)
-            .hint_text("Type a class, e.g. Beam, and press Enter")
-            .desired_width(f32::INFINITY),
-    );
+    let response = ui
+        .horizontal(|ui| {
+            changed |= pickers::class_menu(ui, classes, catalogue, disciplines, picker_filter);
+            ui.add(
+                egui::TextEdit::singleline(input)
+                    .id(edit_id)
+                    .hint_text("or type a class, e.g. Beam, and press Enter")
+                    .desired_width(f32::INFINITY),
+            )
+        })
+        .inner;
     let typed = input.trim().to_owned();
     let mut add = None;
     if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !typed.is_empty() {
         add = Some(normalise_class(&typed));
     }
     if !typed.is_empty() && (response.has_focus() || response.lost_focus()) {
+        // Classes in the loaded models first, then common ones.
         let needle = typed.to_lowercase();
-        let suggestions: Vec<&str> = COMMON_CLASSES
-            .iter()
-            .copied()
-            .filter(|c| c.to_lowercase().contains(&needle) && !classes.iter().any(|x| x == c))
-            .take(6)
-            .collect();
+        let mut suggestions: Vec<&str> = Vec::new();
+        for c in catalogue.suggest(&typed).chain(
+            COMMON_CLASSES
+                .iter()
+                .copied()
+                .filter(|c| c.to_lowercase().contains(&needle)),
+        ) {
+            if suggestions.len() < 8 && !suggestions.contains(&c) && !classes.iter().any(|x| x == c)
+            {
+                suggestions.push(c);
+            }
+        }
         ui.horizontal_wrapped(|ui| {
             for s in suggestions {
                 if ui

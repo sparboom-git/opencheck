@@ -23,6 +23,16 @@ impl PropertySet {
     }
 }
 
+/// A classification reference (`IfcClassificationReference`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassificationRef {
+    /// Name of the classification system, e.g. `CCS` or `BIM7AA`; may be empty.
+    pub system: String,
+    /// Code (`ItemReference` in IFC2x3, `Identification` in IFC4).
+    pub code: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Property {
     pub name: String,

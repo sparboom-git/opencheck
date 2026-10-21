@@ -25,6 +25,8 @@ pub enum JobResult {
         source: ModelSource,
         /// Metadata stored in the project, when the model comes from one.
         entry: Option<ModelEntry>,
+        /// The model this file is a newer version of.
+        replaces: Option<ModelId>,
         result: Result<Box<IfcModel>, String>,
     },
     ProjectOpened {
@@ -51,6 +53,8 @@ pub struct SaveRequest {
     pub ids: Vec<ModelId>,
     pub models: Vec<ProjectModel>,
     pub rulesets: Vec<RulesetFile>,
+    /// IDS files of the project.
+    pub requirements: Vec<RulesetFile>,
     pub documents: ProjectDocuments,
     pub created: Option<String>,
 }
@@ -124,8 +128,14 @@ impl Jobs {
         self.running.clear();
     }
 
-    pub fn load_file(&mut self, path: PathBuf, ctx: &egui::Context) {
-        let reporter = self.start(format!("Loading {}", file_name(&path)), ctx);
+    /// Loads an IFC file; with `replaces` it becomes the next version of that model.
+    pub fn load_file(&mut self, path: PathBuf, replaces: Option<ModelId>, ctx: &egui::Context) {
+        let verb = if replaces.is_some() {
+            "Updating"
+        } else {
+            "Loading"
+        };
+        let reporter = self.start(format!("{verb} {}", file_name(&path)), ctx);
         std::thread::spawn(move || {
             let result = opencheck_core::load_ifc_file(&path)
                 .map(Box::new)
@@ -134,6 +144,7 @@ impl Jobs {
                 JobResult::ModelLoaded {
                     source: ModelSource::File(path),
                     entry: None,
+                    replaces,
                     result,
                 },
                 true,
@@ -182,6 +193,7 @@ impl Jobs {
                             entry: entry.file.clone(),
                         },
                         entry: Some(entry),
+                        replaces: None,
                         result,
                     },
                     false,
@@ -199,12 +211,19 @@ impl Jobs {
                 ids,
                 models,
                 rulesets,
+                requirements,
                 documents,
                 created,
             } = request;
-            let result =
-                project::save_project(&path, &models, &rulesets, &documents, created.as_deref())
-                    .map_err(|e| e.to_string());
+            let result = project::save_project(
+                &path,
+                &models,
+                &rulesets,
+                &requirements,
+                &documents,
+                created.as_deref(),
+            )
+            .map_err(|e| e.to_string());
             reporter.send(JobResult::Saved { path, ids, result }, true);
         });
     }

@@ -7,6 +7,7 @@
 //! manifest.json        format version, timestamps, the list of models
 //! models/<name>.ifc    the IFC files, byte for byte as delivered
 //! rulesets/<name>.toml rulesets used by the project
+//! requirements/<name>.ids IDS files that information rules refer to
 //! view.json            saved view state of the application
 //! ```
 //!
@@ -60,6 +61,9 @@ pub struct Manifest {
     /// Archive paths of the rulesets, e.g. `rulesets/mep-vs-structure.toml`.
     #[serde(default)]
     pub rulesets: Vec<String>,
+    /// Archive paths of IDS files, e.g. `requirements/delivery.ids`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requirements: Vec<String>,
 }
 
 /// One IFC file in the project.
@@ -92,10 +96,10 @@ fn default_revision() -> u32 {
     1
 }
 
-/// A ruleset stored in the project.
+/// A text file stored in the project: a ruleset or an IDS file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RulesetFile {
-    /// Archive path, e.g. `rulesets/clash.toml`.
+    /// Archive path, e.g. `rulesets/clash.toml` or `requirements/x.ids`.
     pub path: String,
     pub text: String,
 }
@@ -105,6 +109,8 @@ pub struct RulesetFile {
 pub struct ProjectContents {
     pub manifest: Manifest,
     pub rulesets: Vec<RulesetFile>,
+    /// IDS files (`requirements/*.ids`).
+    pub requirements: Vec<RulesetFile>,
     pub documents: ProjectDocuments,
 }
 
@@ -164,15 +170,20 @@ pub fn read_project(path: &Path) -> Result<ProjectContents, ProjectError> {
             manifest.format_version
         )));
     }
-    let mut rulesets = Vec::new();
-    for ruleset in &manifest.rulesets {
-        let mut text = String::new();
-        archive.by_name(ruleset)?.read_to_string(&mut text)?;
-        rulesets.push(RulesetFile {
-            path: ruleset.clone(),
-            text,
-        });
-    }
+    let mut read_text = |paths: &[String]| -> Result<Vec<RulesetFile>, ProjectError> {
+        let mut files = Vec::new();
+        for path in paths {
+            let mut text = String::new();
+            archive.by_name(path)?.read_to_string(&mut text)?;
+            files.push(RulesetFile {
+                path: path.clone(),
+                text,
+            });
+        }
+        Ok(files)
+    };
+    let rulesets = read_text(&manifest.rulesets)?;
+    let requirements = read_text(&manifest.requirements)?;
     let documents = ProjectDocuments {
         view: read_json(&mut archive, VIEW)?,
         checking: read_json(&mut archive, CHECKING)?,
@@ -181,6 +192,7 @@ pub fn read_project(path: &Path) -> Result<ProjectContents, ProjectError> {
     Ok(ProjectContents {
         manifest,
         rulesets,
+        requirements,
         documents,
     })
 }
@@ -213,11 +225,12 @@ pub fn save_project(
     path: &Path,
     models: &[ProjectModel],
     rulesets: &[RulesetFile],
+    requirements: &[RulesetFile],
     documents: &ProjectDocuments,
     created: Option<&str>,
 ) -> Result<Manifest, ProjectError> {
     let temp = temp_path(path);
-    let result = write_archive(&temp, models, rulesets, documents, created);
+    let result = write_archive(&temp, models, rulesets, requirements, documents, created);
     match result {
         Ok(manifest) => {
             std::fs::rename(&temp, path)?;
@@ -240,6 +253,7 @@ fn write_archive(
     target: &Path,
     models: &[ProjectModel],
     rulesets: &[RulesetFile],
+    requirements: &[RulesetFile],
     documents: &ProjectDocuments,
     created: Option<&str>,
 ) -> Result<Manifest, ProjectError> {
@@ -274,9 +288,9 @@ fn write_archive(
         });
     }
 
-    for ruleset in rulesets {
-        zip.start_file(&ruleset.path, text_options)?;
-        zip.write_all(ruleset.text.as_bytes())?;
+    for file in rulesets.iter().chain(requirements) {
+        zip.start_file(&file.path, text_options)?;
+        zip.write_all(file.text.as_bytes())?;
     }
     for (name, document) in [
         (VIEW, &documents.view),
@@ -297,6 +311,7 @@ fn write_archive(
         modified: now,
         models: entries,
         rulesets: rulesets.iter().map(|r| r.path.clone()).collect(),
+        requirements: requirements.iter().map(|r| r.path.clone()).collect(),
     };
     // The manifest goes last so a reader that finds it knows the archive is complete.
     zip.start_file(MANIFEST, text_options)?;
@@ -383,10 +398,15 @@ mod tests {
                 source: ModelSource::File(ifc),
             },
         ];
+        let ids = RulesetFile {
+            path: "requirements/delivery.ids".into(),
+            text: "<ids/>".into(),
+        };
         let written = save_project(
             &project,
             &models,
             std::slice::from_ref(&ruleset),
+            std::slice::from_ref(&ids),
             &documents,
             None,
         )
@@ -397,6 +417,7 @@ mod tests {
         let read = read_project(&project).unwrap();
         assert_eq!(read.manifest.models, written.models);
         assert_eq!(read.rulesets, vec![ruleset.clone()]);
+        assert_eq!(read.requirements, vec![ids]);
         assert_eq!(read.documents, documents);
         assert_eq!(read.manifest.models[0].discipline, Discipline::Structural);
         assert_eq!(
@@ -416,6 +437,7 @@ mod tests {
             &project,
             &again,
             &[],
+            &[],
             &ProjectDocuments::default(),
             Some(&read.manifest.created),
         )
@@ -426,6 +448,7 @@ mod tests {
         let entry = &reread.manifest.models[0].file;
         assert_eq!(read_project_model(&project, entry).unwrap(), IFC);
         assert_eq!(reread.documents, ProjectDocuments::default());
+        assert!(reread.requirements.is_empty());
 
         std::fs::remove_dir_all(dir).unwrap();
     }

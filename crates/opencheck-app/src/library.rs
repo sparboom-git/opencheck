@@ -75,6 +75,33 @@ pub fn save(ruleset: &Ruleset) -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
+/// Copies ruleset files into the library after checking that they parse.
+/// Returns how many were imported and a message per file that was not.
+pub fn import(paths: &[PathBuf]) -> (usize, Vec<String>) {
+    let mut imported = 0;
+    let mut errors = Vec::new();
+    for path in paths {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let result = std::fs::read_to_string(path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| Ruleset::from_toml(&text).map_err(|e| e.to_string()))
+            .and_then(|ruleset| save(&ruleset).map_err(|e| e.to_string()));
+        match result {
+            Ok(_) => imported += 1,
+            Err(e) => errors.push(format!("{name} was not imported: {}", first_line(&e))),
+        }
+    }
+    (imported, errors)
+}
+
+/// TOML errors span several lines with a source excerpt; the first says where.
+fn first_line(message: &str) -> &str {
+    message
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or(message)
+}
+
 pub fn delete(path: &Path) -> std::io::Result<()> {
     std::fs::remove_file(path)
 }

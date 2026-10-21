@@ -10,6 +10,9 @@
 //! Several models are combined into a [`Federation`], which places them in a
 //! shared world frame.
 
+pub mod area;
+pub mod bcf;
+pub mod bcf_file;
 pub mod check;
 mod discipline;
 mod federation;
@@ -25,5 +28,5 @@ pub use federation::{Federation, ModelId};
 pub use geometry::{Aabb, ElementMesh};
 pub use loader::{LoadError, LoadStats, load_ifc_bytes, load_ifc_file};
 pub use model::{Element, IfcModel};
-pub use properties::{Property, PropertySet, PropertySetKind, PropertyValue};
+pub use properties::{ClassificationRef, Property, PropertySet, PropertySetKind, PropertyValue};
 pub use spatial::SpatialNode;

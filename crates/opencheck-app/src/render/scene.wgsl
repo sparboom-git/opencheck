@@ -24,10 +24,11 @@ const MODE_HOVER: u32 = 4u;
 const MODE_FOCUS_A: u32 = 5u;
 const MODE_FOCUS_B: u32 = 6u;
 
-const SELECTED_COLOR: vec3<f32> = vec3<f32>(0.17, 0.52, 0.98);
+// Selection green, as in Solibri.
+const SELECTED_COLOR: vec3<f32> = vec3<f32>(0.0, 0.80, 0.0);
 const GHOST_COLOR: vec3<f32> = vec3<f32>(0.62, 0.66, 0.72);
-const FOCUS_A_COLOR: vec3<f32> = vec3<f32>(0.93, 0.36, 0.16);
-const FOCUS_B_COLOR: vec3<f32> = vec3<f32>(0.20, 0.45, 0.95);
+const FOCUS_A_COLOR: vec3<f32> = vec3<f32>(0.910, 0.396, 0.059);
+const FOCUS_B_COLOR: vec3<f32> = vec3<f32>(0.122, 0.373, 0.820);
 
 struct VertexIn {
     @location(0) position: vec3<f32>,

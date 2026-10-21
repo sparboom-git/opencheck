@@ -14,8 +14,8 @@ use ifc_lite_processing::{MeshFrame, ProcessingResult};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    Aabb, Discipline, Element, ElementMesh, IfcModel, Property, PropertySet, PropertySetKind,
-    PropertyValue, SpatialNode,
+    Aabb, ClassificationRef, Discipline, Element, ElementMesh, IfcModel, Property, PropertySet,
+    PropertySetKind, PropertyValue, SpatialNode,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -216,6 +216,7 @@ const STOREY_ELEVATION: usize = 9;
 const REL_FIRST: usize = 4;
 const REL_SECOND: usize = 5;
 const TYPE_HAS_PROPERTY_SETS: usize = 5;
+const REL_GROUP: usize = 6;
 
 /// Collects relationship entities in one scan and resolves them on demand.
 struct SemanticReader<'a> {
@@ -232,6 +233,12 @@ struct SemanticReader<'a> {
     defined_by_properties: FxHashMap<u32, Vec<u32>>,
     /// object -> type object.
     defined_by_type: FxHashMap<u32, u32>,
+    /// object -> classification references (or other classification selects).
+    classified_by: FxHashMap<u32, Vec<u32>>,
+    /// object -> material select.
+    material_of: FxHashMap<u32, u32>,
+    /// object -> groups it is assigned to.
+    groups_of: FxHashMap<u32, Vec<u32>>,
     property_sets: FxHashMap<u32, PropertySet>,
     class_cache: FxHashMap<u32, String>,
 }
@@ -248,6 +255,9 @@ impl<'a> SemanticReader<'a> {
             contained: FxHashMap::default(),
             defined_by_properties: FxHashMap::default(),
             defined_by_type: FxHashMap::default(),
+            classified_by: FxHashMap::default(),
+            material_of: FxHashMap::default(),
+            groups_of: FxHashMap::default(),
             property_sets: FxHashMap::default(),
             class_cache: FxHashMap::default(),
         }
@@ -267,6 +277,9 @@ impl<'a> SemanticReader<'a> {
                 "IFCRELCONTAINEDINSPATIALSTRUCTURE" => RelKind::Contained,
                 "IFCRELDEFINESBYPROPERTIES" => RelKind::Properties,
                 "IFCRELDEFINESBYTYPE" => RelKind::Type,
+                "IFCRELASSOCIATESCLASSIFICATION" => RelKind::Classification,
+                "IFCRELASSOCIATESMATERIAL" => RelKind::Material,
+                "IFCRELASSIGNSTOGROUP" => RelKind::Group,
                 _ => continue,
             };
             rels.push((id, kind));
@@ -314,6 +327,39 @@ impl<'a> SemanticReader<'a> {
                     {
                         for object in objects {
                             self.defined_by_type.insert(object, type_object);
+                        }
+                    }
+                }
+                // RelatedObjects, RelatingClassification
+                RelKind::Classification => {
+                    if let (Some(objects), Some(reference)) =
+                        (rel.get_refs(REL_FIRST), rel.get_ref(REL_SECOND))
+                    {
+                        for object in objects {
+                            self.classified_by
+                                .entry(object)
+                                .or_default()
+                                .push(reference);
+                        }
+                    }
+                }
+                // RelatedObjects, RelatingMaterial
+                RelKind::Material => {
+                    if let (Some(objects), Some(material)) =
+                        (rel.get_refs(REL_FIRST), rel.get_ref(REL_SECOND))
+                    {
+                        for object in objects {
+                            self.material_of.entry(object).or_insert(material);
+                        }
+                    }
+                }
+                // RelatedObjects, RelatedObjectsType, RelatingGroup
+                RelKind::Group => {
+                    if let (Some(objects), Some(group)) =
+                        (rel.get_refs(REL_FIRST), rel.get_ref(REL_GROUP))
+                    {
+                        for object in objects {
+                            self.groups_of.entry(object).or_default().push(group);
                         }
                     }
                 }
@@ -505,7 +551,25 @@ impl<'a> SemanticReader<'a> {
                         .unwrap_or_default();
                     (t, name)
                 });
-                let property_sets = self.property_sets_for(id, type_object.as_ref().map(|t| t.0));
+                let type_id = type_object.as_ref().map(|t| t.0);
+                let property_sets = self.property_sets_for(id, type_id);
+                let type_class = type_id.map(|t| self.class_of(t));
+                let attributes = self.plain_attributes(&entity, &ifc_class);
+                let mut classifications = self.classifications_of(id);
+                if let Some(t) = type_id {
+                    for c in self.classifications_of(t) {
+                        if !classifications.contains(&c) {
+                            classifications.push(c);
+                        }
+                    }
+                }
+                let mut materials = self.materials_of(id);
+                if materials.is_empty()
+                    && let Some(t) = type_id
+                {
+                    materials = self.materials_of(t);
+                }
+                let systems = self.systems_of(id);
                 Some(Element {
                     express_id: id,
                     global_id: string_attr(&entity, ROOT_GLOBAL_ID).unwrap_or_default(),
@@ -522,12 +586,146 @@ impl<'a> SemanticReader<'a> {
                     parent: parent.get(&id).copied(),
                     parts,
                     type_object,
+                    type_class,
+                    attributes,
+                    classifications,
+                    materials,
+                    systems,
                     property_sets,
                     meshes: mesh_indices,
                     bounds,
                 })
             })
             .collect()
+    }
+
+    /// Direct attributes with a plain (non-reference) value.
+    fn plain_attributes(
+        &self,
+        entity: &DecodedEntity,
+        class: &str,
+    ) -> Vec<(String, PropertyValue)> {
+        let Some(names) = ifc_lite_core::attribute_names_for_schema(&self.schema, class) else {
+            return Vec::new();
+        };
+        names
+            .iter()
+            .enumerate()
+            .skip(ROOT_NAME)
+            .filter_map(|(index, name)| {
+                let value = match entity.get(index)? {
+                    AttributeValue::String(s) if !s.trim().is_empty() => {
+                        PropertyValue::Text(s.trim().to_owned())
+                    }
+                    attr @ (AttributeValue::Integer(_)
+                    | AttributeValue::Float(_)
+                    | AttributeValue::Enum(_)) => plain_value(attr),
+                    _ => return None,
+                };
+                Some(((*name).to_owned(), value))
+            })
+            .collect()
+    }
+
+    fn classifications_of(&mut self, id: u32) -> Vec<ClassificationRef> {
+        let mut out = Vec::new();
+        for reference in self.classified_by.get(&id).cloned().unwrap_or_default() {
+            let Some(entity) = self.decode(reference) else {
+                continue;
+            };
+            match entity.ifc_type.name() {
+                // Location, ItemReference/Identification, Name, ReferencedSource
+                "IfcClassificationReference" => {
+                    let system = entity
+                        .get_ref(3)
+                        .and_then(|s| self.decode(s))
+                        .and_then(|s| {
+                            // IfcClassification: Source, Edition, EditionDate, Name
+                            match s.ifc_type.name() {
+                                "IfcClassification" => string_attr(&s, 3),
+                                "IfcClassificationReference" => string_attr(&s, 2),
+                                _ => None,
+                            }
+                        })
+                        .unwrap_or_default();
+                    out.push(ClassificationRef {
+                        system,
+                        code: string_attr(&entity, 1).unwrap_or_default(),
+                        name: string_attr(&entity, 2).unwrap_or_default(),
+                    });
+                }
+                // The whole system without a specific item.
+                "IfcClassification" => out.push(ClassificationRef {
+                    system: string_attr(&entity, 3).unwrap_or_default(),
+                    code: String::new(),
+                    name: String::new(),
+                }),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// Material names behind any material select: single materials, lists,
+    /// layer, profile and constituent sets and their usages.
+    fn materials_of(&mut self, id: u32) -> Vec<String> {
+        let Some(&root) = self.material_of.get(&id) else {
+            return Vec::new();
+        };
+        let mut names = Vec::new();
+        let mut stack = vec![root];
+        let mut seen = FxHashSet::default();
+        while let Some(m) = stack.pop() {
+            if !seen.insert(m) || seen.len() > 64 {
+                continue;
+            }
+            let Some(entity) = self.decode(m) else {
+                continue;
+            };
+            match entity.ifc_type.name() {
+                "IfcMaterial" => {
+                    if let Some(name) = string_attr(&entity, 0)
+                        && !names.contains(&name)
+                    {
+                        names.push(name);
+                    }
+                }
+                // Materials
+                "IfcMaterialList" => stack.extend(entity.get_refs(0).unwrap_or_default()),
+                // ForLayerSet / ForProfileSet
+                "IfcMaterialLayerSetUsage" | "IfcMaterialProfileSetUsage" => {
+                    stack.extend(entity.get_ref(0))
+                }
+                // MaterialLayers
+                "IfcMaterialLayerSet" => stack.extend(entity.get_refs(0).unwrap_or_default()),
+                // Material (first attribute)
+                "IfcMaterialLayer" => stack.extend(entity.get_ref(0)),
+                // Name, Description, MaterialProfiles / MaterialConstituents
+                "IfcMaterialProfileSet" | "IfcMaterialConstituentSet" => {
+                    stack.extend(entity.get_refs(2).unwrap_or_default())
+                }
+                // Name, Description, Material, ...
+                "IfcMaterialProfile" | "IfcMaterialConstituent" => stack.extend(entity.get_ref(2)),
+                _ => {}
+            }
+        }
+        names
+    }
+
+    fn systems_of(&mut self, id: u32) -> Vec<String> {
+        let mut names = Vec::new();
+        for group in self.groups_of.get(&id).cloned().unwrap_or_default() {
+            let class = self.class_of(group);
+            if !ifc_lite_core::is_subtype_of_for_schema(&self.schema, &class, "IfcSystem") {
+                continue;
+            }
+            if let Some(name) = self.decode(group).and_then(|g| string_attr(&g, ROOT_NAME))
+                && !names.contains(&name)
+            {
+                names.push(name);
+            }
+        }
+        names
     }
 
     fn has_tag(&self, class: &str) -> bool {
@@ -612,6 +810,9 @@ enum RelKind {
     Contained,
     Properties,
     Type,
+    Classification,
+    Material,
+    Group,
 }
 
 fn string_attr(entity: &DecodedEntity, index: usize) -> Option<String> {

@@ -21,7 +21,14 @@ const ZOOM_SPEED: f32 = 0.0018;
 const LASER: Color32 = Color32::from_rgb(230, 40, 60);
 
 pub fn show(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
-    let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+    let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
+    // Keep a strip along both sides free so the side panels can still be
+    // resized: their drag handles reach a few pixels into the view.
+    let response = ui.interact(
+        rect.shrink2(Vec2::new(8.0, 0.0)),
+        ui.id().with("viewport"),
+        Sense::click_and_drag(),
+    );
     let aspect = rect.width() / rect.height().max(1.0);
     app.nav.aspect = aspect;
 
@@ -33,7 +40,9 @@ pub fn show(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     }
 
     handle_navigation(app, ui, rect, &response, aspect);
-    if app.measure.active {
+    if app.is_editing_area() {
+        crate::area_edit::interact(app, ui, rect, &response, aspect);
+    } else if app.measure.active {
         handle_measuring(app, ui, rect, &response, aspect);
     } else {
         handle_selection(app, ui, rect, &response, aspect);
@@ -62,11 +71,26 @@ pub fn show(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     if let (Some(pivot), true) = (app.nav.pivot, response.dragged_by(PointerButton::Primary))
         && let Some(p) = project(app, rect, aspect, pivot)
     {
-        ui.painter().circle_filled(p, 4.5, theme::ACCENT);
-        ui.painter()
-            .circle_stroke(p, 8.0, Stroke::new(1.5, theme::ACCENT.gamma_multiply(0.5)));
+        ui.painter().circle_filled(p, 4.5, theme::accent());
+        ui.painter().circle_stroke(
+            p,
+            8.0,
+            Stroke::new(1.5, theme::accent().gamma_multiply(0.5)),
+        );
     }
 
+    app.viewport_rect = rect;
+    if app.is_editing_area() {
+        crate::area_edit::draw(app, ui, rect, aspect);
+        error_toasts(app, ui, rect);
+        return;
+    }
+    if app.is_capturing() {
+        // Pictures for exports: the model and the issue marker only.
+        draw_focus_marker(app, ui, rect, aspect);
+        capture_progress(app, ui, rect);
+        return;
+    }
     draw_measurements(app, ui, rect, aspect);
     draw_focus_marker(app, ui, rect, aspect);
     section_handle(app, ui, rect, aspect);
@@ -77,6 +101,21 @@ pub fn show(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     }
     error_toasts(app, ui, rect);
     drop_overlay(ui, rect);
+}
+
+/// A small progress note below the 3D view while pictures are taken; it is
+/// outside the captured area.
+fn capture_progress(app: &OpenCheckApp, ui: &egui::Ui, rect: Rect) {
+    if let Some(capture) = &app.capture {
+        let (done, total) = capture.progress();
+        ui.ctx().debug_painter().text(
+            rect.center_bottom() + Vec2::new(0.0, 14.0),
+            Align2::CENTER_TOP,
+            format!("Taking pictures {done}/{total}…"),
+            FontId::proportional(13.0),
+            theme::text_muted(),
+        );
+    }
 }
 
 fn paint_background(ui: &egui::Ui, rect: Rect) {
@@ -98,7 +137,7 @@ fn empty_state(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, response: 
         Align2::CENTER_CENTER,
         icon::FILE_ARROW_UP,
         FontId::proportional(54.0),
-        theme::ACCENT,
+        theme::accent(),
     );
     let message = if app.is_busy() {
         "Loading…"
@@ -110,14 +149,14 @@ fn empty_state(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, response: 
         Align2::CENTER_CENTER,
         message,
         FontId::proportional(22.0),
-        theme::TEXT,
+        theme::text(),
     );
     painter.text(
         center + Vec2::new(0.0, 44.0),
         Align2::CENTER_CENTER,
         "or click anywhere to browse. Several files are combined into one federated model.",
         FontId::proportional(14.0),
-        theme::TEXT_MUTED,
+        theme::text_muted(),
     );
     if response.clicked() && !app.is_busy() {
         app.open_file_dialog(ui.ctx());
@@ -137,7 +176,7 @@ fn ndc(rect: Rect, pos: Pos2) -> GVec2 {
     )
 }
 
-fn pointer_ray(app: &OpenCheckApp, rect: Rect, aspect: f32, pos: Pos2) -> Ray {
+pub(crate) fn pointer_ray(app: &OpenCheckApp, rect: Rect, aspect: f32, pos: Pos2) -> Ray {
     app.camera.ray(ndc(rect, pos), aspect)
 }
 
@@ -146,7 +185,7 @@ fn pick_at(app: &OpenCheckApp, rect: Rect, aspect: f32, pos: Pos2) -> Option<Pic
         .pick(&app.federation, &pointer_ray(app, rect, aspect, pos))
 }
 
-fn project(app: &OpenCheckApp, rect: Rect, aspect: f32, p: Vec3) -> Option<Pos2> {
+pub(crate) fn project(app: &OpenCheckApp, rect: Rect, aspect: f32, p: Vec3) -> Option<Pos2> {
     let clip = app.camera.view_proj(aspect) * p.extend(1.0);
     if clip.w <= 1e-4 {
         return None;
@@ -204,14 +243,18 @@ fn handle_navigation(
     let pointer = response.interact_pointer_pos().or(response.hover_pos());
 
     // Orbit with the left button, around the point that was under the cursor.
-    if response.drag_started_by(PointerButton::Primary)
+    // In the top view of "Edit view" the left button draws instead.
+    let orbit = !app.is_editing_area();
+    if orbit
+        && response.drag_started_by(PointerButton::Primary)
         && let Some(pos) = pointer
     {
         let ray = pointer_ray(app, rect, aspect, pos);
         let hit = app.view.pick(&app.federation, &ray);
         app.nav.pivot = Some(hit.map_or_else(|| fallback_point(app, &ray), |h| h.point));
     }
-    if response.dragged_by(PointerButton::Primary)
+    if orbit
+        && response.dragged_by(PointerButton::Primary)
         && let Some(pivot) = app.nav.pivot
     {
         let d = response.drag_delta();
@@ -622,12 +665,12 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
     if points.len() >= 3 {
         painter.add(Shape::convex_polygon(
             points.clone(),
-            theme::ACCENT.gamma_multiply(0.08),
+            theme::accent().gamma_multiply(0.08),
             Stroke::NONE,
         ));
         painter.add(Shape::closed_line(
             points,
-            Stroke::new(1.5, theme::ACCENT.gamma_multiply(0.8)),
+            Stroke::new(1.5, theme::accent().gamma_multiply(0.8)),
         ));
     }
 
@@ -667,12 +710,12 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
         center,
         17.0,
         if active {
-            theme::ACCENT
+            theme::accent()
         } else {
             Color32::WHITE
         },
     );
-    painter.circle_stroke(center, 17.0, Stroke::new(2.0, theme::ACCENT));
+    painter.circle_stroke(center, 17.0, Stroke::new(2.0, theme::accent()));
     painter.text(
         center,
         Align2::CENTER_CENTER,
@@ -681,7 +724,7 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
         if active {
             Color32::WHITE
         } else {
-            theme::ACCENT
+            theme::accent()
         },
     );
     // Arrows hint that the handle moves up and down.
@@ -691,7 +734,7 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
             Align2::CENTER_CENTER,
             glyph,
             FontId::proportional(14.0),
-            theme::ACCENT,
+            theme::accent(),
         );
     }
     let elevation = app.federation.origin().z + section.height as f64;
@@ -700,7 +743,7 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
         center + Vec2::new(26.0, 0.0),
         Align2::LEFT_CENTER,
         &format!("Section  {elevation:+.3} m"),
-        theme::ACCENT,
+        theme::accent(),
     );
     response.on_hover_text("Drag up or down to move the section. Double click to remove it.");
 }
@@ -729,12 +772,12 @@ fn draw_focus_marker(app: &OpenCheckApp, ui: &egui::Ui, rect: Rect, aspect: f32)
 fn draw_measurements(app: &OpenCheckApp, ui: &egui::Ui, rect: Rect, aspect: f32) {
     let painter = ui.painter_at(rect);
     for m in &app.measure.pinned {
-        draw_measurement(app, &painter, rect, aspect, m, theme::ACCENT);
+        draw_measurement(app, &painter, rect, aspect, m, theme::accent());
     }
     if let Some(m) = &app.measure.live {
         let color = match m.kind {
             MeasureKind::Laser => LASER,
-            MeasureKind::PointToPoint => theme::ACCENT,
+            MeasureKind::PointToPoint => theme::accent(),
         };
         draw_measurement(app, &painter, rect, aspect, m, color);
     }
@@ -756,8 +799,8 @@ fn draw_measurements(app: &OpenCheckApp, ui: &egui::Ui, rect: Rect, aspect: f32)
     if let Some(start) = app.measure.start
         && let Some(p) = project(app, rect, aspect, start)
     {
-        painter.circle_filled(p, 5.0, theme::ACCENT);
-        painter.circle_stroke(p, 9.0, Stroke::new(1.5, theme::ACCENT));
+        painter.circle_filled(p, 5.0, theme::accent());
+        painter.circle_stroke(p, 9.0, Stroke::new(1.5, theme::accent()));
     }
     if let Some(snap) = app.measure.snap
         && let Some(p) = project(app, rect, aspect, snap.point)
@@ -882,10 +925,11 @@ fn measure_hint(app: &OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
 
 /// A row of icon buttons inside a floating card.
 fn icon_button(ui: &mut egui::Ui, glyph: &str, active: bool, tooltip: &str) -> egui::Response {
-    let text =
-        RichText::new(glyph)
-            .size(19.0)
-            .color(if active { theme::ACCENT } else { theme::TEXT });
+    let text = RichText::new(glyph).size(19.0).color(if active {
+        theme::accent()
+    } else {
+        theme::text()
+    });
     ui.add(
         egui::Button::selectable(active, text)
             .min_size(Vec2::splat(34.0))
@@ -939,7 +983,16 @@ fn tool_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
                 app.show_all();
             }
             ui.separator();
-            if icon_button(ui, icon::CUBE_TRANSPARENT, app.view.xray, "X-ray (X)").clicked() {
+            let reviewing = app.view.focus.is_some();
+            let (xray_on, xray_tip) = if reviewing {
+                (
+                    !app.view.show_context,
+                    "Ghost the rest of the model around the clash (X)",
+                )
+            } else {
+                (app.view.xray, "X-ray (X)")
+            };
+            if icon_button(ui, icon::CUBE_TRANSPARENT, xray_on, xray_tip).clicked() {
                 app.toggle_xray();
             }
             let sectioned = app.view.section.is_some();
@@ -963,7 +1016,7 @@ fn tool_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
             let filtered =
                 !app.view.hidden.is_empty() || isolated || app.view.storey_filter.is_some();
             if filtered {
-                ui.label(RichText::new("filtered").small().color(theme::TEXT_MUTED));
+                ui.label(RichText::new("filtered").small().color(theme::text_muted()));
             }
         });
     });
@@ -1013,7 +1066,11 @@ fn error_toasts(app: &mut OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
         );
         overlay(ui, rect, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(icon::WARNING).size(18.0).color(theme::DANGER));
+                ui.label(
+                    RichText::new(icon::WARNING)
+                        .size(18.0)
+                        .color(theme::danger()),
+                );
                 ui.label(message);
                 if ui.small_button(icon::X).clicked() {
                     dismissed = Some(i);
@@ -1024,17 +1081,48 @@ fn error_toasts(app: &mut OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
     if let Some(i) = dismissed {
         app.errors.remove(i);
     }
+
+    // Notices sit below the errors and fade after a few seconds.
+    const NOTICE_SECONDS: f64 = 6.0;
+    let now = ui.input(|i| i.time);
+    app.notices
+        .retain(|(_, shown)| shown.is_none_or(|t| now - t < NOTICE_SECONDS));
+    let mut dismissed = None;
+    for (i, (message, shown)) in app.notices.iter_mut().enumerate() {
+        shown.get_or_insert(now);
+        let row = (app.errors.len() + i) as f32;
+        let rect = Rect::from_center_size(
+            Pos2::new(view.center().x, view.top() + 34.0 + row * 52.0),
+            Vec2::new(520.0, 44.0),
+        );
+        overlay(ui, rect, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(icon::INFO).size(18.0).color(theme::accent()));
+                ui.label(message.as_str());
+                if ui.small_button(icon::X).clicked() {
+                    dismissed = Some(i);
+                }
+            });
+        });
+    }
+    if let Some(i) = dismissed {
+        app.notices.remove(i);
+    }
+    if !app.notices.is_empty() {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(500));
+    }
 }
 
 fn drop_overlay(ui: &egui::Ui, rect: Rect) {
     let hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
     if hovering {
         let painter = ui.painter();
-        painter.rect_filled(rect.shrink(8.0), 12.0, theme::ACCENT.gamma_multiply(0.12));
+        painter.rect_filled(rect.shrink(8.0), 12.0, theme::accent().gamma_multiply(0.12));
         painter.rect_stroke(
             rect.shrink(8.0),
             12.0,
-            Stroke::new(2.0, theme::ACCENT),
+            Stroke::new(2.0, theme::accent()),
             egui::StrokeKind::Inside,
         );
         painter.text(

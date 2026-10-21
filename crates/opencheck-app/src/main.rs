@@ -1,21 +1,30 @@
 //! OpenCheck desktop application.
 
 mod app;
+mod area_edit;
+mod bcf_live;
+mod bcf_ui;
+mod c402;
 mod camera;
 mod checking;
 mod checking_ui;
+mod export;
+mod issue_dialog;
 mod issues;
 mod issues_ui;
 mod jobs;
 mod library;
 mod measure;
 mod panels;
+mod pickers;
 mod render;
+mod report;
 mod results_ui;
 mod ruleset_manager;
 mod scene;
 mod session;
 mod snap;
+mod standard_editor;
 mod theme;
 mod viewport;
 

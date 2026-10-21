@@ -23,7 +23,8 @@ and tests every pair of an element from **a** and an element from **b**:
 |---|---|
 | `clash` | the solids intersect deeper than `tolerance_mm`, or one lies completely inside the other |
 | `clearance` | the elements come closer than `clearance_mm` (touching and intersecting included) |
-| `duplicates` | two elements of the same IFC class have the same geometry within `tolerance_mm` |
+| `duplicates` | two elements have the same shape in the same place within `tolerance_mm`, whatever their IFC class or tessellation |
+| `information` | (one element at a time) a building part lacks information that an information standard requires at the project's LOD level; see [information-requirements.md](information-requirements.md) |
 
 Each reported pair is a *finding*. Users review findings, accept or reject
 them, and turn the relevant ones into issues.
@@ -45,7 +46,7 @@ author = "Jane Doe, Example Engineering"      # optional
 id = "sprinkler-pipes-vs-beams"               # required, unique within the file
 name = "Sprinkler pipes must not intersect beams or columns"
 description = "Optional longer explanation shown to the user."
-type = "clash"                                # clash | clearance | duplicates
+type = "clash"                                # clash | clearance | duplicates | information
 severity = "critical"                         # critical | moderate | low
 tolerance_mm = 10                             # clash and duplicates; default 10
 between = "different_models"                  # any | different_models | same_model
@@ -76,11 +77,12 @@ classes = ["IfcBeam", "IfcColumn"]
 | `id` | yes | Unique within the ruleset. Keep it stable: findings are matched between runs by ruleset id, rule id and the two elements. |
 | `name` | yes | Shown in the results list. Phrase it as the requirement ("Ducts must not intersect beams"). |
 | `description` | no | Explanation for the reviewer. |
-| `type` | yes | `clash`, `clearance` or `duplicates`. |
+| `type` | yes | `clash`, `clearance`, `duplicates` or `information`. |
 | `severity` | yes | `critical`, `moderate` or `low`. |
 | `tolerance_mm` | no | Clash: intersections up to this depth are ignored (default 10). Duplicates: largest offset between two copies (default 10). |
 | `clearance_mm` | for `clearance` | Required free distance; must be above 0. |
 | `between` | no | `any` (default), `different_models` or `same_model`. Use `different_models` for coordination between disciplines and `same_model` for model quality checks. |
+| `standard` | for `information` | Id of the information standard, e.g. `opencheck.information.lod-dk`. Group `a` then limits which elements are checked; `b` is not used. |
 | `a` | no | Selector for the first group. Omitted: every element. |
 | `b` | no | Selector for the second group. **Omitted: elements of `a` are tested against each other.** |
 
@@ -91,9 +93,11 @@ An element belongs to a group when it matches **all** keys given:
 | Key | Meaning |
 |---|---|
 | `disciplines` | List of model disciplines (see below). Empty or omitted: any. The discipline is set per model by the user. |
-| `classes` | List of IFC classes. **Subtypes match too**: `IfcWall` also matches `IfcWallStandardCase`, `IfcBuildingElement` matches all walls, slabs, beams and so on. Empty or omitted: any class. |
+| `classes` | List of IFC classes. **Subtypes match too**: `IfcWall` also matches `IfcWallStandardCase`, `IfcBuildingElement` matches all walls, slabs, beams and so on. IFC2x3 elements also match the class their type gives them: an `IfcFlowSegment` with an `IfcDuctSegmentType` matches `IfcDuctSegment`. Empty or omitted: any class. |
 | `exclude_classes` | IFC classes to leave out, subtypes included. |
 | `properties` | List of property conditions; all must hold. |
+| `names` | Regular expressions (case is ignored) for the element's name, object type or type name; one must match. |
+| `materials` | Regular expressions for material names; one must match a material of the element. |
 
 Property condition:
 
@@ -109,9 +113,9 @@ numbers are compared as numbers.
 
 ### Disciplines
 
-`architectural`, `structural`, `mechanical` (HVAC / ventilation), `plumbing`
-(water, drainage, sprinkler pipes when no separate fire model), `electrical`,
-`fire_protection`, `landscape`, `infrastructure`, `unknown`.
+`architectural`, `structural`, `mechanical` (shown as Ventilation, code VEN),
+`plumbing` (water and drainage), `electrical`, `fire_protection` (shown as
+Sprinkler, code SPR), `landscape`, `infrastructure`, `unknown`.
 
 ### Useful IFC classes
 

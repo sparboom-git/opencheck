@@ -36,6 +36,13 @@ impl Federation {
         id
     }
 
+    /// Puts a newer version of a model in the place of the old one: same id,
+    /// same position, same federation origin. Returns the old model.
+    pub fn replace(&mut self, id: ModelId, model: IfcModel) -> Option<Arc<IfcModel>> {
+        let slot = self.models.iter_mut().find(|(m, _)| *m == id)?;
+        Some(std::mem::replace(&mut slot.1, Arc::new(model)))
+    }
+
     pub fn remove(&mut self, id: ModelId) -> Option<Arc<IfcModel>> {
         let index = self.models.iter().position(|(m, _)| *m == id)?;
         let (_, model) = self.models.remove(index);

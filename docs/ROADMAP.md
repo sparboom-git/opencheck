@@ -18,6 +18,24 @@ once they are built.
 - Ruleset Manager with form editor and personal ruleset library; results
   grouped by category and component; multi-select; selected issues (BCF-style)
   saved in the project.
+- Update model: replace an IFC file with a newer revision; the check runs
+  again and issue findings that are gone are marked "Solved by update".
+- Standard duplicates ruleset in every project: same shape in the same place
+  within one model, compared by geometry (any class or tessellation).
+- C402 criticality (C1–C3) on issues, assignees by initials, BCF 2.1 file
+  export with pictures, illustrated issue report (HTML, Danish).
+- Responsibility per issue (disciplines, assignee) and BCF Live with Dalux:
+  browser sign-in, project choice, default person per discipline, sending
+  issues as topics with viewpoints, fetching status and assignee changes,
+  comments.
+- Information requirements per building part and LOD level (200, 300, 325,
+  400 DK) as a standard ruleset; level per project and per model; fill rate
+  per building part.
+- Information requirements adapted per project: where each item is read
+  from, for all building parts or one; "found in" per item in the results.
+- IDS 1.0: import `.ids` files into the project and check them as
+  information rules (app and `check --ids`); export the built-in standard as
+  IDS (`export-ids`, and from the Add menu).
 
 ## In progress
 
@@ -32,17 +50,24 @@ once they are built.
   check run and must be handled. Report templates define layout and fields;
   output as PDF and HTML.
 - **BCF export / import** of issues.
-- **BCF Live connector**: synchronise issues with an issue platform through the
-  BCF API, starting with Dalux, so issues can be commented on there.
+- **BCF Live, next steps**: snapshots (images) with viewpoints, opening a
+  topic's viewpoint from the server, more servers than Dalux, automatic
+  sync.
 - **Custom rulesets with an LLM**: the application offers a downloadable
   Markdown guide that describes the ruleset format. A user gives it to their
   preferred language model, describes the rules they need, and imports the
   resulting TOML file. The guide lives in
   [ruleset-authoring.md](ruleset-authoring.md).
-- More rule types: property checks (required properties and allowed values),
-  classification checks, space checks, model QA (missing storeys, elements
-  without containment).
-- Update model: replace an IFC file with a newer revision and compare.
+- **IDS, next steps**: run the official buildingSMART IDS test cases;
+  `IFCRELNESTS`, voids and fills relations; predefined types and
+  classification hierarchies from type objects; storeys and other spatial
+  nodes as applicable elements.
+- Information requirements, next steps: allowed values and value patterns,
+  choosing which items each part requires per level in the project.
+- More rule types: space checks, model QA (missing storeys, elements without
+  containment).
+- Model update report: what changed between two revisions (added, removed
+  and changed elements).
 
 ## Later
 

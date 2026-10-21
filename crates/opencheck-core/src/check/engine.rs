@@ -17,6 +17,11 @@ use sha2::{Digest, Sha256};
 use super::geom::{
     Triangle, closest_point_on_triangle, point_in_mesh, triangle_aabb, triangle_intersection,
 };
+use super::ids::{Ids, check_ids, ids_path};
+use super::information::{
+    InformationStandard, InformationSummary, ItemCoverage, ModelFacts, PartCoverage,
+    builtin_standard, is_checked,
+};
 use super::ruleset::{Between, Rule, RuleKind, Ruleset, RulesetInfo, Selector};
 use crate::{Aabb, IfcModel, ModelId};
 
@@ -26,6 +31,18 @@ pub struct CheckModel {
     pub id: ModelId,
     pub model: Arc<IfcModel>,
     pub transform: Mat4,
+    /// Elements taking part, by index into `model.elements` (a working
+    /// area); None means all.
+    pub mask: Option<Arc<Vec<bool>>>,
+}
+
+impl CheckModel {
+    /// Whether element `index` takes part in the check.
+    pub fn includes(&self, index: usize) -> bool {
+        self.mask
+            .as_ref()
+            .is_none_or(|m| m.get(index).copied().unwrap_or(true))
+    }
 }
 
 /// One ruleset to run and the models it runs on.
@@ -33,6 +50,15 @@ pub struct CheckModel {
 pub struct CheckJob {
     pub ruleset: Ruleset,
     pub models: Vec<ModelId>,
+    /// Information rules: the level (LOD) per model. Models not listed use
+    /// the standard's default level.
+    pub levels: Vec<(ModelId, String)>,
+    /// IDS documents by path, for information rules whose standard is
+    /// `ids:<path>`.
+    pub ids: Vec<(String, Arc<Ids>)>,
+    /// Information standards the project has adapted; they replace the
+    /// built-in standard with the same id.
+    pub standards: Vec<Arc<InformationStandard>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -45,6 +71,8 @@ pub enum FindingKind {
     Clearance,
     /// The same element twice.
     Duplicate,
+    /// Required information is missing on the element.
+    MissingInformation,
 }
 
 impl FindingKind {
@@ -54,6 +82,7 @@ impl FindingKind {
             FindingKind::Inside => "Inside",
             FindingKind::Clearance => "Clearance",
             FindingKind::Duplicate => "Duplicate",
+            FindingKind::MissingInformation => "Missing information",
         }
     }
 }
@@ -81,7 +110,19 @@ pub struct Finding {
     pub region: Aabb,
     /// Clash: estimated penetration depth. Clearance: actual distance.
     /// Duplicate: largest offset between the copies. Metres.
+    /// Missing information: how many items are missing.
     pub magnitude: f32,
+    /// Missing information: the kind of building part, e.g. "Cable carriers".
+    pub category: String,
+    /// Missing information: names of the missing items.
+    pub details: Vec<String>,
+}
+
+impl Finding {
+    /// The finding concerns one element (`a` and `b` are the same).
+    pub fn is_single(&self) -> bool {
+        self.kind == FindingKind::MissingInformation
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -90,12 +131,16 @@ pub struct RuleResult {
     pub findings: Vec<Finding>,
     pub pairs_tested: usize,
     pub duration: Duration,
+    /// Information rules: fill rate per building part.
+    pub information: Option<InformationSummary>,
 }
 
 #[derive(Debug, Clone)]
 pub struct RulesetResult {
     pub info: RulesetInfo,
     pub rules: Vec<RuleResult>,
+    /// Models the ruleset ran on.
+    pub models: Vec<ModelId>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -177,6 +222,9 @@ pub fn run_check(
                 .rules
                 .iter()
                 .map(|rule| {
+                    if rule.kind == RuleKind::Information {
+                        return (Vec::new(), Vec::new());
+                    }
                     let a = select(models, &job.models, &rule.a);
                     let b = match &rule.b {
                         Some(selector) => select(models, &job.models, selector),
@@ -217,6 +265,20 @@ pub fn run_check(
         let mut rules = Vec::new();
         for (rule, (a, b)) in job.ruleset.rules.iter().zip(job_groups) {
             let rule_started = Instant::now();
+            if rule.kind == RuleKind::Information {
+                let (findings, summary, checked) =
+                    check_information(models, job, rule, &job.ruleset.ruleset.id);
+                rules.push(RuleResult {
+                    rule: rule.clone(),
+                    findings,
+                    pairs_tested: checked,
+                    duration: rule_started.elapsed(),
+                    information: Some(summary),
+                });
+                let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+                progress(0.1 + 0.9 * n as f32 / total_rules as f32);
+                continue;
+            }
             let resolve = |list: &[(usize, usize)]| -> Vec<usize> {
                 list.iter()
                     .filter_map(|key| index.get(key).copied())
@@ -243,6 +305,7 @@ pub fn run_check(
                 findings,
                 pairs_tested: pairs.len(),
                 duration: rule_started.elapsed(),
+                information: None,
             });
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             progress(0.1 + 0.9 * n as f32 / total_rules as f32);
@@ -250,11 +313,20 @@ pub fn run_check(
         report.rulesets.push(RulesetResult {
             info: job.ruleset.ruleset.clone(),
             rules,
+            models: job.models.clone(),
         });
     }
     report.duration = started.elapsed();
     report
 }
+
+const SPATIAL_CLASSES: &[&str] = &[
+    "IfcProject",
+    "IfcSite",
+    "IfcBuilding",
+    "IfcBuildingStorey",
+    "IfcSpatialZone",
+];
 
 fn select(models: &[CheckModel], scope: &[ModelId], selector: &Selector) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
@@ -264,6 +336,22 @@ fn select(models: &[CheckModel], scope: &[ModelId], selector: &Selector) -> Vec<
         }
         let model = &check_model.model;
         for (e, element) in model.elements.iter().enumerate() {
+            if !check_model.includes(e) {
+                continue;
+            }
+            // Sites, buildings and storeys sometimes carry marker geometry; they
+            // are not built things and only take part when asked for by name.
+            let spatial = SPATIAL_CLASSES
+                .iter()
+                .any(|c| element.ifc_class.eq_ignore_ascii_case(c));
+            if spatial
+                && !selector
+                    .classes
+                    .iter()
+                    .any(|c| c.eq_ignore_ascii_case(&element.ifc_class))
+            {
+                continue;
+            }
             if element.has_geometry() && selector.matches(model, element) {
                 out.push((m, e));
             }
@@ -285,7 +373,7 @@ fn candidate_pairs(
     let margin = match rule.kind {
         RuleKind::Clearance => rule.clearance_mm / 1000.0,
         RuleKind::Duplicates => rule.tolerance_mm / 1000.0,
-        RuleKind::Clash => 0.0,
+        RuleKind::Clash | RuleKind::Information => 0.0,
     };
     let mut sorted_b: Vec<usize> = b.to_vec();
     sorted_b.sort_by(|x, y| {
@@ -364,7 +452,9 @@ fn test_pair(
     let (kind, point, region, magnitude) = match rule.kind {
         RuleKind::Clash => clash(a, b, rule.tolerance_mm / 1000.0)?,
         RuleKind::Clearance => clearance(a, b, rule.clearance_mm / 1000.0)?,
-        RuleKind::Duplicates => duplicate(a, b, models, rule.tolerance_mm / 1000.0)?,
+        RuleKind::Duplicates => duplicate(a, b, rule.tolerance_mm / 1000.0)?,
+        // Checked per element in `check_information`.
+        RuleKind::Information => return None,
     };
     let element = |p: &Prepared| {
         let model = &models[p.model];
@@ -386,7 +476,192 @@ fn test_pair(
         point,
         region,
         magnitude,
+        category: String::new(),
+        details: Vec::new(),
     })
+}
+
+/// Checks every element in the job's models against the rule's information
+/// standard. Returns the findings, the fill rate and the elements checked.
+fn check_information(
+    models: &[CheckModel],
+    job: &CheckJob,
+    rule: &Rule,
+    ruleset_id: &str,
+) -> (Vec<Finding>, InformationSummary, usize) {
+    if let Some(path) = ids_path(&rule.standard) {
+        return match job.ids.iter().find(|(p, _)| p == path) {
+            Some((_, ids)) => check_ids(ids, models, job, rule, ruleset_id),
+            None => {
+                let summary = InformationSummary {
+                    standard: path.to_owned(),
+                    notes: vec![format!("The IDS file {path} is not available.")],
+                    ..InformationSummary::default()
+                };
+                (Vec::new(), summary, 0)
+            }
+        };
+    }
+    let adapted = job
+        .standards
+        .iter()
+        .find(|s| s.standard.id == rule.standard);
+    let Some(standard) = adapted
+        .map(|s| s.as_ref())
+        .or_else(|| builtin_standard(&rule.standard))
+    else {
+        return (Vec::new(), InformationSummary::default(), 0);
+    };
+    let mut summary = InformationSummary {
+        standard: standard.standard.name.clone(),
+        ..InformationSummary::default()
+    };
+    let mut findings = Vec::new();
+    let mut checked = 0;
+    for check_model in models.iter().filter(|m| job.models.contains(&m.id)) {
+        let model = &check_model.model;
+        let level = job
+            .levels
+            .iter()
+            .find(|(id, _)| *id == check_model.id)
+            .map(|(_, l)| l.as_str())
+            .filter(|l| standard.standard.levels.iter().any(|x| x == l))
+            .unwrap_or(&standard.standard.default_level);
+        let facts = ModelFacts::new(model);
+        // (element index, part index, required item indices, where each was found)
+        type Outcome = (usize, usize, Vec<usize>, Vec<Option<String>>);
+        let results: Vec<Outcome> = model
+            .elements
+            .par_iter()
+            .enumerate()
+            .filter_map(|(e, element)| {
+                // Parts of assemblies follow their assembly; spatial nodes are no parts.
+                if !check_model.includes(e)
+                    || !is_checked(element)
+                    || SPATIAL_CLASSES
+                        .iter()
+                        .any(|c| element.ifc_class.eq_ignore_ascii_case(c))
+                    || !rule.a.matches(model, element)
+                {
+                    return None;
+                }
+                let p = standard
+                    .parts
+                    .iter()
+                    .position(|p| p.applies.iter().any(|s| s.matches(model, element)))?;
+                let part = &standard.parts[p];
+                let required: Vec<usize> = part
+                    .levels
+                    .get(level)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|id| standard.items.iter().position(|i| &i.id == id))
+                    .collect();
+                let found = required
+                    .iter()
+                    .map(|&i| standard.found(part, &standard.items[i], model, &facts, element))
+                    .collect();
+                Some((e, p, required, found))
+            })
+            .collect();
+        checked += results.len();
+
+        for (e, p, required, found) in results {
+            let missing: Vec<usize> = required
+                .iter()
+                .zip(&found)
+                .filter(|(_, f)| f.is_none())
+                .map(|(&i, _)| i)
+                .collect();
+            let part = &standard.parts[p];
+            let coverage = match summary.parts.iter().position(|c| c.part == part.id) {
+                Some(i) => &mut summary.parts[i],
+                None => {
+                    summary.parts.push(PartCoverage {
+                        part: part.id.clone(),
+                        name: part.name.clone(),
+                        elements: 0,
+                        complete: 0,
+                        items: Vec::new(),
+                    });
+                    summary.parts.last_mut().expect("just pushed")
+                }
+            };
+            coverage.elements += 1;
+            if missing.is_empty() {
+                coverage.complete += 1;
+            }
+            for (&i, where_found) in required.iter().zip(&found) {
+                let item = &standard.items[i];
+                let row = match coverage.items.iter().position(|c| c.item == item.id) {
+                    Some(r) => &mut coverage.items[r],
+                    None => {
+                        coverage.items.push(ItemCoverage {
+                            item: item.id.clone(),
+                            name: item.name.clone(),
+                            required: 0,
+                            present: 0,
+                            found_in: Vec::new(),
+                        });
+                        coverage.items.last_mut().expect("just pushed")
+                    }
+                };
+                row.required += 1;
+                if let Some(place) = where_found {
+                    row.present += 1;
+                    match row.found_in.iter_mut().find(|(p, _)| p == place) {
+                        Some((_, n)) => *n += 1,
+                        None => row.found_in.push((place.clone(), 1)),
+                    }
+                }
+            }
+            if missing.is_empty() {
+                continue;
+            }
+
+            let element = &model.elements[e];
+            let mut bounds = element.bounds;
+            for part_id in &element.parts {
+                if let Some(child) = model.element(*part_id) {
+                    bounds = bounds.union(&child.bounds);
+                }
+            }
+            if bounds.is_empty() {
+                continue;
+            }
+            let region = bounds.transformed(&check_model.transform.as_dmat4());
+            let found = FindingElement {
+                model: check_model.id,
+                express_id: element.express_id,
+                global_id: element.global_id.clone(),
+                name: element.name.clone(),
+                ifc_class: element.ifc_class.clone(),
+            };
+            findings.push(Finding {
+                id: finding_id(ruleset_id, &rule.id, &element.global_id, &element.global_id),
+                kind: FindingKind::MissingInformation,
+                a: found.clone(),
+                b: found,
+                point: region.center(),
+                region,
+                magnitude: missing.len() as f32,
+                category: part.name.clone(),
+                details: missing
+                    .iter()
+                    .map(|&i| standard.items[i].name.clone())
+                    .collect(),
+            });
+        }
+    }
+    // Keep the standard's order of parts.
+    summary
+        .parts
+        .sort_by_key(|c| standard.parts.iter().position(|p| p.id == c.part));
+    for row in summary.parts.iter_mut().flat_map(|p| &mut p.items) {
+        row.found_in
+            .sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    }
+    (findings, summary, checked)
 }
 
 /// UUID-formatted hash of the rule and the (unordered) element pair.
@@ -567,22 +842,68 @@ fn clearance(a: &Prepared, b: &Prepared, required: f32) -> Option<Detection> {
     Some((FindingKind::Clearance, (p + q) * 0.5, region, best))
 }
 
-fn duplicate(
-    a: &Prepared,
-    b: &Prepared,
-    models: &[CheckModel],
-    tolerance: f32,
-) -> Option<Detection> {
-    let class_a = &models[a.model].model.elements[a.element].ifc_class;
-    let class_b = &models[b.model].model.elements[b.element].ifc_class;
-    if class_a != class_b || a.triangles.len() != b.triangles.len() {
-        return None;
-    }
+/// Most point-triangle tests the surface comparison may spend on one pair.
+const DUPLICATE_SURFACE_BUDGET: usize = 50_000_000;
+
+/// Two elements with the same shape in the same place, whatever their class
+/// or tessellation: the boxes agree within the tolerance, and each surface
+/// lies on the other.
+fn duplicate(a: &Prepared, b: &Prepared, tolerance: f32) -> Option<Detection> {
     let offset = (a.bounds.min - b.bounds.min)
         .abs()
         .max((a.bounds.max - b.bounds.max).abs())
         .max_element();
-    (offset <= tolerance).then(|| (FindingKind::Duplicate, a.bounds.center(), a.bounds, offset))
+    if offset > tolerance {
+        return None;
+    }
+    // Rounding in exported coordinates needs a little room even at 0 mm.
+    let tolerance = tolerance.max(1e-4);
+    let same_vertices =
+        vertices_on_vertices(a, b, tolerance) && vertices_on_vertices(b, a, tolerance);
+    let same_shape = same_vertices
+        || (4 * a.triangles.len() * b.triangles.len() <= DUPLICATE_SURFACE_BUDGET
+            && surface_on_surface(a, b, tolerance)
+            && surface_on_surface(b, a, tolerance));
+    same_shape.then(|| (FindingKind::Duplicate, a.bounds.center(), a.bounds, offset))
+}
+
+/// Every corner of `a` has a corner of `b` within `tolerance`: the fast test
+/// for copies that share their tessellation.
+fn vertices_on_vertices(a: &Prepared, b: &Prepared, tolerance: f32) -> bool {
+    let cell = |p: Vec3| (p / tolerance).floor().as_i64vec3();
+    let mut grid: FxHashMap<glam::I64Vec3, Vec<Vec3>> = FxHashMap::default();
+    for p in b.triangles.iter().flatten() {
+        grid.entry(cell(*p)).or_default().push(*p);
+    }
+    a.triangles.iter().flatten().all(|p| {
+        let c = cell(*p);
+        (-1..=1).any(|x| {
+            (-1..=1).any(|y| {
+                (-1..=1).any(|z| {
+                    grid.get(&(c + glam::I64Vec3::new(x, y, z)))
+                        .is_some_and(|points| points.iter().any(|q| p.distance(*q) <= tolerance))
+                })
+            })
+        })
+    })
+}
+
+/// Every corner and triangle centre of `a` lies within `tolerance` of the
+/// surface of `b`. Catches copies with a different tessellation.
+fn surface_on_surface(a: &Prepared, b: &Prepared, tolerance: f32) -> bool {
+    let on_b = |p: Vec3| {
+        b.triangles.iter().zip(&b.boxes).any(|(t, bounds)| {
+            let grown = Aabb {
+                min: bounds.min - Vec3::splat(tolerance),
+                max: bounds.max + Vec3::splat(tolerance),
+            };
+            grown.contains_point(p) && closest_point_on_triangle(p, t).distance(p) <= tolerance
+        })
+    };
+    a.triangles.iter().all(|t| {
+        let centre = (t[0] + t[1] + t[2]) / 3.0;
+        t.iter().all(|p| on_b(*p)) && on_b(centre)
+    })
 }
 
 #[cfg(test)]
@@ -644,6 +965,69 @@ mod tests {
         let (_, _, _, distance) = clearance(&a, &b, 0.05).expect("too close");
         assert!((distance - 0.03).abs() < 1e-4);
         assert!(clearance(&a, &b, 0.02).is_none());
+    }
+
+    fn from_triangles(triangles: Vec<Triangle>) -> Prepared {
+        let boxes: Vec<Aabb> = triangles.iter().map(triangle_aabb).collect();
+        let bounds = boxes.iter().fold(Aabb::EMPTY, |acc, b| acc.union(b));
+        Prepared {
+            model: 0,
+            element: 0,
+            triangles,
+            boxes,
+            bounds,
+        }
+    }
+
+    /// Each triangle split in four, as another exporter might tessellate it.
+    fn subdivided(triangles: Vec<Triangle>) -> Vec<Triangle> {
+        triangles
+            .into_iter()
+            .flat_map(|[a, b, c]| {
+                let (ab, bc, ca) = ((a + b) / 2.0, (b + c) / 2.0, (c + a) / 2.0);
+                [[a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn identical_boxes_are_duplicates() {
+        let a = prepared(Vec3::ZERO, Vec3::new(4.0, 0.2, 3.0));
+        let b = prepared(Vec3::new(0.002, 0.0, 0.0), Vec3::new(4.002, 0.2, 3.0));
+        let (kind, _, _, offset) = duplicate(&a, &b, 0.005).expect("duplicate");
+        assert_eq!(kind, FindingKind::Duplicate);
+        assert!((offset - 0.002).abs() < 1e-4);
+    }
+
+    #[test]
+    fn retessellated_copy_is_a_duplicate() {
+        let a = prepared(Vec3::ZERO, Vec3::ONE);
+        let b = from_triangles(subdivided(box_triangles(Vec3::ZERO, Vec3::ONE)));
+        assert_ne!(a.triangles.len(), b.triangles.len());
+        assert!(duplicate(&a, &b, 0.005).is_some());
+        assert!(duplicate(&b, &a, 0.005).is_some());
+    }
+
+    #[test]
+    fn same_box_but_different_shape_is_not_a_duplicate() {
+        let cube = prepared(Vec3::ZERO, Vec3::ONE);
+        // An L that fills the same bounding box.
+        let mut l = box_triangles(Vec3::ZERO, Vec3::new(1.0, 0.5, 1.0));
+        l.extend(box_triangles(
+            Vec3::new(0.0, 0.5, 0.0),
+            Vec3::new(0.5, 1.0, 1.0),
+        ));
+        let l = from_triangles(l);
+        assert_eq!(l.bounds.max, Vec3::ONE);
+        assert!(duplicate(&cube, &l, 0.005).is_none());
+        assert!(duplicate(&l, &cube, 0.005).is_none());
+    }
+
+    #[test]
+    fn copy_moved_beyond_tolerance_is_not_a_duplicate() {
+        let a = prepared(Vec3::ZERO, Vec3::ONE);
+        let b = prepared(Vec3::new(0.01, 0.0, 0.0), Vec3::new(1.01, 1.0, 1.0));
+        assert!(duplicate(&a, &b, 0.005).is_none());
     }
 
     #[test]

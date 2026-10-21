@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use glam::DMat4;
 use rustc_hash::FxHashMap;
 
-use crate::{Aabb, Discipline, ElementMesh, LoadStats, PropertySet, SpatialNode};
+use crate::{
+    Aabb, ClassificationRef, Discipline, ElementMesh, LoadStats, PropertySet, PropertyValue,
+    SpatialNode,
+};
 
 /// A building element or other product from an IFC file.
 #[derive(Debug, Clone)]
@@ -26,6 +29,17 @@ pub struct Element {
     pub parts: Vec<u32>,
     /// Express ID and name of the type object (`IfcRelDefinesByType`).
     pub type_object: Option<(u32, String)>,
+    /// IFC class of the type object, e.g. `IfcCableCarrierSegmentType`.
+    pub type_class: Option<String>,
+    /// Direct attributes with a plain value, by schema name (`Name`,
+    /// `ObjectType`, `LongName`, `OverallWidth`, ...).
+    pub attributes: Vec<(String, PropertyValue)>,
+    /// Classification references of the element and of its type.
+    pub classifications: Vec<ClassificationRef>,
+    /// Material names of the element, or of its type when it has none.
+    pub materials: Vec<String>,
+    /// Names of the systems (`IfcSystem`) the element is assigned to.
+    pub systems: Vec<String>,
     /// Property and quantity sets, own sets first, then sets inherited from the type.
     pub property_sets: Vec<u32>,
     /// Indices into [`IfcModel::meshes`].
@@ -37,6 +51,44 @@ pub struct Element {
 impl Element {
     pub fn has_geometry(&self) -> bool {
         !self.meshes.is_empty()
+    }
+
+    /// A direct attribute by schema name, ignoring case.
+    pub fn attribute(&self, name: &str) -> Option<&PropertyValue> {
+        self.attributes
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v)
+    }
+
+    /// The class the element would have in IFC4. IFC2x3 files write many
+    /// building services elements as generic `IfcFlowSegment` and so on, with
+    /// the specific kind only in the type: `IfcCableCarrierSegmentType`
+    /// makes the occurrence an `IfcCableCarrierSegment`.
+    pub fn occurrence_class(&self) -> &str {
+        const GENERIC: &[&str] = &[
+            "IfcFlowSegment",
+            "IfcFlowFitting",
+            "IfcFlowTerminal",
+            "IfcFlowController",
+            "IfcFlowMovingDevice",
+            "IfcFlowStorageDevice",
+            "IfcFlowTreatmentDevice",
+            "IfcEnergyConversionDevice",
+            "IfcDistributionControlElement",
+            "IfcDistributionFlowElement",
+            "IfcDistributionElement",
+            "IfcBuildingElementProxy",
+        ];
+        if GENERIC.contains(&self.ifc_class.as_str())
+            && let Some(type_class) = &self.type_class
+            && let Some(class) = type_class.strip_suffix("Type")
+            && class != self.ifc_class
+            && !class.ends_with("Element")
+        {
+            return class;
+        }
+        &self.ifc_class
     }
 
     /// Display label: the name, or the class when the element is unnamed.

@@ -6,7 +6,7 @@ use eframe::egui::{self, KeyboardShortcut, Modifiers, RichText};
 use eframe::egui_wgpu::RenderState;
 use egui_phosphor::regular as icon;
 use glam::Vec3;
-use opencheck_core::check::CheckModel;
+use opencheck_core::check::{CheckModel, FindingElement, Severity};
 use opencheck_core::project::{
     self, ModelEntry, ModelSource, PROJECT_EXTENSION, ProjectDocuments, ProjectModel,
 };
@@ -15,13 +15,14 @@ use opencheck_core::{Aabb, Federation, IfcModel, ModelId};
 use crate::camera::Camera;
 use crate::checking::{Checking, Decision};
 use crate::issues::{
-    ComponentRole, Issue, IssueCamera, IssueComponent, IssueSource, IssueStatus, Issues, new_guid,
+    ComponentRole, Issue, IssueCamera, IssueComponent, IssueElement, IssueSection, IssueSource,
+    IssueStatus, Issues, ModelRevision, RunContext, new_guid,
 };
 use crate::jobs::{JobResult, Jobs, SaveRequest};
 use crate::measure::MeasureTool;
 use crate::render::SceneGpu;
 use crate::ruleset_manager::{self, ManagerState};
-use crate::scene::{ElementRef, SectionPlane, ViewState};
+use crate::scene::{ElementRef, Focus, SectionPlane, ViewState};
 use crate::session::{self, ModelRecord, Session};
 use crate::{checking_ui, panels, results_ui, theme, viewport};
 
@@ -41,6 +42,17 @@ pub struct Navigation {
     pub last_pointer: Option<egui::Pos2>,
     /// Aspect ratio of the last drawn viewport, used by keyboard commands.
     pub aspect: f32,
+}
+
+/// Where findings go when they become issues.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IssueTarget {
+    /// One issue holding all of them.
+    Bundle,
+    /// One issue per finding.
+    Separate,
+    /// Added to an issue that already exists.
+    Existing(String),
 }
 
 /// Something that would discard unsaved changes, waiting for the user's answer.
@@ -67,12 +79,33 @@ pub struct OpenCheckApp {
     pub checking: Checking,
     pub manager: ManagerState,
     pub issues: Issues,
+    /// Connection to a BCF server (Dalux) for sharing issues.
+    pub bcf: crate::bcf_live::BcfLive,
+    /// Pictures being taken for a BCF file or report.
+    pub capture: Option<crate::export::Capture>,
+    /// Where the 3D view was drawn last frame, for pictures.
+    pub viewport_rect: egui::Rect,
+    /// The report settings window is open.
+    pub report_window: bool,
+    /// Issues about to be created, waiting for their fields in the dialog.
+    pub issue_draft: Option<crate::issue_dialog::IssueDraft>,
+    /// "Edit view": the working area being drawn in a top view.
+    pub area_edit: Option<crate::area_edit::AreaEdit>,
+    /// F12: frame time and display scale in the status bar, for diagnosing
+    /// slow frames (e.g. when moving between screens with different scaling).
+    frame_stats: bool,
+    /// CPU time of the last frame in milliseconds, slowest of the last second.
+    frame_ms: (f32, f32, f64),
     /// Point of the finding or issue under review, for the marker in the 3D view.
     pub focus_marker: Option<Vec3>,
     pub tab: Tab,
     pub jobs: Jobs,
     pub session: Session,
     pub errors: Vec<String>,
+    /// Short messages that fade by themselves; the time is set when first shown.
+    pub notices: Vec<(String, Option<f64>)>,
+    /// A model was updated: run the check again once loading has finished.
+    pub recheck_after_update: bool,
     pub tree_filter: String,
     pub property_filter: String,
     render_state: Option<RenderState>,
@@ -86,7 +119,7 @@ pub struct OpenCheckApp {
 
 impl OpenCheckApp {
     pub fn new(cc: &eframe::CreationContext<'_>, files: Vec<PathBuf>) -> Self {
-        theme::install(&cc.egui_ctx);
+        theme::install(&cc.egui_ctx, theme::saved_dark());
         let render_state = cc.wgpu_render_state.clone();
         if let Some(rs) = &render_state {
             SceneGpu::install(rs);
@@ -103,11 +136,21 @@ impl OpenCheckApp {
             checking: Checking::default(),
             manager: ManagerState::default(),
             issues: Issues::default(),
+            bcf: crate::bcf_live::BcfLive::default(),
+            capture: None,
+            viewport_rect: egui::Rect::NOTHING,
+            report_window: false,
+            issue_draft: None,
+            area_edit: None,
+            frame_stats: false,
+            frame_ms: (0.0, 0.0, 0.0),
             focus_marker: None,
             tab: Tab::Model,
             jobs: Jobs::default(),
             session: Session::default(),
             errors: Vec::new(),
+            notices: Vec::new(),
+            recheck_after_update: false,
             tree_filter: String::new(),
             property_filter: String::new(),
             render_state,
@@ -117,6 +160,7 @@ impl OpenCheckApp {
             allow_close: false,
             window_title: String::new(),
         };
+        app.checking.ensure_standard();
         for file in files {
             app.open_path(file, &cc.egui_ctx);
         }
@@ -129,7 +173,7 @@ impl OpenCheckApp {
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
         match extension.as_str() {
-            "ifc" => self.jobs.load_file(path, ctx),
+            "ifc" => self.jobs.load_file(path, None, ctx),
             PROJECT_EXTENSION => self.request(PendingAction::OpenProject(Some(path)), ctx),
             _ => self.errors.push(format!(
                 "{} is not an IFC file or OpenCheck project",
@@ -145,7 +189,7 @@ impl OpenCheckApp {
             .pick_files()
         {
             for path in paths {
-                self.jobs.load_file(path, ctx);
+                self.jobs.load_file(path, None, ctx);
             }
         }
     }
@@ -198,9 +242,11 @@ impl OpenCheckApp {
         self.measure = MeasureTool::default();
         self.session = Session::default();
         self.checking = Checking::default();
+        self.checking.ensure_standard();
         self.issues = Issues::default();
         self.focus_marker = None;
         self.scene_bounds = Aabb::EMPTY;
+        self.recheck_after_update = false;
     }
 
     /// Saves to the current file, or asks for one. `then` runs after a successful save.
@@ -269,6 +315,7 @@ impl OpenCheckApp {
                 ids,
                 models,
                 rulesets: self.checking.ruleset_files(),
+                requirements: self.checking.requirement_files(),
                 documents,
                 created: self.session.created.clone(),
             },
@@ -284,9 +331,13 @@ impl OpenCheckApp {
                 JobResult::ModelLoaded {
                     source,
                     entry,
+                    replaces,
                     result,
                 } => match result {
-                    Ok(model) => self.add_model(*model, source, entry),
+                    Ok(model) => match replaces {
+                        Some(old) => self.replace_model(old, *model, source),
+                        None => self.add_model(*model, source, entry),
+                    },
                     Err(message) => self.errors.push(format!(
                         "Could not open {}: {message}",
                         source_label(&source)
@@ -296,10 +347,14 @@ impl OpenCheckApp {
                     Ok(contents) => {
                         self.session.path = Some(path);
                         self.session.created = Some(contents.manifest.created);
-                        let errors = self
-                            .checking
-                            .load(contents.rulesets, contents.documents.checking);
+                        let errors = self.checking.load(
+                            contents.rulesets,
+                            contents.requirements,
+                            contents.documents.checking,
+                        );
                         self.errors.extend(errors);
+                        // Older projects get the standard rulesets too.
+                        self.checking.ensure_standard();
                         self.issues = Issues::load(contents.documents.issues);
                         self.session.pending_view = contents.documents.view;
                         self.session.dirty = false;
@@ -311,6 +366,7 @@ impl OpenCheckApp {
                 },
                 JobResult::ProjectModelsDone => {
                     self.checking.apply_pending(&self.federation.ids());
+                    self.apply_area();
                     self.checking.stale = false;
                     if let Some(view) = self.session.pending_view.take() {
                         session::apply_view(
@@ -347,6 +403,7 @@ impl OpenCheckApp {
                 },
                 JobResult::CheckDone { report } => {
                     self.checking.finish_run(*report);
+                    self.evaluate_issues();
                     match self.checking.selected.clone() {
                         Some(id) if self.tab == Tab::Checking => self.show_finding(&id, false),
                         _ => self.clear_finding_focus(),
@@ -402,8 +459,205 @@ impl OpenCheckApp {
             self.set_model_visible(id, false);
         }
         self.scene_bounds = self.federation.bounds();
+        if self.checking.area.is_some() {
+            self.apply_area();
+        }
         if first {
             self.camera.home(&self.scene_bounds, self.nav.aspect);
+        }
+    }
+
+    pub fn notify(&mut self, message: String) {
+        self.notices.push((message, None));
+    }
+
+    /// Asks for a newer version of a model's IFC file and loads it in its place.
+    pub fn update_model_dialog(&mut self, id: ModelId, ctx: &egui::Context) {
+        let name = self
+            .federation
+            .get(id)
+            .map(|m| m.short_name.clone())
+            .unwrap_or_default();
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title(format!("Update {name}: choose the new IFC file"))
+            .add_filter("IFC model", &["ifc", "IFC"])
+            .pick_file()
+        {
+            self.jobs.load_file(path, Some(id), ctx);
+        }
+    }
+
+    /// Swaps in a new version of a model. Name, discipline, visibility and
+    /// the user's picks (by GlobalId) carry over; the revision goes up.
+    fn replace_model(&mut self, id: ModelId, mut model: IfcModel, source: ModelSource) {
+        let (Some(record), Some(old)) = (
+            self.session.records.get(&id).cloned(),
+            self.federation.get(id),
+        ) else {
+            self.add_model(model, source, None);
+            return;
+        };
+        if record.entry.sha256 == model.content_hash {
+            let message = format!(
+                "{} is unchanged: the new file is identical to the loaded version.",
+                old.short_name
+            );
+            self.notify(message);
+            return;
+        }
+        model.short_name = old.short_name.clone();
+        model.discipline = old.discipline;
+
+        // Picks on the old model, by GlobalId, to find them again in the new one.
+        let global_ids = |refs: Vec<ElementRef>| -> Vec<String> {
+            refs.into_iter()
+                .filter(|r| r.model == id)
+                .filter_map(|r| old.element(r.express_id).map(|e| e.global_id.clone()))
+                .collect()
+        };
+        let hidden = global_ids(self.view.hidden.iter().copied().collect());
+        let isolated = self
+            .view
+            .isolated
+            .as_ref()
+            .map(|set| global_ids(set.iter().copied().collect()));
+        let selection = global_ids(self.view.selection.clone());
+        self.view.hidden.retain(|r| r.model != id);
+        if let Some(set) = &mut self.view.isolated {
+            set.retain(|r| r.model != id);
+        }
+        self.view.selection.retain(|r| r.model != id);
+        let visible = self.view.model(id).is_none_or(|m| m.visible);
+        if self
+            .view
+            .focus
+            .as_ref()
+            .is_some_and(|f| f.involves_model(id))
+        {
+            self.clear_finding_focus();
+        }
+
+        let revision = record.entry.revision + 1;
+        let name = model.short_name.clone();
+        self.federation.replace(id, model);
+        self.measure.edges.forget_model(id);
+        self.view.remove_model(id);
+        let transform = self
+            .federation
+            .model_transform(id)
+            .expect("model was just replaced");
+        let model = self.federation.get(id).expect("model was just replaced");
+        let chunks = self.view.add_model(id, model, transform);
+        if let Some(rs) = &self.render_state {
+            SceneGpu::upload_model(rs, id, &chunks);
+        }
+        let find = |gid: &String| {
+            model.element_by_global_id(gid).map(|e| ElementRef {
+                model: id,
+                express_id: e.express_id,
+            })
+        };
+        self.view.hidden.extend(hidden.iter().filter_map(find));
+        if let (Some(set), Some(ids)) = (&mut self.view.isolated, isolated) {
+            set.extend(ids.iter().filter_map(find));
+        }
+        self.view
+            .selection
+            .extend(selection.iter().filter_map(find));
+        let content_hash = model.content_hash.clone();
+        if !visible {
+            self.set_model_visible(id, false);
+        }
+
+        let entry = self
+            .session
+            .records
+            .get_mut(&id)
+            .map(|r| &mut r.entry)
+            .expect("record checked above");
+        entry.revision = revision;
+        entry.sha256 = content_hash;
+        entry.updated = project::now_rfc3339();
+        if let ModelSource::File(path) = &source {
+            entry.source_path = Some(path.display().to_string());
+        }
+        if let Some(r) = self.session.records.get_mut(&id) {
+            r.source = source;
+        }
+        self.scene_bounds = self.federation.bounds();
+        if self.checking.area.is_some() {
+            self.apply_area();
+        }
+        self.session.dirty = true;
+        self.checking.stale = true;
+        // Re-check so issues learn what the update solved.
+        self.recheck_after_update = self.checking.report.is_some();
+        self.notify(format!("{name} updated to revision {revision}."));
+    }
+
+    /// Marks issue findings that a model update made disappear as solved,
+    /// and reopens them if they come back.
+    fn evaluate_issues(&mut self) {
+        let Some(report) = self.checking.report.as_ref() else {
+            return;
+        };
+        let model_id = |name: &str| {
+            self.federation
+                .iter()
+                .find(|(_, m)| m.short_name == name)
+                .map(|(id, _)| id)
+        };
+        let revision = |name: &str| {
+            model_id(name)
+                .and_then(|id| self.session.records.get(&id))
+                .map(|r| r.entry.revision)
+        };
+        // Was this rule run on every model the finding involved?
+        let checked = |source: &IssueSource| {
+            report.rulesets.iter().any(|rs| {
+                let same_ruleset = if source.ruleset_id.is_empty() {
+                    rs.info.name == source.ruleset
+                } else {
+                    rs.info.id == source.ruleset_id
+                };
+                same_ruleset
+                    && rs.rules.iter().any(|r| {
+                        if source.rule_id.is_empty() {
+                            r.rule.name == source.rule
+                        } else {
+                            r.rule.id == source.rule_id
+                        }
+                    })
+                    && !source.revisions.is_empty()
+                    && source
+                        .revisions
+                        .iter()
+                        .all(|m| model_id(&m.model).is_some_and(|id| rs.models.contains(&id)))
+            })
+        };
+        let present = |finding: &str| self.checking.find(finding).is_some();
+        let outcome = self.issues.apply_run(
+            &RunContext {
+                present: &present,
+                checked: &checked,
+                revision: &revision,
+            },
+            &project::now_rfc3339(),
+        );
+        if outcome.solved > 0 {
+            self.notify(format!(
+                "{} issue findings were solved by model updates.",
+                outcome.solved
+            ));
+        }
+        if outcome.reopened > 0 {
+            self.notify(format!(
+                "{} issue findings came back and were reopened.",
+                outcome.reopened
+            ));
+        }
+        if outcome.solved + outcome.reopened > 0 {
+            self.session.dirty = true;
         }
     }
 
@@ -414,7 +668,8 @@ impl OpenCheckApp {
         if self
             .view
             .focus
-            .is_some_and(|(a, b)| a.model == id || b.model == id)
+            .as_ref()
+            .is_some_and(|f| f.involves_model(id))
         {
             self.clear_finding_focus();
         }
@@ -425,6 +680,9 @@ impl OpenCheckApp {
             SceneGpu::remove_model(rs, id);
         }
         self.scene_bounds = self.federation.bounds();
+        if self.checking.area.is_some() {
+            self.apply_area();
+        }
     }
 
     pub fn set_model_visible(&mut self, id: ModelId, visible: bool) {
@@ -499,6 +757,10 @@ impl OpenCheckApp {
     }
 
     pub fn show_all(&mut self) {
+        // While reviewing a clash, "everything" includes the model around it.
+        if self.view.focus.is_some() {
+            self.view.show_context = true;
+        }
         self.view.hidden.clear();
         self.view.isolated = None;
         self.view.storey_filter = None;
@@ -506,13 +768,27 @@ impl OpenCheckApp {
     }
 
     pub fn toggle_xray(&mut self) {
-        self.view.xray = !self.view.xray;
+        if self.view.focus.is_some() {
+            self.view.show_context = !self.view.show_context;
+        } else {
+            self.view.xray = !self.view.xray;
+        }
         self.view.modes_dirty = true;
     }
 
     /// Cuts the model just above the top of the selection, or through the
     /// middle of the view when nothing is selected.
     pub fn section_at_selection(&mut self) {
+        // Reviewing a clash: cut a little above it, so it can be seen from above.
+        if self.view.focus.is_some()
+            && let Some(point) = self.focus_marker
+        {
+            self.view.section = Some(SectionPlane {
+                height: point.z + 0.25,
+                anchor: point,
+            });
+            return;
+        }
         let selected = self.view.bounds_of(&self.view.selection);
         let (height, anchor) = if selected.is_empty() {
             let bounds = self.visible_or_scene_bounds();
@@ -560,23 +836,27 @@ impl OpenCheckApp {
                 .rulesets
                 .iter()
                 .filter(|r| r.ruleset.ruleset.id == id)
-                .map(|r| opencheck_core::check::CheckJob {
-                    ruleset: r.ruleset.clone(),
-                    models: r.models.clone().unwrap_or_else(|| ids.clone()),
-                })
+                .map(|r| self.checking.job(r, &ids))
                 .collect(),
             None => self.checking.jobs(&ids),
         };
         if jobs.is_empty() {
             return;
         }
+        let origin = self.federation.origin();
+        let area = self.checking.area;
         let models: Vec<CheckModel> = ids
             .iter()
             .filter_map(|id| {
+                let model = self.federation.shared(*id)?;
+                let transform = self.federation.model_transform(*id)?;
+                // Only the working area takes part.
+                let mask = area.map(|a| std::sync::Arc::new(a.mask(&model, &transform, origin)));
                 Some(CheckModel {
                     id: *id,
-                    model: self.federation.shared(*id)?,
-                    transform: self.federation.model_transform(*id)?,
+                    model,
+                    transform,
+                    mask,
                 })
             })
             .collect();
@@ -590,27 +870,71 @@ impl OpenCheckApp {
         self.show_finding(id, true);
     }
 
+    /// The a- and b-side elements of some findings, and the region they cover.
+    fn focus_for<'a>(&self, ids: impl IntoIterator<Item = &'a String>) -> (Focus, Aabb) {
+        let mut focus = Focus::default();
+        let mut region = Aabb::EMPTY;
+        for id in ids {
+            if let Some((_, _, f)) = self.checking.find(id) {
+                focus.a.insert(ElementRef {
+                    model: f.a.model,
+                    express_id: f.a.express_id,
+                });
+                focus.b.insert(ElementRef {
+                    model: f.b.model,
+                    express_id: f.b.express_id,
+                });
+                region = region.union(&f.region);
+            }
+        }
+        (focus, region)
+    }
+
+    /// Highlights every ticked finding and the one under review, without
+    /// moving the camera.
+    pub fn refresh_finding_focus(&mut self) {
+        let mut ids = self.checking.marked.clone();
+        if let Some(selected) = &self.checking.selected
+            && !ids.contains(selected)
+        {
+            ids.push(selected.clone());
+        }
+        let (focus, _) = self.focus_for(&ids);
+        self.view.focus = (!focus.a.is_empty()).then_some(focus);
+        self.focus_marker = self
+            .checking
+            .selected
+            .as_ref()
+            .and_then(|id| self.checking.find(id))
+            .map(|(_, _, f)| f.point);
+        self.view.modes_dirty = true;
+    }
+
+    /// Highlights the given findings and frames them together.
+    pub fn show_group(&mut self, ids: &[String]) {
+        let (focus, region) = self.focus_for(ids);
+        if focus.a.is_empty() {
+            return;
+        }
+        self.checking.selected = None;
+        self.issues.selected = None;
+        self.view.focus = Some(focus);
+        self.focus_marker = None;
+        self.view.selection.clear();
+        self.view.modes_dirty = true;
+        self.camera.fit(&finding_frame(&region), self.nav.aspect);
+    }
+
     pub fn show_finding(&mut self, id: &str, move_camera: bool) {
         let Some((_, _, finding)) = self.checking.find(id) else {
             self.clear_finding_focus();
             return;
         };
-        let a = ElementRef {
-            model: finding.a.model,
-            express_id: finding.a.express_id,
-        };
-        let b = ElementRef {
-            model: finding.b.model,
-            express_id: finding.b.express_id,
-        };
-        let point = finding.point;
         let frame = finding_frame(&finding.region);
         self.checking.selected = Some(id.to_owned());
         self.issues.selected = None;
-        self.view.focus = Some((a, b));
-        self.focus_marker = Some(point);
         self.view.selection.clear();
-        self.view.modes_dirty = true;
+        self.refresh_finding_focus();
         if move_camera {
             self.camera.fit(&frame, self.nav.aspect);
         }
@@ -629,13 +953,13 @@ impl OpenCheckApp {
 
     /// The point of the finding or issue under review, for the marker in the 3D view.
     pub fn focus_point(&self) -> Option<Vec3> {
-        self.view.focus?;
+        self.view.focus.as_ref()?;
         self.focus_marker
     }
 
-    /// Turns findings into selected issues, one issue per finding, and marks
-    /// them accepted: an issue is a problem someone has to handle.
-    pub fn add_issues(&mut self, finding_ids: &[String]) {
+    /// Turns findings into issues and marks them accepted: an issue is a
+    /// problem someone has to handle. Returns the issue they went into.
+    pub fn add_issues(&mut self, finding_ids: &[String], target: IssueTarget) -> Option<String> {
         let origin = self.federation.origin();
         let model_name = |id| {
             self.federation
@@ -643,74 +967,231 @@ impl OpenCheckApp {
                 .map(|m| m.short_name.clone())
                 .unwrap_or_default()
         };
-        let mut added = Vec::new();
-        for id in finding_ids {
-            if self.issues.for_finding(id).is_some() {
-                continue;
-            }
-            let Some((ruleset, rule, f)) = self.checking.find(id) else {
-                continue;
-            };
-            // The viewpoint: the same framing the finding gets when selected.
-            let mut camera = self.camera;
-            camera.fit(&finding_frame(&f.region), self.nav.aspect);
-            let component = |e: &opencheck_core::check::FindingElement, role| IssueComponent {
-                global_id: e.global_id.clone(),
-                name: e.name.clone(),
-                ifc_class: e.ifc_class.clone(),
-                model: model_name(e.model),
-                role,
-            };
-            let now = project::now_rfc3339();
-            let label = |e: &opencheck_core::check::FindingElement| {
-                if e.name.is_empty() {
-                    e.ifc_class.clone()
-                } else {
-                    e.name.clone()
+        // The model versions a finding was seen in.
+        let model_revisions = |ids: &[ModelId]| {
+            let mut revisions: Vec<ModelRevision> = Vec::new();
+            for id in ids {
+                let model = model_name(*id);
+                if revisions.iter().all(|r| r.model != model) {
+                    revisions.push(ModelRevision {
+                        model,
+                        revision: self.session.records.get(id).map_or(1, |r| r.entry.revision),
+                    });
                 }
-            };
-            added.push(Issue {
-                guid: new_guid(id),
-                title: format!("{} vs {}", label(&f.a), label(&f.b)),
-                description: String::new(),
-                status: IssueStatus::Open,
-                priority: rule.rule.severity,
-                created: now.clone(),
-                modified: now,
-                labels: vec![f.kind.label().to_owned()],
-                source: Some(IssueSource {
+            }
+            revisions
+        };
+        let component = |e: &FindingElement, role| IssueComponent {
+            global_id: e.global_id.clone(),
+            name: e.name.clone(),
+            ifc_class: e.ifc_class.clone(),
+            model: model_name(e.model),
+            role,
+            tag: self
+                .federation
+                .get(e.model)
+                .and_then(|m| m.element(e.express_id))
+                .map(crate::issues::element_id)
+                .unwrap_or_default(),
+        };
+        struct Entry {
+            source: IssueSource,
+            components: Vec<IssueComponent>,
+            region: Aabb,
+            severity: Severity,
+            classes: (String, String),
+            title: String,
+            /// Missing information about one element, not a pair.
+            single: bool,
+            /// Disciplines of the models the elements come from.
+            disciplines: Vec<opencheck_core::Discipline>,
+        }
+        let entries: Vec<Entry> = finding_ids
+            .iter()
+            .filter(|id| self.issues.for_finding(id).is_none())
+            .filter_map(|id| self.checking.find(id))
+            .map(|(ruleset, rule, f)| Entry {
+                source: IssueSource {
                     finding: f.id.clone(),
                     ruleset: ruleset.info.name.clone(),
                     rule: rule.rule.name.clone(),
                     kind: f.kind.label().to_owned(),
                     magnitude_mm: f.magnitude * 1000.0,
-                }),
-                components: vec![
-                    component(&f.a, ComponentRole::A),
-                    component(&f.b, ComponentRole::B),
-                ],
-                point: (origin + f.point.as_dvec3()).to_array(),
-                camera: Some(IssueCamera {
+                    ruleset_id: ruleset.info.id.clone(),
+                    rule_id: rule.rule.id.clone(),
+                    revisions: model_revisions(&[f.a.model, f.b.model]),
+                    solved_by_update: None,
+                    details: f.details.clone(),
+                },
+                components: if f.is_single() {
+                    vec![component(&f.a, ComponentRole::A)]
+                } else {
+                    vec![
+                        component(&f.a, ComponentRole::A),
+                        component(&f.b, ComponentRole::B),
+                    ]
+                },
+                region: f.region,
+                severity: rule.rule.severity,
+                classes: if f.is_single() {
+                    (f.category.clone(), f.category.clone())
+                } else {
+                    (f.a.ifc_class.clone(), f.b.ifc_class.clone())
+                },
+                title: if f.is_single() {
+                    format!(
+                        "{}: missing {}",
+                        results_ui::element_label(&f.a),
+                        f.details.join(", ")
+                    )
+                } else {
+                    format!(
+                        "{} vs {}",
+                        results_ui::element_label(&f.a),
+                        results_ui::element_label(&f.b)
+                    )
+                },
+                single: f.is_single(),
+                disciplines: {
+                    let mut list = Vec::new();
+                    for model in [f.a.model, f.b.model] {
+                        if let Some(m) = self.federation.get(model)
+                            && !list.contains(&m.discipline)
+                        {
+                            list.push(m.discipline);
+                        }
+                    }
+                    list
+                },
+            })
+            .collect();
+        if entries.is_empty() {
+            return None;
+        }
+        for e in &entries {
+            self.checking
+                .decide(&e.source.finding, Some(Decision::Accepted));
+        }
+        self.session.dirty = true;
+
+        // The viewpoint frames every finding in the issue.
+        let viewpoint = |entries: &[&Entry]| {
+            let region = entries
+                .iter()
+                .fold(Aabb::EMPTY, |acc, e| acc.union(&e.region));
+            let mut camera = self.camera;
+            camera.fit(&finding_frame(&region), self.nav.aspect);
+            (
+                (origin + region.center().as_dvec3()).to_array(),
+                IssueCamera {
                     eye: (origin + camera.eye.as_dvec3()).to_array(),
                     yaw: camera.yaw,
                     pitch: camera.pitch,
-                }),
-            });
-        }
-        if added.is_empty() {
-            return;
-        }
-        for issue in &added {
-            if let Some(source) = &issue.source {
-                self.checking
-                    .decide(&source.finding, Some(Decision::Accepted));
+                },
+            )
+        };
+        // What the reviewer is looking at right now: camera, section, context.
+        let current = self.capture_issue_view();
+        let make = |entries: &[&Entry], use_current: bool| {
+            let (point, framed) = viewpoint(entries);
+            let first = entries[0];
+            let same_classes = entries.iter().all(|e| e.classes == first.classes);
+            let title = match (entries.len(), same_classes) {
+                (1, _) => first.title.clone(),
+                (n, true) if first.single => {
+                    format!("{n} elements: {} missing information", first.classes.0)
+                }
+                (n, true) => format!(
+                    "{n} findings: {} vs {}",
+                    results_ui::component_kind(&first.classes.0),
+                    results_ui::component_kind(&first.classes.1)
+                ),
+                (n, false) => format!("{n} findings: {} and others", first.title),
+            };
+            let mut labels: Vec<String> = entries.iter().map(|e| e.source.kind.clone()).collect();
+            labels.sort();
+            labels.dedup();
+            let now = project::now_rfc3339();
+            let mut issue = Issue {
+                guid: new_guid(&first.source.finding),
+                title,
+                description: String::new(),
+                status: IssueStatus::Open,
+                priority: entries
+                    .iter()
+                    .map(|e| e.severity)
+                    .min()
+                    .unwrap_or(first.severity),
+                created: now.clone(),
+                modified: now,
+                labels,
+                findings: entries.iter().map(|e| e.source.clone()).collect(),
+                source: None,
+                components: Vec::new(),
+                point,
+                camera: Some(framed),
+                section: None,
+                show_context: false,
+                hidden: Vec::new(),
+                solved_by_update: false,
+                responsible: Vec::new(),
+                assigned_to: String::new(),
+                bcf: None,
+            };
+            for e in entries {
+                issue.add_responsible(e.disciplines.iter().copied());
             }
-        }
-        self.issues.list.extend(added);
-        self.session.dirty = true;
+            if use_current {
+                current.apply_to(&mut issue);
+            }
+            issue.add_components(entries.iter().flat_map(|e| e.components.iter().cloned()));
+            issue
+        };
+
+        let refs: Vec<&Entry> = entries.iter().collect();
+        let guid = match target {
+            IssueTarget::Bundle => {
+                let issue = make(&refs, true);
+                let guid = issue.guid.clone();
+                self.issues.list.push(issue);
+                guid
+            }
+            IssueTarget::Separate => {
+                let mut last = String::new();
+                // One issue per finding: each gets its own framing, unless there is
+                // only one, which is what is on screen.
+                let single = refs.len() == 1;
+                for e in &refs {
+                    let issue = make(std::slice::from_ref(e), single);
+                    last = issue.guid.clone();
+                    self.issues.list.push(issue);
+                }
+                last
+            }
+            IssueTarget::Existing(guid) => {
+                let issue = self.issues.get_mut(&guid)?;
+                for e in &refs {
+                    issue.findings.push(e.source.clone());
+                    issue.add_components(e.components.iter().cloned());
+                    issue.add_responsible(e.disciplines.iter().copied());
+                    issue.priority = issue.priority.min(e.severity);
+                }
+                if issue.solved_by_update {
+                    // New, unsolved findings: the issue is open again.
+                    issue.solved_by_update = false;
+                    issue.status = IssueStatus::Open;
+                }
+                issue.touch();
+                guid
+            }
+        };
+        // The ticked findings are dealt with now.
+        self.checking.marked.clear();
+        self.refresh_finding_focus();
+        Some(guid)
     }
 
-    /// Restores an issue's viewpoint and shows its components.
+    /// Restores an issue's viewpoint and shows all of its components.
     pub fn show_issue(&mut self, guid: &str) {
         let Some(issue) = self.issues.get(guid).cloned() else {
             return;
@@ -733,23 +1214,18 @@ impl OpenCheckApp {
             }
             fallback
         };
-        let a = issue
-            .components
-            .iter()
-            .find(|c| c.role == ComponentRole::A)
-            .and_then(resolve);
-        let b = issue
-            .components
-            .iter()
-            .find(|c| c.role == ComponentRole::B)
-            .and_then(resolve);
+        let mut focus = Focus::default();
+        for c in &issue.components {
+            if let Some(element) = resolve(c) {
+                match c.role {
+                    ComponentRole::A => focus.a.insert(element),
+                    ComponentRole::B => focus.b.insert(element),
+                };
+            }
+        }
         self.issues.selected = Some(guid.to_owned());
-        self.checking.selected = issue.source.as_ref().map(|s| s.finding.clone());
-        self.view.focus = match (a, b) {
-            (Some(a), Some(b)) => Some((a, b)),
-            (Some(x), None) | (None, Some(x)) => Some((x, x)),
-            (None, None) => None,
-        };
+        self.checking.selected = None;
+        self.view.focus = (!focus.a.is_empty() || !focus.b.is_empty()).then_some(focus);
         self.focus_marker = Some((glam::DVec3::from_array(issue.point) - origin).as_vec3());
         self.view.selection.clear();
         self.view.modes_dirty = true;
@@ -757,6 +1233,66 @@ impl OpenCheckApp {
             self.camera.eye = (glam::DVec3::from_array(c.eye) - origin).as_vec3();
             self.camera.yaw = c.yaw;
             self.camera.pitch = c.pitch;
+        }
+        // The rest of the viewpoint: section, context and hidden elements.
+        self.view.section = issue.section.map(|s| SectionPlane {
+            height: (s.height - origin.z) as f32,
+            anchor: (glam::DVec3::from_array(s.anchor) - origin).as_vec3(),
+        });
+        self.view.show_context = issue.show_context;
+        self.view.isolated = None;
+        self.view.hidden = issue
+            .hidden
+            .iter()
+            .filter_map(|h| {
+                resolve(&IssueComponent {
+                    global_id: h.global_id.clone(),
+                    name: String::new(),
+                    ifc_class: String::new(),
+                    model: h.model.clone(),
+                    role: ComponentRole::A,
+                    tag: String::new(),
+                })
+            })
+            .collect();
+    }
+
+    /// The current view as an issue viewpoint.
+    fn capture_issue_view(&self) -> IssueView {
+        let origin = self.federation.origin();
+        IssueView {
+            camera: IssueCamera {
+                eye: (origin + self.camera.eye.as_dvec3()).to_array(),
+                yaw: self.camera.yaw,
+                pitch: self.camera.pitch,
+            },
+            section: self.view.section.map(|s| IssueSection {
+                height: origin.z + s.height as f64,
+                anchor: (origin + s.anchor.as_dvec3()).to_array(),
+            }),
+            show_context: self.view.show_context,
+            hidden: self
+                .view
+                .hidden
+                .iter()
+                .filter_map(|e| {
+                    let model = self.federation.get(e.model)?;
+                    Some(IssueElement {
+                        global_id: model.element(e.express_id)?.global_id.clone(),
+                        model: model.short_name.clone(),
+                    })
+                })
+                .collect(),
+        }
+    }
+
+    /// Stores what is on screen now as the issue's viewpoint.
+    pub fn update_issue_view(&mut self, guid: &str) {
+        let view = self.capture_issue_view();
+        if let Some(issue) = self.issues.get_mut(guid) {
+            view.apply_to(issue);
+            issue.touch();
+            self.session.dirty = true;
         }
     }
 
@@ -860,6 +1396,18 @@ impl OpenCheckApp {
                 ui.close();
             }
             ui.separator();
+            ui.menu_button(format!("{}  Theme", icon::PALETTE), |ui| {
+                ui.set_min_width(180.0);
+                let dark = theme::is_dark();
+                for (label, value) in [("Light (Grafit)", false), ("Dark", true)] {
+                    if ui.selectable_label(dark == value, label).clicked() {
+                        theme::set_dark(&ctx, value);
+                        theme::save_dark(value);
+                        ui.close();
+                    }
+                }
+            });
+            ui.separator();
             if item(ui, icon::SIGN_OUT, "Exit", None) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 ui.close();
@@ -871,17 +1419,16 @@ impl OpenCheckApp {
         egui::Panel::top("top_bar")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::PANEL)
+                    .fill(theme::panel())
                     .inner_margin(egui::Margin::symmetric(12, 8))
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+                    .stroke(egui::Stroke::new(1.0, theme::border())),
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(format!("{} OpenCheck", icon::CUBE_FOCUS))
-                            .size(17.0)
-                            .strong()
-                            .color(theme::ACCENT),
+                            .size(15.0)
+                            .family(theme::bold()),
                     );
                     ui.add_space(12.0);
                     self.file_menu(ui);
@@ -892,7 +1439,7 @@ impl OpenCheckApp {
                         let selected = self.tab == tab;
                         let text = RichText::new(label).size(14.5);
                         let text = if selected {
-                            text.strong().color(theme::ACCENT)
+                            text.family(theme::bold())
                         } else {
                             text
                         };
@@ -903,10 +1450,10 @@ impl OpenCheckApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let add = egui::Button::new(
                             RichText::new(format!("{}  Add models", icon::PLUS))
-                                .color(egui::Color32::WHITE)
+                                .color(theme::on_accent())
                                 .strong(),
                         )
-                        .fill(theme::ACCENT);
+                        .fill(theme::accent());
                         if ui
                             .add(add)
                             .on_hover_text("Open one or more IFC files")
@@ -923,9 +1470,9 @@ impl OpenCheckApp {
         egui::Panel::bottom("status_bar")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::SURFACE)
+                    .fill(theme::surface())
                     .inner_margin(egui::Margin::symmetric(12, 4))
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+                    .stroke(egui::Stroke::new(1.0, theme::border())),
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -940,9 +1487,27 @@ impl OpenCheckApp {
                             .as_ref()
                             .map(|p| p.display().to_string())
                             .unwrap_or_else(|| "Not saved yet".to_owned());
-                        ui.label(RichText::new(file).color(theme::TEXT_MUTED));
+                        ui.label(RichText::new(file).color(theme::text_muted()));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.frame_stats {
+                            let size = ui.ctx().content_rect().size() * ui.ctx().pixels_per_point();
+                            ui.label(
+                                RichText::new(format!(
+                                    "frame {:.1} ms (slowest {:.0} ms) · scale {:.2} · {:.0}×{:.0} px",
+                                    self.frame_ms.0,
+                                    self.frame_ms.1,
+                                    ui.ctx().pixels_per_point(),
+                                    size.x,
+                                    size.y
+                                ))
+                                .monospace()
+                                .small()
+                                .color(theme::accent()),
+                            )
+                            .on_hover_text("CPU time per frame. F12 hides this.");
+                            ui.separator();
+                        }
                         let elements: usize =
                             self.federation.iter().map(|(_, m)| m.elements.len()).sum();
                         let triangles: usize = self
@@ -957,7 +1522,7 @@ impl OpenCheckApp {
                                 elements,
                                 triangles
                             ))
-                            .color(theme::TEXT_MUTED),
+                            .color(theme::text_muted()),
                         );
                         if !self.view.selection.is_empty() {
                             ui.separator();
@@ -990,13 +1555,13 @@ impl OpenCheckApp {
             ui.add_space(6.0);
             ui.label(
                 RichText::new("Your changes will be lost if you don't save them.")
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             );
             ui.add_space(14.0);
             ui.horizontal(|ui| {
                 let save =
-                    egui::Button::new(RichText::new("Save").strong().color(egui::Color32::WHITE))
-                        .fill(theme::ACCENT);
+                    egui::Button::new(RichText::new("Save").strong().color(theme::on_accent()))
+                        .fill(theme::accent());
                 if ui.add(save).clicked() {
                     choice = Some(0);
                 }
@@ -1051,15 +1616,37 @@ fn source_label(source: &ModelSource) -> String {
 }
 
 impl eframe::App for OpenCheckApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if ctx.input(|i| i.key_pressed(egui::Key::F12)) {
+            self.frame_stats = !self.frame_stats;
+        }
+        if self.frame_stats {
+            let ms = frame.info().cpu_usage.unwrap_or(0.0) * 1000.0;
+            let now = ctx.input(|i| i.time);
+            let (_, slowest, since) = self.frame_ms;
+            let slowest = if now - since > 1.0 {
+                ms
+            } else {
+                slowest.max(ms)
+            };
+            let since = if now - since > 1.0 { now } else { since };
+            self.frame_ms = (ms, slowest, since);
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
         self.receive_jobs(&ctx);
+        self.handle_bcf(&ctx);
+        self.step_capture(&ctx);
         self.handle_dropped_files(&ctx);
         self.handle_shortcuts(&ctx);
         self.handle_close_request(&ctx);
         self.update_title(&ctx);
         if self.jobs.is_busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        } else if self.recheck_after_update && !self.checking.is_running() {
+            // All updated models are in: check again so issues see what was solved.
+            self.recheck_after_update = false;
+            self.run_check(&ctx, None);
         }
 
         self.top_bar(ui);
@@ -1079,7 +1666,14 @@ impl eframe::App for OpenCheckApp {
             .frame(egui::Frame::new())
             .show(ui, |ui| viewport::show(self, ui));
 
-        ruleset_manager::show(self, &ctx);
+        // Windows stay out of the pictures.
+        if !self.is_capturing() {
+            ruleset_manager::show(self, &ctx);
+            crate::standard_editor::window(self, &ctx);
+            crate::bcf_ui::window(self, &ctx);
+            crate::issues_ui::report_window(self, &ctx);
+            crate::issue_dialog::window(self, &ctx);
+        }
         self.confirm_dialog(&ctx);
         self.sync_gpu();
     }
@@ -1091,5 +1685,22 @@ fn finding_frame(region: &Aabb) -> Aabb {
     Aabb {
         min: region.min - Vec3::splat(pad),
         max: region.max + Vec3::splat(pad),
+    }
+}
+
+/// What an issue remembers of the view it was created from.
+struct IssueView {
+    camera: IssueCamera,
+    section: Option<IssueSection>,
+    show_context: bool,
+    hidden: Vec<IssueElement>,
+}
+
+impl IssueView {
+    fn apply_to(&self, issue: &mut Issue) {
+        issue.camera = Some(self.camera);
+        issue.section = self.section;
+        issue.show_context = self.show_context;
+        issue.hidden = self.hidden.clone();
     }
 }

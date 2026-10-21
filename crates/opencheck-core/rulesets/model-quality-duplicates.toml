@@ -1,17 +1,20 @@
 [ruleset]
 id = "opencheck.quality.duplicates"
 name = "Model quality: duplicates"
-description = "The same element modelled twice in one model, for example two identical walls on top of each other. Duplicates inflate quantities and hide clashes."
-version = "1"
+description = "Standard check, always part of a project: the same element modelled twice in one model, lying exactly on top of each other. Duplicates inflate quantities and hide clashes."
+version = "2"
 author = "OpenCheck"
 
 [[rule]]
 id = "duplicate-elements"
 name = "Elements must not be modelled twice"
+description = "Two elements of the same model with the same shape in the same place (within the tolerance), also when their IFC class or tessellation differ. Parts are not compared with their own assembly."
 type = "duplicates"
 severity = "moderate"
 tolerance_mm = 5
 between = "same_model"
 
 [rule.a]
-classes = ["IfcBuildingElement", "IfcDistributionElement", "IfcFurnishingElement"]
+# Every physical element. Openings and virtual elements are not built.
+classes = ["IfcElement"]
+exclude_classes = ["IfcFeatureElement", "IfcVirtualElement"]

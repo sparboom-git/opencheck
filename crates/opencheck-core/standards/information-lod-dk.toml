@@ -1,0 +1,777 @@
+# Information requirements per building part at the Danish LOD levels
+# (LOD 200 DK, 300 DK, 325 DK and 400 DK).
+#
+# Each [[item]] lists the places the information may be found in. Projects
+# and exporters store the same information differently (classification as
+# IfcClassificationReference, in CCS/BIM7AA property sets or in company
+# property sets), so an item counts as present when any source has a value.
+# Patterns are regular expressions on names, ignoring case.
+#
+# Each [[part]] applies to the elements its selectors match; an element
+# belongs to the first part that matches, so specific parts come first.
+
+[standard]
+id = "opencheck.information.lod-dk"
+name = "Information requirements, LOD DK"
+description = "Which information each kind of building part must carry at LOD 200, 300, 325 and 400 DK. Information that follows from geometry and placement (levels, positions) counts as present when the element has geometry."
+version = "1"
+levels = ["200", "300", "325", "400"]
+default_level = "300"
+
+# ---- Classification ------------------------------------------------------
+
+[[item]]
+id = "classification-code"
+name = "Klassifikationskode"
+description = "Classification code, e.g. a CCS, CCI or BIM7AA code."
+any = [
+    { classification = true },
+    { property = "^(CCS|CCI|SfB|FK)?(Classification|ClassCode)$" },
+    { property = "^BIM7AA(Type)?Code$" },
+    { property = "^Klassifikation(skode)?$" },
+]
+
+[[item]]
+id = "type-id"
+name = "Type (-kode/-ID)"
+description = "Type code or type ID in the classification system."
+any = [
+    { property = "^(CCS|CCI|BIM7AA)(Main)?TypeID$" },
+    { property = "^Type ?(kode|id)$" },
+]
+
+[[item]]
+id = "unique-id"
+name = "Unikt ID"
+description = "Unique identification of the single element."
+any = [
+    { property = "^(CCS|CCI)SingleLevelID$" },
+    { property = "^Unikt ?ID$" },
+]
+
+# ---- Names and types -----------------------------------------------------
+
+[[item]]
+id = "type-name"
+name = "Typenavn"
+description = "Name of the type, from the type object or the object type."
+any = [{ type_name = true }, { attribute = "^ObjectType$" }]
+
+[[item]]
+id = "name"
+name = "Navn"
+any = [{ attribute = "^Name$" }]
+
+[[item]]
+id = "room-name"
+name = "Rumnavn"
+any = [{ attribute = "^LongName$" }, { property = "^(Rumnavn|RoomName)$" }]
+
+[[item]]
+id = "room-number"
+name = "Rumnummer"
+any = [{ attribute = "^Name$" }, { property = "^(Rumnummer|RoomNumber)$" }]
+
+# ---- Placement (follows from the model) -----------------------------------
+
+[[item]]
+id = "storey"
+name = "Placering: Etage"
+description = "The element is contained in a building storey."
+any = [{ storey = true }, { property = "^(Etage|Level|Storey)$" }]
+
+[[item]]
+id = "centre-level"
+name = "Centerkote"
+any = [{ geometry = true }]
+
+[[item]]
+id = "level"
+name = "Kote"
+any = [{ geometry = true }]
+
+[[item]]
+id = "location"
+name = "Placering"
+any = [{ geometry = true }]
+
+# ---- Dimensions -----------------------------------------------------------
+
+[[item]]
+id = "thickness"
+name = "Tykkelse"
+any = [{ property = "^(Width|Thickness|NominalThickness|TotalThickness|Tykkelse)$" }]
+
+[[item]]
+id = "dimension"
+name = "Dimension"
+any = [
+    { property = "^(Nominal(Diameter|DiameterOrWidth|Width|Height)|OuterDiameter|InnerDiameter|Diameter|Width|Height|Size|Dimensions?|Bredde|Højde|Størrelse)$" },
+    { attribute = "^Overall(Width|Height)$" },
+]
+
+[[item]]
+id = "height"
+name = "Højde"
+any = [
+    { property = "^(Height|NominalHeight|OverallHeight|Højde)$" },
+    { attribute = "^OverallHeight$" },
+]
+
+[[item]]
+id = "width"
+name = "Bredde"
+any = [
+    { property = "^(Width|NominalWidth|OverallWidth|Bredde)$" },
+    { attribute = "^OverallWidth$" },
+]
+
+[[item]]
+id = "depth"
+name = "Dybde"
+any = [{ property = "^(Depth|NominalDepth|Dybde)$" }]
+
+[[item]]
+id = "diameter"
+name = "Diameter"
+any = [{ property = "^(Diameter|NominalDiameter|OuterDiameter)$" }]
+
+[[item]]
+id = "opening-width"
+name = "Bredde: Hulmål"
+any = [
+    { attribute = "^OverallWidth$" },
+    { property = "^(Width|OverallWidth|RoughWidth|Bredde|Hulmål ?bredde)$" },
+]
+
+[[item]]
+id = "opening-height"
+name = "Højde: Hulmål"
+any = [
+    { attribute = "^OverallHeight$" },
+    { property = "^(Height|OverallHeight|RoughHeight|Højde|Hulmål ?højde)$" },
+]
+
+[[item]]
+id = "length"
+name = "Længde"
+any = [{ property = "^(Length|NominalLength|Længde)$" }]
+
+[[item]]
+id = "slope"
+name = "Hældning på ramper"
+any = [{ property = "^(Slope|RequiredSlope|Hældning)$" }]
+
+[[item]]
+id = "area"
+name = "Areal"
+any = [{ property = "^(NetFloorArea|GrossFloorArea|NetArea|GrossArea|Area|Areal)$" }]
+
+[[item]]
+id = "net-area"
+name = "Areal: Nettoareal"
+any = [{ property = "^(NetFloorArea|NetArea|Nettoareal)$" }]
+
+[[item]]
+id = "gross-area"
+name = "Areal: Bruttoareal"
+any = [{ property = "^(GrossFloorArea|GrossArea|Bruttoareal)$" }]
+
+[[item]]
+id = "volume"
+name = "Volumen"
+any = [{ property = "^(NetVolume|GrossVolume|Volume|Volumen)$" }]
+
+# ---- Construction and materials -------------------------------------------
+
+[[item]]
+id = "construction"
+name = "Konstruktionsopbygning"
+description = "The build-up: material layers or a description of them."
+any = [
+    { material = true },
+    { property = "^(Konstruktions)?opbygning$" },
+    { property = "^Construction(Type)?$" },
+]
+
+[[item]]
+id = "build-up"
+name = "Opbygning"
+any = [
+    { material = true },
+    { property = "^(Konstruktions)?opbygning$" },
+    { property = "^Construction(Type)?$" },
+]
+
+[[item]]
+id = "material"
+name = "Materiale"
+any = [{ material = true }, { property = "^(Material|Materiale)$" }]
+
+[[item]]
+id = "load-bearing"
+name = "Lastbærende"
+any = [{ property = "^(LoadBearing|Lastbærende)$" }]
+
+[[item]]
+id = "surface-treatment"
+name = "Overfladebehandling"
+any = [{ property = "^(ExternalSurfaceType|SurfaceTreatment|Overfladebehandling)$" }]
+
+[[item]]
+id = "surface-class"
+name = "Overfladekrav"
+any = [{ property = "^(ExternalSurfaceClass|SurfaceClass|Overfladekrav)$" }]
+
+[[item]]
+id = "concrete-strength"
+name = "Betontrykstyrke"
+any = [{ property = "^(CompressiveStrength|StrengthClass|ConcreteStrength|Betontrykstyrke|Styrkeklasse)$" }]
+
+[[item]]
+id = "exposure-class"
+name = "Eksponeringsklasse"
+any = [{ property = "^(EnvironmentalClass|ExposureClass|Eksponeringsklasse|Miljøklasse)$" }]
+
+[[item]]
+id = "max-aggregate"
+name = "Maks. stenstørrelse"
+any = [{ property = "^(MaxAggregateSize|Maks\\.? ?stenstørrelse)$" }]
+
+[[item]]
+id = "steel-grade"
+name = "Stålkvalitet"
+any = [{ material = true }, { property = "^(SteelGrade|Grade|Stålkvalitet)$" }]
+
+# ---- Fire, sound and use --------------------------------------------------
+
+[[item]]
+id = "fire-rating"
+name = "Brandteknisk klasse"
+any = [{ property = "^(FireRating|Brandklasse|Brandteknisk ?klasse)$" }]
+
+[[item]]
+id = "acoustic-rating"
+name = "Lydklasse"
+any = [{ property = "^(AcousticRating|Lydklasse)$" }]
+
+[[item]]
+id = "fire-exit"
+name = "Flugtvej"
+any = [{ property = "^(FireExit|Flugtvej)$" }]
+
+[[item]]
+id = "hardware-set"
+name = "Beslagsæt"
+any = [{ property = "^(HardwareSet|Beslagsæt)$" }]
+
+[[item]]
+id = "contract"
+name = "Entreprise"
+any = [{ property = "^(SubcontractResource|Entreprise|Contract)$" }]
+
+[[item]]
+id = "discipline"
+name = "Fagområde"
+any = [{ property = "^(Purpose|Fagområde|Discipline)$" }]
+
+# ---- Building services ----------------------------------------------------
+
+[[item]]
+id = "system"
+name = "System"
+any = [
+    { system = true },
+    { property = "^(System|SystemName|SystemType|SystemClassification|CCSFunctionalID|CCIFunctionalID)$" },
+]
+
+[[item]]
+id = "board-number"
+name = "Tavlenummer"
+any = [{ property = "^(Tavle(nummer)?|PanelNumber|CCSFunctionalID|CCIFunctionalID)$" }]
+
+[[item]]
+id = "compartments"
+name = "Sporinddeling"
+any = [{ property = "^(NumberOfCompartments|Sporinddeling)$" }]
+
+[[item]]
+id = "insulation-thickness"
+name = "Isoleringstykkelse"
+any = [{ property = "^(InsulationThickness|Isoleringstykkelse)$" }]
+
+[[item]]
+id = "insulation-type"
+name = "Isoleringstype"
+any = [{ property = "^(InsulationType|Isoleringstype)$" }]
+
+[[item]]
+id = "air-direction"
+name = "Luftretning"
+any = [{ property = "^(AirflowType|AirFlowDirection|Luftretning)$" }]
+
+[[item]]
+id = "air-flow"
+name = "Luftmængde"
+any = [{ property = "^(AirFlowRate|AirflowRate|Luftmængde)$" }]
+
+[[item]]
+id = "water-flow"
+name = "Vandmængde"
+any = [{ property = "^(FlowRate|WaterFlowRate|Vandmængde)$" }]
+
+[[item]]
+id = "supply-area"
+name = "Forsyningsområde"
+any = [{ property = "^(Forsyningsområde|SupplyArea|ServiceArea)$" }]
+
+[[item]]
+id = "room-control"
+name = "Rumstyring"
+any = [{ property = "^(Rumstyring|RoomControl)$" }]
+
+# ---- Landscape ------------------------------------------------------------
+
+[[item]]
+id = "area-distribution"
+name = "Arealfordeling"
+any = [{ property = "^(Arealfordeling|AreaDistribution)$" }]
+
+[[item]]
+id = "count"
+name = "Antal"
+any = [{ property = "^(Antal|Count|Quantity)$" }]
+
+[[item]]
+id = "quality"
+name = "Kvalitet"
+any = [{ property = "^(Kvalitet|Quality)$" }]
+
+# ==== Building parts ========================================================
+# Recesses and holes come first: they are often proxies in any model.
+
+[[part]]
+id = "recess"
+name = "Reces- og hulobjekter"
+description = "Recesses and holes for installations."
+applies = [
+    { classes = ["IfcBuildingElementProxy", "IfcDistributionElement", "IfcVirtualElement"], names = ["reces", "\\bhul", "udsparing", "provision ?for ?void", "\\bvoid\\b"] },
+    { classes = ["IfcBuildingElementProxy"], properties = [{ pset = "Pset_ProvisionForVoid", name = "Shape" }] },
+]
+[part.levels]
+"300" = ["classification-code", "type-id", "type-name", "width", "height", "depth", "diameter"]
+"325" = ["classification-code", "type-id", "type-name", "width", "height", "depth", "diameter", "discipline"]
+"400" = ["classification-code", "type-id", "unique-id", "type-name", "width", "height", "depth", "diameter", "discipline", "contract"]
+
+# ---- Landscape (landscape models) -----------------------------------------
+
+[[part]]
+id = "landscape-solitary-planting"
+name = "Solitære beplantninger"
+applies = [{ disciplines = ["landscape"], names = ["solitær", "\\btræ", "\\btree", "busk", "shrub"] }]
+[part.levels]
+"200" = ["type-name"]
+"300" = ["classification-code", "type-id", "type-name", "dimension"]
+"325" = ["classification-code", "type-id", "type-name", "dimension", "quality", "location"]
+"400" = ["classification-code", "type-id", "type-name", "dimension", "quality", "location"]
+
+[[part]]
+id = "landscape-planting"
+name = "Beplantningstypologier"
+applies = [{ disciplines = ["landscape"], names = ["beplantning", "planting", "\\bhæk", "hedge", "\\bbed\\b"] }]
+[part.levels]
+"200" = ["type-name"]
+"300" = ["classification-code", "type-id", "type-name", "area", "area-distribution"]
+"325" = ["classification-code", "type-id", "type-name", "area", "area-distribution", "location", "count", "quality"]
+"400" = ["classification-code", "type-id", "type-name", "area", "area-distribution", "location", "count", "quality"]
+
+[[part]]
+id = "landscape-furnishing"
+name = "Inventar i terræn"
+applies = [{ disciplines = ["landscape"], classes = ["IfcFurnishingElement"] }]
+[part.levels]
+"200" = ["type-name"]
+"300" = ["classification-code", "type-id", "type-name", "dimension"]
+"325" = ["classification-code", "type-id", "type-name", "dimension", "location"]
+"400" = ["classification-code", "type-id", "type-name", "dimension", "location", "construction"]
+
+[[part]]
+id = "landscape-construction"
+name = "Konstruktionselementer i terræn"
+description = "Retaining walls, stairs, ramps and the like."
+applies = [{ disciplines = ["landscape"], classes = ["IfcWall", "IfcStair", "IfcStairFlight", "IfcRamp", "IfcRampFlight", "IfcRailing", "IfcFooting"] }]
+[part.levels]
+"200" = ["type-name"]
+"300" = ["classification-code", "type-id", "type-name", "dimension"]
+"325" = ["classification-code", "type-id", "type-name", "dimension", "location", "construction"]
+"400" = ["classification-code", "type-id", "type-name", "dimension", "location", "construction"]
+
+[[part]]
+id = "landscape-surface"
+name = "Overflader i terræn"
+description = "Paved and unpaved surfaces."
+applies = [{ disciplines = ["landscape"], classes = ["IfcSlab", "IfcCovering", "IfcGeographicElement", "IfcBuildingElementProxy"] }]
+[part.levels]
+"200" = ["type-name"]
+"300" = ["classification-code", "type-id", "type-name", "area"]
+"325" = ["classification-code", "type-id", "type-name", "area", "location", "construction"]
+"400" = ["classification-code", "type-id", "type-name", "area", "location", "construction"]
+
+# ---- Structure (structural models) ----------------------------------------
+
+[[part]]
+id = "foundation"
+name = "Fundament"
+description = "Strip and pad foundations."
+applies = [{ disciplines = ["structural"], classes = ["IfcFooting", "IfcPile"] }]
+[part.levels]
+"200" = ["type-name", "length"]
+"300" = ["classification-code", "type-id", "type-name", "length", "load-bearing"]
+"325" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey"]
+"400" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey", "surface-treatment", "surface-class", "concrete-strength", "exposure-class", "max-aggregate", "contract"]
+
+[[part]]
+id = "concrete-wall"
+name = "Betonvæg"
+applies = [{ disciplines = ["structural"], classes = ["IfcWall"] }]
+[part.levels]
+"200" = ["type-name", "thickness", "height", "length"]
+"300" = ["classification-code", "type-id", "type-name", "thickness", "height", "length", "load-bearing"]
+"325" = ["classification-code", "type-id", "type-name", "thickness", "height", "length", "load-bearing", "storey"]
+"400" = ["classification-code", "type-id", "type-name", "thickness", "height", "length", "load-bearing", "storey", "surface-treatment", "surface-class", "concrete-strength", "exposure-class", "max-aggregate", "contract"]
+
+[[part]]
+id = "steel-column"
+name = "Stålsøjle"
+applies = [
+    { disciplines = ["structural"], classes = ["IfcColumn"], materials = ["st[aå]l", "steel", "\\bS[23]\\d\\d"] },
+    { disciplines = ["structural"], classes = ["IfcColumn"], names = ["st[aå]l", "steel", "\\b(HE[ABM]?|IPE|UNP|RHS|SHS|CHS|KKR|VKR)\\s*\\d"] },
+]
+[part.levels]
+"200" = ["type-name", "length"]
+"300" = ["classification-code", "type-id", "type-name", "length", "load-bearing"]
+"325" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey"]
+"400" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey", "steel-grade", "contract"]
+
+[[part]]
+id = "concrete-column"
+name = "Betonsøjle"
+applies = [{ disciplines = ["structural"], classes = ["IfcColumn"] }]
+[part.levels]
+"200" = ["type-name", "length"]
+"300" = ["classification-code", "type-id", "type-name", "length", "load-bearing"]
+"325" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey"]
+"400" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey", "surface-treatment", "surface-class", "concrete-strength", "exposure-class", "max-aggregate", "contract"]
+
+[[part]]
+id = "steel-beam"
+name = "Stålbjælke"
+applies = [
+    { disciplines = ["structural"], classes = ["IfcBeam"], materials = ["st[aå]l", "steel", "\\bS[23]\\d\\d"] },
+    { disciplines = ["structural"], classes = ["IfcBeam"], names = ["st[aå]l", "steel", "\\b(HE[ABM]?|IPE|UNP|RHS|SHS|CHS|KKR|VKR)\\s*\\d"] },
+]
+[part.levels]
+"200" = ["type-name", "length"]
+"300" = ["classification-code", "type-id", "type-name", "length", "load-bearing"]
+"325" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey"]
+"400" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey", "steel-grade", "contract"]
+
+[[part]]
+id = "concrete-beam"
+name = "Betonbjælke"
+applies = [{ disciplines = ["structural"], classes = ["IfcBeam"] }]
+[part.levels]
+"200" = ["type-name", "length"]
+"300" = ["classification-code", "type-id", "type-name", "length", "load-bearing"]
+"325" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey"]
+"400" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey", "surface-treatment", "surface-class", "concrete-strength", "exposure-class", "max-aggregate", "contract"]
+
+[[part]]
+id = "concrete-slab"
+name = "Betondæk"
+applies = [{ disciplines = ["structural"], classes = ["IfcSlab"] }]
+[part.levels]
+"200" = ["type-name", "thickness"]
+"300" = ["classification-code", "type-id", "type-name", "thickness", "load-bearing"]
+"325" = ["classification-code", "type-id", "type-name", "thickness", "load-bearing", "storey"]
+"400" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey", "surface-treatment", "surface-class", "concrete-strength", "exposure-class", "max-aggregate", "contract"]
+
+# ---- Electrical -----------------------------------------------------------
+
+[[part]]
+id = "electrical-carrier"
+name = "El-føringsveje"
+description = "Cable trays, cable ladders, trunking, conduits and the like."
+applies = [
+    { classes = ["IfcCableCarrierSegment", "IfcCableCarrierFitting"] },
+    { disciplines = ["electrical"], classes = ["IfcFlowSegment", "IfcFlowFitting"] },
+]
+[part.levels]
+"200" = ["type-name", "dimension"]
+"300" = ["classification-code", "type-id", "type-name", "dimension", "centre-level"]
+"325" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "storey"]
+"400" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "storey", "material", "compartments", "contract"]
+
+[[part]]
+id = "electrical-component"
+name = "El-komponenter"
+description = "Boards, racks, light fittings, outlets and other electrical components."
+applies = [
+    { classes = ["IfcLightFixture", "IfcLamp", "IfcOutlet", "IfcElectricDistributionBoard", "IfcElectricDistributionPoint", "IfcSwitchingDevice", "IfcElectricAppliance", "IfcCommunicationsAppliance", "IfcAudioVisualAppliance", "IfcProtectiveDevice", "IfcJunctionBox", "IfcElectricFlowStorageDevice", "IfcElectricGenerator", "IfcElectricMotor", "IfcTransformer"] },
+    { disciplines = ["electrical"], classes = ["IfcDistributionElement"] },
+]
+[part.levels]
+"200" = ["type-name"]
+"300" = ["classification-code", "type-id", "type-name"]
+"325" = ["classification-code", "type-id", "type-name", "level", "storey"]
+"400" = ["classification-code", "type-id", "type-name", "level", "storey", "board-number", "dimension", "contract"]
+
+# ---- Ventilation ----------------------------------------------------------
+
+[[part]]
+id = "ventilation-duct"
+name = "Ventilationsføringsveje"
+description = "Ducts and duct fittings."
+applies = [
+    { classes = ["IfcDuctSegment", "IfcDuctFitting"] },
+    { disciplines = ["mechanical"], classes = ["IfcFlowSegment", "IfcFlowFitting"], exclude_classes = ["IfcPipeSegment", "IfcPipeFitting", "IfcCableCarrierSegment", "IfcCableCarrierFitting", "IfcCableSegment", "IfcCableFitting"] },
+]
+[part.levels]
+"200" = ["type-name", "dimension"]
+"300" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "insulation-thickness", "system"]
+"325" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "insulation-thickness", "insulation-type", "storey", "system", "air-direction"]
+"400" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "insulation-thickness", "insulation-type", "storey", "system", "air-direction", "air-flow", "material", "contract"]
+
+# ---- Plumbing -------------------------------------------------------------
+
+[[part]]
+id = "plumbing-pipe"
+name = "VVS-føringsveje"
+description = "Pipes and pipe fittings."
+applies = [
+    { classes = ["IfcPipeSegment", "IfcPipeFitting"] },
+    { disciplines = ["plumbing", "fire_protection"], classes = ["IfcFlowSegment", "IfcFlowFitting"], exclude_classes = ["IfcDuctSegment", "IfcDuctFitting", "IfcCableCarrierSegment", "IfcCableCarrierFitting", "IfcCableSegment", "IfcCableFitting"] },
+]
+[part.levels]
+"200" = ["type-name", "dimension"]
+"300" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "insulation-thickness", "system"]
+"325" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "insulation-thickness", "insulation-type", "storey", "system"]
+"400" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "insulation-thickness", "insulation-type", "storey", "system", "material", "contract"]
+
+# ---- Ventilation equipment and components ---------------------------------
+
+[[part]]
+id = "ventilation-unit"
+name = "Ventilationsanlæg og ventilatorer"
+description = "Air handling units, heating and cooling coils, fans and the like."
+applies = [
+    { classes = ["IfcUnitaryEquipment", "IfcFan", "IfcAirToAirHeatRecovery", "IfcCoil", "IfcHumidifier", "IfcEvaporativeCooler"] },
+    { disciplines = ["mechanical"], classes = ["IfcEnergyConversionDevice", "IfcFlowMovingDevice"] },
+]
+[part.levels]
+"200" = ["type-name"]
+"300" = ["classification-code", "type-id", "type-name", "system"]
+"325" = ["classification-code", "type-id", "type-name", "level", "storey", "system"]
+"400" = ["classification-code", "type-id", "type-name", "level", "storey", "system", "air-flow", "dimension", "contract"]
+
+[[part]]
+id = "ventilation-component"
+name = "Ventilationskomponenter"
+description = "Diffusers, dampers, silencers and other ventilation components."
+applies = [
+    { classes = ["IfcAirTerminal", "IfcAirTerminalBox", "IfcDamper", "IfcDuctSilencer"] },
+    { disciplines = ["mechanical"], classes = ["IfcDistributionElement"], exclude_classes = ["IfcPipeSegment", "IfcPipeFitting"] },
+]
+[part.levels]
+"200" = ["type-name"]
+"300" = ["classification-code", "type-id", "type-name", "system"]
+"325" = ["classification-code", "type-id", "type-name", "level", "storey", "system"]
+"400" = ["classification-code", "type-id", "type-name", "level", "storey", "system", "air-flow", "dimension", "contract"]
+
+# ---- Plumbing equipment and components ------------------------------------
+
+[[part]]
+id = "sanitary"
+name = "Sanitets- og regnvandstilslutninger"
+description = "Connections to sanitary appliances, machines, toilets, basins, roof drains and the like."
+applies = [{ classes = ["IfcSanitaryTerminal", "IfcWasteTerminal", "IfcStackTerminal"] }]
+[part.levels]
+"200" = ["type-name"]
+"300" = ["classification-code", "type-id", "type-name"]
+"325" = ["classification-code", "type-id", "type-name", "level", "storey"]
+"400" = ["classification-code", "type-id", "type-name", "level", "storey", "water-flow", "dimension", "contract"]
+
+[[part]]
+id = "plumbing-equipment"
+name = "VVS mekanisk udstyr og anlæg"
+description = "Mixing loops, meter arrangements, filtration plants and the like."
+applies = [
+    { classes = ["IfcTank", "IfcBoiler", "IfcChiller", "IfcHeatExchanger", "IfcInterceptor", "IfcFlowMeter"] },
+    { disciplines = ["plumbing", "fire_protection"], classes = ["IfcEnergyConversionDevice", "IfcFlowStorageDevice", "IfcFlowTreatmentDevice"] },
+]
+[part.levels]
+"200" = ["type-name"]
+"300" = ["classification-code", "type-id", "type-name"]
+"325" = ["classification-code", "type-id", "type-name", "storey", "system"]
+"400" = ["classification-code", "type-id", "type-name", "level", "storey", "system", "dimension", "contract"]
+
+[[part]]
+id = "plumbing-component"
+name = "VVS-komponenter"
+description = "Valves, pumps, filters, supports, junction boxes, thermometers and the like."
+applies = [
+    { classes = ["IfcValve", "IfcPump", "IfcFilter"] },
+    { disciplines = ["plumbing", "fire_protection"], classes = ["IfcDistributionElement"] },
+]
+[part.levels]
+"200" = ["type-name"]
+"300" = ["classification-code", "type-id", "type-name", "system"]
+"325" = ["classification-code", "type-id", "type-name", "level", "storey", "system"]
+"400" = ["classification-code", "type-id", "type-name", "level", "storey", "system", "dimension", "contract"]
+
+[[part]]
+id = "mep-space"
+name = "Spaces"
+description = "Spaces for building services. The architect's room name and number are the reference; discipline-specific values (air flow, heating and cooling demand, lighting) are required as the delivery specification states."
+applies = [{ disciplines = ["mechanical", "plumbing", "electrical", "fire_protection"], classes = ["IfcSpace"] }]
+[part.levels]
+"200" = ["room-name", "area", "supply-area"]
+"300" = ["room-name", "room-number", "area", "supply-area", "room-control"]
+"325" = ["room-name", "room-number", "area", "supply-area", "room-control"]
+"400" = ["room-name", "room-number", "area", "supply-area", "room-control"]
+
+# ---- Architecture ---------------------------------------------------------
+
+[[part]]
+id = "curtain-wall"
+name = "Glas- / systemvægge"
+description = "Composite system walls with or without glass. Their parts follow the curtain wall."
+applies = [{ classes = ["IfcCurtainWall"] }]
+[part.levels]
+"200" = ["type-name", "dimension"]
+"300" = ["classification-code", "type-id", "type-name", "dimension"]
+"325" = ["classification-code", "type-id", "type-name", "storey", "dimension", "build-up"]
+"400" = ["classification-code", "type-id", "type-name", "storey", "dimension", "build-up", "contract"]
+
+[[part]]
+id = "window"
+name = "Vindue"
+description = "Windows, panes and blind panels."
+applies = [{ classes = ["IfcWindow"] }]
+[part.levels]
+"200" = ["type-name", "opening-width", "opening-height"]
+"300" = ["classification-code", "type-id", "type-name", "opening-width", "opening-height"]
+"325" = ["classification-code", "type-id", "type-name", "opening-width", "opening-height", "storey", "fire-exit", "build-up", "fire-rating", "acoustic-rating"]
+"400" = ["classification-code", "type-id", "type-name", "opening-width", "opening-height", "storey", "fire-exit", "build-up", "fire-rating", "acoustic-rating", "contract"]
+
+[[part]]
+id = "door"
+name = "Dør"
+description = "External and internal doors and gates."
+applies = [{ classes = ["IfcDoor"] }]
+[part.levels]
+"200" = ["type-name", "opening-width", "opening-height"]
+"300" = ["classification-code", "type-id", "type-name", "opening-width", "opening-height"]
+"325" = ["classification-code", "type-id", "type-name", "opening-width", "opening-height", "storey", "fire-exit", "hardware-set", "build-up", "fire-rating", "acoustic-rating"]
+"400" = ["classification-code", "type-id", "type-name", "opening-width", "opening-height", "storey", "fire-exit", "hardware-set", "build-up", "fire-rating", "acoustic-rating", "contract"]
+
+[[part]]
+id = "stair-ramp"
+name = "Trapper og ramper"
+description = "Cast and prefabricated stairs and ramps."
+applies = [{ classes = ["IfcStair", "IfcStairFlight", "IfcRamp", "IfcRampFlight"] }]
+[part.levels]
+"200" = ["type-name"]
+"300" = ["classification-code", "type-id", "type-name", "slope"]
+"325" = ["classification-code", "type-id", "type-name", "storey", "slope"]
+"400" = ["classification-code", "type-id", "type-name", "storey", "slope", "contract"]
+
+[[part]]
+id = "railing"
+name = "Værn"
+applies = [{ classes = ["IfcRailing"] }]
+[part.levels]
+"300" = ["classification-code", "type-id", "type-name", "height"]
+"325" = ["classification-code", "type-id", "type-name", "height", "storey", "build-up"]
+"400" = ["classification-code", "type-id", "type-name", "height", "storey", "build-up"]
+
+[[part]]
+id = "roof"
+name = "Tag"
+description = "Roof constructions that close the building at the top."
+applies = [
+    { classes = ["IfcRoof"] },
+    { classes = ["IfcSlab"], names = ["\\btag", "\\broof"] },
+]
+[part.levels]
+"200" = ["type-name", "thickness"]
+"300" = ["classification-code", "type-id", "type-name", "thickness"]
+"325" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
+"400" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction", "contract"]
+
+[[part]]
+id = "ceiling"
+name = "Loft"
+applies = [{ classes = ["IfcCovering"], names = ["loft", "ceiling", "nedhæng", "akustik"] }]
+[part.levels]
+"300" = ["classification-code", "type-id", "type-name", "thickness"]
+"325" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
+"400" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
+
+[[part]]
+id = "floor"
+name = "Gulv"
+description = "Floor separations at the generic level and floors at the other levels."
+applies = [
+    { classes = ["IfcSlab"] },
+    { classes = ["IfcCovering"], names = ["gulv", "floor"] },
+]
+[part.levels]
+"200" = ["type-name", "thickness"]
+"300" = ["classification-code", "type-id", "type-name", "thickness"]
+"325" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
+"400" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
+
+[[part]]
+id = "wall"
+name = "Væg"
+description = "External and internal non-load-bearing walls."
+applies = [{ classes = ["IfcWall"] }]
+[part.levels]
+"200" = ["type-name", "thickness"]
+"300" = ["classification-code", "type-id", "type-name", "thickness"]
+"325" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
+"400" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction", "contract"]
+
+[[part]]
+id = "furnishing"
+name = "Inventar"
+description = "Loose and fixed furniture."
+applies = [{ classes = ["IfcFurnishingElement"] }]
+[part.levels]
+"200" = ["type-name", "thickness"]
+"300" = ["classification-code", "type-id", "type-name", "thickness"]
+"325" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
+"400" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction", "contract"]
+
+[[part]]
+id = "gross-area"
+name = "Bruttoareal"
+description = "Gross area objects of the building."
+applies = [{ classes = ["IfcSpace"], names = ["brutto", "\\bgross"] }]
+[part.levels]
+"200" = ["name", "gross-area"]
+"300" = ["classification-code", "type-id", "name", "gross-area"]
+"325" = ["classification-code", "type-id", "name", "gross-area", "storey"]
+"400" = ["classification-code", "type-id", "name", "gross-area", "storey"]
+
+[[part]]
+id = "room"
+name = "Rum"
+description = "Rooms bounded by 3D constructions."
+applies = [{ classes = ["IfcSpace"] }]
+[part.levels]
+"200" = ["room-name", "net-area"]
+"300" = ["classification-code", "type-id", "room-name", "room-number", "net-area"]
+"325" = ["classification-code", "type-id", "room-name", "room-number", "net-area", "storey"]
+"400" = ["classification-code", "type-id", "room-name", "room-number", "net-area", "storey"]

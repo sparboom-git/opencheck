@@ -4,10 +4,14 @@
 //! viewer, and for scripting checks later on.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use opencheck_core::check::{BUILTIN_RULESETS, CheckJob, CheckModel, Ruleset, run_check};
+use opencheck_core::check::{
+    BUILTIN_RULESETS, BUILTIN_STANDARDS, CheckJob, CheckModel, IDS_PREFIX, Ids, Rule, RuleKind,
+    Ruleset, RulesetInfo, Selector, Severity, builtin_standard, run_check, standard_to_ids,
+};
 use opencheck_core::{Federation, IfcModel, SpatialNode, load_ifc_file};
 
 #[derive(Parser)]
@@ -54,9 +58,26 @@ enum Command {
         /// Findings to list per rule.
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        /// Level (LOD) for information rules, e.g. 300. Default: the standard's.
+        #[arg(long)]
+        level: Option<String>,
+        /// IDS 1.0 file to check the models against. Repeat for several.
+        #[arg(long = "ids")]
+        ids: Vec<PathBuf>,
     },
     /// List the built-in rulesets.
     Rulesets,
+    /// Write a built-in information standard as an IDS 1.0 file.
+    ExportIds {
+        /// Output file, e.g. lod-300.ids.
+        output: PathBuf,
+        /// Standard id. Default: the first built-in standard.
+        #[arg(long)]
+        standard: Option<String>,
+        /// Levels to export, e.g. --level 300. Default: all levels.
+        #[arg(long = "level")]
+        levels: Vec<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -69,7 +90,9 @@ fn main() -> Result<()> {
             rulesets,
             all,
             limit,
-        } => check(&files, &rulesets, all, limit),
+            level,
+            ids,
+        } => check(&files, &rulesets, all, limit, level.as_deref(), &ids),
         Command::Rulesets => {
             for builtin in BUILTIN_RULESETS {
                 let ruleset = Ruleset::from_toml(builtin.toml)?;
@@ -77,7 +100,75 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::ExportIds {
+            output,
+            standard,
+            levels,
+        } => export_ids(&output, standard.as_deref(), &levels),
     }
+}
+
+fn export_ids(output: &PathBuf, standard: Option<&str>, levels: &[String]) -> Result<()> {
+    let id = standard.unwrap_or(BUILTIN_STANDARDS[0].id);
+    let Some(standard) = builtin_standard(id) else {
+        let known: Vec<&str> = BUILTIN_STANDARDS.iter().map(|b| b.id).collect();
+        bail!("unknown standard {id}; built in: {}", known.join(", "));
+    };
+    if let Some(unknown) = levels
+        .iter()
+        .find(|l| !standard.standard.levels.contains(l))
+    {
+        bail!(
+            "unknown level {unknown}; the standard has {}",
+            standard.standard.levels.join(", ")
+        );
+    }
+    let export = standard_to_ids(standard, levels);
+    std::fs::write(output, export.ids.to_xml())
+        .with_context(|| format!("writing {}", output.display()))?;
+    println!(
+        "{} specifications written to {}",
+        export.ids.specifications.len(),
+        output.display()
+    );
+    if !export.warnings.is_empty() {
+        println!("\nNot expressible in IDS:");
+        for warning in &export.warnings {
+            println!("  - {warning}");
+        }
+    }
+    Ok(())
+}
+
+/// A ruleset with one information rule for an IDS file, and the document.
+fn ids_ruleset(path: &PathBuf) -> Result<(Ruleset, (String, Arc<Ids>))> {
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let ids = Ids::from_xml(&text).with_context(|| format!("IDS file {}", path.display()))?;
+    let key = path.display().to_string();
+    let ruleset = Ruleset {
+        ruleset: RulesetInfo {
+            id: format!("ids.{key}"),
+            name: format!("IDS: {}", ids.title()),
+            description: ids.info.description.clone(),
+            version: "1".to_owned(),
+            author: String::new(),
+        },
+        rules: vec![Rule {
+            id: "ids".to_owned(),
+            name: "Elements meet the IDS specifications".to_owned(),
+            description: String::new(),
+            kind: RuleKind::Information,
+            severity: Severity::Moderate,
+            tolerance_mm: 10.0,
+            clearance_mm: 0.0,
+            between: Default::default(),
+            a: Selector::default(),
+            b: None,
+            standard: format!("{IDS_PREFIX}{key}"),
+        }],
+    };
+    Ok((ruleset, (key, Arc::new(ids))))
 }
 
 fn load_ruleset(spec: &str) -> Result<Ruleset> {
@@ -88,8 +179,21 @@ fn load_ruleset(spec: &str) -> Result<Ruleset> {
     Ruleset::from_toml(&text).with_context(|| format!("ruleset {spec}"))
 }
 
-fn check(files: &[PathBuf], specs: &[String], all: bool, limit: usize) -> Result<()> {
+fn check(
+    files: &[PathBuf],
+    specs: &[String],
+    all: bool,
+    limit: usize,
+    level: Option<&str>,
+    ids_files: &[PathBuf],
+) -> Result<()> {
     let mut rulesets = Vec::new();
+    let mut documents = Vec::new();
+    for path in ids_files {
+        let (ruleset, document) = ids_ruleset(path)?;
+        rulesets.push(ruleset);
+        documents.push(document);
+    }
     if all {
         for builtin in BUILTIN_RULESETS {
             rulesets.push(Ruleset::from_toml(builtin.toml)?);
@@ -99,7 +203,7 @@ fn check(files: &[PathBuf], specs: &[String], all: bool, limit: usize) -> Result
         rulesets.push(load_ruleset(spec)?);
     }
     if rulesets.is_empty() {
-        bail!("give at least one --ruleset, or --all");
+        bail!("give at least one --ruleset or --ids, or --all");
     }
 
     let mut federation = Federation::new();
@@ -117,6 +221,7 @@ fn check(files: &[PathBuf], specs: &[String], all: bool, limit: usize) -> Result
             transform: federation
                 .model_transform(id)
                 .expect("id from the federation"),
+            mask: None,
         })
         .collect();
     let jobs: Vec<CheckJob> = rulesets
@@ -124,6 +229,17 @@ fn check(files: &[PathBuf], specs: &[String], all: bool, limit: usize) -> Result
         .map(|ruleset| CheckJob {
             ruleset,
             models: federation.ids(),
+            levels: level
+                .map(|l| {
+                    federation
+                        .ids()
+                        .into_iter()
+                        .map(|id| (id, l.to_owned()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            ids: documents.clone(),
+            standards: Vec::new(),
         })
         .collect();
 
@@ -146,7 +262,48 @@ fn check(files: &[PathBuf], specs: &[String], all: bool, limit: usize) -> Result
                 rule.pairs_tested,
                 rule.duration.as_secs_f64() * 1000.0
             );
+            if let Some(info) = &rule.information {
+                for note in &info.notes {
+                    println!("    ! {note}");
+                }
+                for part in &info.parts {
+                    println!(
+                        "    {:<36} {:>5} elements, {:>5} complete",
+                        part.name, part.elements, part.complete
+                    );
+                    for item in &part.items {
+                        println!(
+                            "        {:<32} {:>5} / {:<5} {:>4.0} %",
+                            item.name,
+                            item.present,
+                            item.required,
+                            100.0 * item.present as f64 / item.required.max(1) as f64
+                        );
+                        if !item.found_in.is_empty() {
+                            let places: Vec<String> = item
+                                .found_in
+                                .iter()
+                                .take(3)
+                                .map(|(place, n)| format!("{place} ({n})"))
+                                .collect();
+                            println!("            found in {}", places.join(", "));
+                        }
+                    }
+                }
+            }
             for f in rule.findings.iter().take(limit) {
+                if f.is_single() {
+                    println!(
+                        "    {:<9} {} [{}] {} ({}): missing {}",
+                        f.kind.label(),
+                        f.a.name,
+                        f.a.ifc_class,
+                        name_of(f.a.model),
+                        f.category,
+                        f.details.join(", ")
+                    );
+                    continue;
+                }
                 println!(
                     "    {:<9} {:>7.0} mm  {} [{}] {}  <->  {} [{}] {}",
                     f.kind.label(),
@@ -353,6 +510,24 @@ fn props(path: &PathBuf, key: &str) -> Result<()> {
             .map(|n| n.label().to_owned())
             .unwrap_or_else(|| format!("#{container}"));
         row("Container", &label);
+    }
+    if let Some(type_class) = &element.type_class {
+        row("Type class", type_class);
+    }
+    if element.occurrence_class() != element.ifc_class {
+        row("Acts as", element.occurrence_class());
+    }
+    for c in &element.classifications {
+        row(
+            "Classification",
+            format!("{} {} {}", c.system, c.code, c.name).trim(),
+        );
+    }
+    if !element.materials.is_empty() {
+        row("Materials", &element.materials.join(", "));
+    }
+    if !element.systems.is_empty() {
+        row("Systems", &element.systems.join(", "));
     }
 
     for pset in model.property_sets_of(element) {
