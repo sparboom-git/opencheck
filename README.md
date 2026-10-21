@@ -23,6 +23,21 @@ You do not need to build OpenCheck to try it. For Windows:
 The program is not code-signed, so Windows SmartScreen may show "Windows
 protected your PC" the first time. Click **More info** and then **Run anyway**.
 
+### In the browser
+
+OpenCheck also runs in the browser, without installing anything:
+<https://sparboom-git.github.io/opencheck/>. It needs WebGPU, which recent
+Chrome and Edge have. IFC files are opened in the browser and never uploaded.
+
+The browser version is new and does a little less than the desktop program.
+Models are opened (picked or dropped on the page), viewed and checked; issues,
+reports and BCF files are downloaded. *Save* downloads the project as an
+`.opencheck` file and *Open project* (or dropping the file on the page) opens
+it again, so projects move freely between the browser and the desktop
+program. Not yet in the browser: updating a model in place, BCF Live, and
+remembering the theme. Large models load slower, and the page waits while a
+model loads or a check runs.
+
 ## What it does
 
 ### Model
@@ -160,7 +175,7 @@ opencheck export-ids lod-300.ids --level 300
 |---|---|
 | `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine, information requirements and IDS, BCF data and files, project files |
 | `opencheck-cli` | The `opencheck` command line tool |
-| `opencheck-app` | Desktop application: federated 3D viewer (egui + wgpu), checking, issues, reports and BCF Live |
+| `opencheck-app` | The application, for the desktop and the browser: federated 3D viewer (egui + wgpu), checking, issues, reports and BCF Live |
 
 IFC parsing and tessellation are provided by
 [ifc-lite](https://github.com/LTplus-AG/ifc-lite) (MPL-2.0). OpenCheck wraps it
@@ -178,6 +193,18 @@ cargo build --release
 On Windows either the MSVC toolchain (with Visual Studio Build Tools) or the
 GNU toolchain works. The GNU toolchain additionally needs a MinGW-w64
 installation with binutils on `PATH`, for example WinLibs.
+
+The browser version is built with [Trunk](https://trunkrs.dev):
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install trunk --locked
+cd crates/opencheck-app
+trunk serve --release
+```
+
+and opened at <http://localhost:8080>. Every push to `main` publishes it on
+GitHub Pages (`.github/workflows/pages.yml`).
 
 To try it with the buildingSMART sample models:
 

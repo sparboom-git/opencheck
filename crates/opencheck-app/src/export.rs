@@ -257,7 +257,7 @@ impl OpenCheckApp {
             }
             ExportKind::Bcf(path) => self
                 .bcf_file(&capture.issues, &capture.images)
-                .and_then(|bytes| std::fs::write(path, bytes).map_err(|e| e.to_string()))
+                .and_then(|bytes| crate::platform::write(path, &bytes).map_err(|e| e.to_string()))
                 .map(|()| {
                     (
                         path.clone(),
@@ -266,7 +266,7 @@ impl OpenCheckApp {
                 }),
             ExportKind::Report(path) => {
                 let html = crate::report::build(self, &capture.issues, &capture.images);
-                std::fs::write(path, html)
+                crate::platform::write(path, html.as_bytes())
                     .map_err(|e| e.to_string())
                     .map(|()| {
                         (
@@ -283,7 +283,10 @@ impl OpenCheckApp {
                     path.file_name().unwrap_or_default().to_string_lossy()
                 ));
                 if matches!(capture.kind, ExportKind::Report(_)) {
-                    let _ = webbrowser::open(&path.to_string_lossy());
+                    // In the browser the report was downloaded instead.
+                    if !crate::platform::IS_WEB {
+                        let _ = webbrowser::open(&path.to_string_lossy());
+                    }
                 }
             }
             Err(e) => self.errors.push(format!("Could not export: {e}")),
@@ -353,12 +356,11 @@ impl OpenCheckApp {
     /// Asks for a file name and exports the issues in scope as BCF.
     pub fn export_bcf_dialog(&mut self, ctx: &egui::Context) {
         let name = format!("{}-issues.bcfzip", self.export_base_name());
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title("Export issues as BCF")
-            .add_filter("BCF file", &["bcfzip", "bcf"])
-            .set_file_name(name)
-            .save_file()
-        {
+        if let Some(path) = crate::platform::save_file(
+            "Export issues as BCF",
+            ("BCF file", &["bcfzip", "bcf"]),
+            &name,
+        ) {
             self.start_export(ExportKind::Bcf(path), ctx);
         }
     }
@@ -369,11 +371,8 @@ impl OpenCheckApp {
             self.export_base_name(),
             &project::now_rfc3339()[..10]
         );
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title("Export issue report")
-            .add_filter("Report (HTML)", &["html"])
-            .set_file_name(name)
-            .save_file()
+        if let Some(path) =
+            crate::platform::save_file("Export issue report", ("Report (HTML)", &["html"]), &name)
         {
             self.start_export(ExportKind::Report(path), ctx);
         }

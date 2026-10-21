@@ -24,6 +24,8 @@ humantime = "2"
 quick-xml = "0.41"
 rayon = "1"
 regex = "1"
+# Instant and SystemTime that also work in the browser (WebAssembly).
+web-time = "1"
 rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -136,7 +136,7 @@ impl Jobs {
             "Loading"
         };
         let reporter = self.start(format!("{verb} {}", file_name(&path)), ctx);
-        std::thread::spawn(move || {
+        crate::platform::spawn(move || {
             let result = opencheck_core::load_ifc_file(&path)
                 .map(Box::new)
                 .map_err(|e| e.to_string());
@@ -152,11 +152,32 @@ impl Jobs {
         });
     }
 
+    /// Loads an IFC file from its bytes (browser: picked or dropped files).
+    pub fn load_bytes(&mut self, name: String, bytes: Vec<u8>, ctx: &egui::Context) {
+        let reporter = self.start(format!("Loading {name}"), ctx);
+        crate::platform::spawn(move || {
+            let result = opencheck_core::load_ifc_bytes(&name, &bytes)
+                .map(Box::new)
+                .map_err(|e| e.to_string());
+            // Kept, since there is no file to read again when the project is saved.
+            let bytes: Arc<[u8]> = Arc::from(bytes);
+            reporter.send(
+                JobResult::ModelLoaded {
+                    source: ModelSource::Memory { name, bytes },
+                    entry: None,
+                    replaces: None,
+                    result,
+                },
+                true,
+            );
+        });
+    }
+
     /// Reads the project, then its models one by one in manifest order, so the
     /// federation is built in the same order every time.
     pub fn open_project(&mut self, path: PathBuf, ctx: &egui::Context) {
         let reporter = self.start(format!("Opening {}", file_name(&path)), ctx);
-        std::thread::spawn(move || {
+        crate::platform::spawn(move || {
             let contents = match project::read_project(&path) {
                 Ok(c) => c,
                 Err(e) => {
@@ -203,9 +224,72 @@ impl Jobs {
         });
     }
 
+    /// [`Self::open_project`] for a project file picked in the browser. The
+    /// models' bytes stay in memory for the next save.
+    pub fn open_project_bytes(&mut self, name: String, bytes: Vec<u8>, ctx: &egui::Context) {
+        let reporter = self.start(format!("Opening {name}"), ctx);
+        let path = PathBuf::from(name);
+        crate::platform::spawn(move || {
+            let contents = match project::read_project_bytes(&bytes) {
+                Ok(c) => c,
+                Err(e) => {
+                    reporter.send(
+                        JobResult::ProjectOpened {
+                            path,
+                            result: Err(e.to_string()),
+                        },
+                        true,
+                    );
+                    return;
+                }
+            };
+            let entries = contents.manifest.models.clone();
+            reporter.send(
+                JobResult::ProjectOpened {
+                    path,
+                    result: Ok(contents),
+                },
+                false,
+            );
+            for entry in entries {
+                let name = format!("{}.ifc", entry.name);
+                let (result, source) = match project::read_project_model_bytes(&bytes, &entry.file)
+                {
+                    Ok(model) => {
+                        let result = opencheck_core::load_ifc_bytes(&name, &model)
+                            .map(Box::new)
+                            .map_err(|e| e.to_string());
+                        let source = ModelSource::Memory {
+                            name,
+                            bytes: Arc::from(model),
+                        };
+                        (result, source)
+                    }
+                    Err(e) => (
+                        Err(e.to_string()),
+                        ModelSource::Memory {
+                            name,
+                            bytes: Arc::from(Vec::new()),
+                        },
+                    ),
+                };
+                reporter.send(
+                    JobResult::ModelLoaded {
+                        source,
+                        entry: Some(entry),
+                        replaces: None,
+                        result,
+                    },
+                    false,
+                );
+            }
+            reporter.send(JobResult::ProjectModelsDone, true);
+        });
+    }
+
     pub fn save_project(&mut self, request: SaveRequest, ctx: &egui::Context) {
         let reporter = self.start(format!("Saving {}", file_name(&request.path)), ctx);
-        std::thread::spawn(move || {
+        crate::platform::spawn(move || {
             let SaveRequest {
                 path,
                 ids,
@@ -215,15 +299,32 @@ impl Jobs {
                 documents,
                 created,
             } = request;
-            let result = project::save_project(
-                &path,
-                &models,
-                &rulesets,
-                &requirements,
-                &documents,
-                created.as_deref(),
-            )
-            .map_err(|e| e.to_string());
+            // In the browser the project is built in memory and downloaded.
+            let result = if crate::platform::IS_WEB {
+                project::save_project_bytes(
+                    &models,
+                    &rulesets,
+                    &requirements,
+                    &documents,
+                    created.as_deref(),
+                )
+                .map_err(|e| e.to_string())
+                .and_then(|(bytes, manifest)| {
+                    crate::platform::write(&path, &bytes)
+                        .map(|()| manifest)
+                        .map_err(|e| e.to_string())
+                })
+            } else {
+                project::save_project(
+                    &path,
+                    &models,
+                    &rulesets,
+                    &requirements,
+                    &documents,
+                    created.as_deref(),
+                )
+                .map_err(|e| e.to_string())
+            };
             reporter.send(JobResult::Saved { path, ids, result }, true);
         });
     }
@@ -237,7 +338,7 @@ impl Jobs {
         ctx: &egui::Context,
     ) {
         let reporter = self.start("Checking".to_owned(), ctx);
-        std::thread::spawn(move || {
+        crate::platform::spawn(move || {
             let ctx = reporter.ctx.clone();
             let report = opencheck_core::check::run_check(&models, &jobs, &|fraction| {
                 progress.store((fraction * 1000.0) as u32, Ordering::Relaxed);

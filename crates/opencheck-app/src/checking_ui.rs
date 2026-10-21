@@ -151,7 +151,7 @@ fn add_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             .clicked()
         {
             ui.close();
-            import_ruleset(app);
+            import_ruleset(app, ui.ctx());
         }
         if ui
             .button(format!("{}  Import IDS…", icon::FILE_ARROW_UP))
@@ -162,7 +162,7 @@ fn add_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             .clicked()
         {
             ui.close();
-            import_ids(app);
+            import_ids(app, ui.ctx());
         }
         if ui
             .button(format!(
@@ -196,12 +196,13 @@ fn add_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     });
 }
 
-fn import_ids(app: &mut OpenCheckApp) {
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Import IDS")
-        .add_filter("Information Delivery Specification", &["ids", "xml"])
-        .pick_file()
-    else {
+fn import_ids(app: &mut OpenCheckApp, ctx: &egui::Context) {
+    let filter: crate::platform::Filter = ("Information Delivery Specification", &["ids", "xml"]);
+    if crate::platform::IS_WEB {
+        crate::platform::pick_in_browser(crate::platform::Pick::ImportIds, filter, false, ctx);
+        return;
+    }
+    let Some(path) = crate::platform::pick_file("Import IDS", filter) else {
         return;
     };
     let name = path
@@ -224,26 +225,26 @@ fn export_ids(app: &mut OpenCheckApp) {
         return;
     };
     let level = app.checking.project_level();
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Export information requirements as IDS")
-        .add_filter("Information Delivery Specification", &["ids"])
-        .set_file_name(format!("information-lod-{level}.ids"))
-        .save_file()
-    else {
+    let Some(path) = crate::platform::save_file(
+        "Export information requirements as IDS",
+        ("Information Delivery Specification", &["ids"]),
+        &format!("information-lod-{level}.ids"),
+    ) else {
         return;
     };
     let export = standard_to_ids(standard, std::slice::from_ref(&level));
-    if let Err(e) = std::fs::write(&path, export.ids.to_xml()) {
+    if let Err(e) = crate::platform::write(&path, export.ids.to_xml().as_bytes()) {
         app.errors.push(format!("Could not save the IDS file: {e}"));
     }
 }
 
-fn import_ruleset(app: &mut OpenCheckApp) {
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Import ruleset")
-        .add_filter("OpenCheck ruleset", &["toml"])
-        .pick_file()
-    else {
+fn import_ruleset(app: &mut OpenCheckApp, ctx: &egui::Context) {
+    let filter: crate::platform::Filter = ("OpenCheck ruleset", &["toml"]);
+    if crate::platform::IS_WEB {
+        crate::platform::pick_in_browser(crate::platform::Pick::ImportRuleset, filter, false, ctx);
+        return;
+    }
+    let Some(path) = crate::platform::pick_file("Import ruleset", filter) else {
         return;
     };
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
@@ -260,12 +261,11 @@ fn import_ruleset(app: &mut OpenCheckApp) {
 }
 
 fn download_guide(app: &mut OpenCheckApp) {
-    if let Some(path) = rfd::FileDialog::new()
-        .set_title("Save ruleset guide")
-        .add_filter("Markdown", &["md"])
-        .set_file_name("opencheck-ruleset-guide.md")
-        .save_file()
-        && let Err(e) = std::fs::write(&path, RULESET_GUIDE)
+    if let Some(path) = crate::platform::save_file(
+        "Save ruleset guide",
+        ("Markdown", &["md"]),
+        "opencheck-ruleset-guide.md",
+    ) && let Err(e) = crate::platform::write(&path, RULESET_GUIDE.as_bytes())
     {
         app.errors.push(format!("Could not save the guide: {e}"));
     }

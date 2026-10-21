@@ -7,19 +7,32 @@
 //!
 //! Every request runs on a background thread; results come back as
 //! [`Message`]s that the UI applies with [`BcfLive::poll`].
+//!
+//! The browser version has no BCF Live yet: browsers do not let a page
+//! listen for the sign-in, and servers must allow the page's address (CORS).
 
+// Sign-in and token handling are left out of the browser build.
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufRead, BufReader, Write};
+#[cfg(not(target_arch = "wasm32"))]
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+
+use web_time::{Instant, SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
+#[cfg(not(target_arch = "wasm32"))]
+use opencheck_core::bcf::AuthInfo;
 use opencheck_core::bcf::{
-    self, AuthInfo, Comment, CommentRequest, CurrentUser, Extensions, Project, TokenResponse,
-    Topic, TopicRequest, ViewpointRequest,
+    self, Comment, CommentRequest, CurrentUser, Extensions, Project, TokenResponse, Topic,
+    TopicRequest, ViewpointRequest,
 };
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use sha2::{Digest, Sha256};
 
 /// The address Dalux gives its customers for BCF.
@@ -360,13 +373,18 @@ impl BcfLive {
         work: impl FnOnce(&Client) -> Result<(), String> + Send + 'static,
     ) {
         self.busy += 1;
+        #[cfg(not(target_arch = "wasm32"))]
         let client = Client {
             credentials: std::sync::Mutex::new(self.credentials()),
             sender: self.sender.clone(),
             agent: agent(),
         };
+        #[cfg(target_arch = "wasm32")]
+        let client = Client {
+            sender: self.sender.clone(),
+        };
         let ctx = ctx.clone();
-        std::thread::spawn(move || {
+        crate::platform::spawn(move || {
             let result = work(&client);
             let _ = client.sender.send(Message::Finished(result));
             ctx.request_repaint();
@@ -383,8 +401,12 @@ impl BcfLive {
         let account = self.account().clone();
         let sender = self.sender.clone();
         let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let message = match sign_in(&account) {
+        crate::platform::spawn(move || {
+            #[cfg(not(target_arch = "wasm32"))]
+            let result = sign_in(&account);
+            #[cfg(target_arch = "wasm32")]
+            let result: Result<TokenResponse, String> = Err(DESKTOP_ONLY.to_owned());
+            let message = match result {
                 Ok(tokens) => Message::SignedIn {
                     server: account.server.clone(),
                     tokens,
@@ -596,6 +618,7 @@ impl BcfLive {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .http_status_as_error(false)
@@ -605,6 +628,7 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Requests with a bearer token, refreshing it once when it has expired.
 struct Client {
     credentials: std::sync::Mutex<Credentials>,
@@ -612,6 +636,7 @@ struct Client {
     agent: ureq::Agent,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Client {
     fn send(&self, message: Message) {
         let _ = self.sender.send(message);
@@ -742,6 +767,44 @@ impl Client {
     }
 }
 
+/// In the browser every request ends with the same answer.
+#[cfg(target_arch = "wasm32")]
+struct Client {
+    sender: Sender<Message>,
+}
+
+#[cfg(target_arch = "wasm32")]
+const DESKTOP_ONLY: &str =
+    "BCF Live works in the desktop app; the browser version cannot sign in yet.";
+
+#[cfg(target_arch = "wasm32")]
+impl Client {
+    fn send(&self, message: Message) {
+        let _ = self.sender.send(message);
+    }
+
+    fn get<T: serde::de::DeserializeOwned>(&self, _path: &str) -> Result<T, String> {
+        Err(DESKTOP_ONLY.to_owned())
+    }
+
+    fn post<T: serde::de::DeserializeOwned>(
+        &self,
+        _path: &str,
+        _body: &impl Serialize,
+    ) -> Result<T, String> {
+        Err(DESKTOP_ONLY.to_owned())
+    }
+
+    fn put<T: serde::de::DeserializeOwned>(
+        &self,
+        _path: &str,
+        _body: &impl Serialize,
+    ) -> Result<T, String> {
+        Err(DESKTOP_ONLY.to_owned())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 /// Reads a JSON answer, turning HTTP errors into readable messages.
 fn read<T: serde::de::DeserializeOwned>(
     response: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
@@ -840,6 +903,7 @@ fn create_topic(client: &Client, project: &str, topic: &TopicRequest) -> Result<
     Err(first)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A server answer on one line, e.g. `{ "message": "Unauthorized" }`.
 fn one_line(body: &str) -> String {
     let text = body.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -850,6 +914,7 @@ fn one_line(body: &str) -> String {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn auth_info(agent: &ureq::Agent, root: &str) -> Result<AuthInfo, String> {
     read(
         agent.get(&format!("{root}/auth")).call(),
@@ -857,12 +922,14 @@ fn auth_info(agent: &ureq::Agent, root: &str) -> Result<AuthInfo, String> {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn random_token() -> Result<String, String> {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).map_err(|e| e.to_string())?;
     Ok(bcf::base64_url(&bytes))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// The whole browser sign-in: authorization code (with PKCE when the server wants it) and a listener
 /// on this computer for the way back.
 fn sign_in(account: &Account) -> Result<TokenResponse, String> {
@@ -952,6 +1019,7 @@ fn sign_in(account: &Account) -> Result<TokenResponse, String> {
     Ok(tokens)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 enum Callback {
     Code(String),
     Denied(String),
@@ -959,6 +1027,7 @@ enum Callback {
     Ignore,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn handle_callback(stream: TcpStream, state: &str) -> Callback {
     let _ = stream.set_nonblocking(false);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));

@@ -49,6 +49,14 @@ built.
   with viewpoint and picture, sync of status, assignee, title and priority,
   comments, connection log.
 
+**Web version**
+
+- The same code compiled to WebAssembly and published on GitHub Pages for
+  every push to `main`. IFC files are opened in the browser and stay there;
+  projects, issues, reports and BCF files are downloaded, and projects are
+  opened again from the file. File dialogs, downloads and
+  background work go through one small layer (`platform.rs`).
+
 **Look and feel**
 
 - "Grafit" design with IBM Plex fonts; light and dark theme.
@@ -87,14 +95,9 @@ built.
 
 - **Code signing** of the Windows build, so SmartScreen does not warn; builds
   for macOS and Linux.
-- **Web version**: the same Rust code compiled to WebAssembly and served as a
-  static website. IFC files are opened and stay in the browser (nothing is
-  uploaded to a server); projects are kept in browser storage and can be
-  downloaded as `.opencheck` files. To keep this possible:
-  - `opencheck-core` must not depend on the file system or threads in its
-    API; it works on bytes.
-  - File access and background work in the app go through one small layer
-    that can be swapped for browser APIs (File System Access, Web Workers).
-  - A CI job should compile `opencheck-core` for `wasm32-unknown-unknown`.
-  Known limits: about 4 GB memory per tab, WebGPU only in Chromium browsers
-  today (WebGL2 needs a shader fallback), slower geometry processing.
+- **Web version, next steps**: recent projects kept in browser storage;
+  updating a model in place; the theme and ruleset library remembered; loading and
+  checking in a Web Worker so the page does not wait; BCF Live (needs a
+  sign-in that returns to the page and servers that allow it); WebGL2 for
+  browsers without WebGPU. Known limits: about 4 GB memory per tab, slower
+  geometry processing.

@@ -278,10 +278,10 @@ fn item_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     .add(egui::Button::new(RichText::new(icon::DOWNLOAD_SIMPLE).small()).frame(false))
                     .on_hover_text("Import ruleset files (.toml) into the library")
                     .clicked()
-                    && let Some(paths) = rfd::FileDialog::new()
-                        .set_title("Import rulesets into the library")
-                        .add_filter("OpenCheck ruleset", &["toml"])
-                        .pick_files()
+                    && let Some(paths) = crate::platform::pick_files(
+                        "Import rulesets into the library",
+                        ("OpenCheck ruleset", &["toml"]),
+                    )
                 {
                     let (imported, errors) = library::import(&paths);
                     app.errors.extend(errors);
@@ -537,12 +537,12 @@ fn project_editor(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) {
         }
     }
     if export
-        && let Some(path) = rfd::FileDialog::new()
-            .set_title("Export ruleset")
-            .add_filter("OpenCheck ruleset", &["toml"])
-            .set_file_name(format!("{}.toml", ruleset.ruleset.name))
-            .save_file()
-        && let Err(e) = std::fs::write(&path, ruleset.to_toml())
+        && let Some(path) = crate::platform::save_file(
+            "Export ruleset",
+            ("OpenCheck ruleset", &["toml"]),
+            &format!("{}.toml", ruleset.ruleset.name),
+        )
+        && let Err(e) = crate::platform::write(&path, ruleset.to_toml().as_bytes())
     {
         app.errors.push(format!("Could not export: {e}"));
     }

@@ -13,7 +13,7 @@ use wgpu::util::DeviceExt;
 /// Depth buffer format; matches `NativeOptions::depth_buffer = 32`.
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Matches `NativeOptions::multisampling`.
-pub const MSAA_SAMPLES: u32 = 4;
+pub const MSAA_SAMPLES: u32 = if cfg!(target_arch = "wasm32") { 1 } else { 4 };
 
 /// How an element is drawn. Must match the constants in `scene.wgsl`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

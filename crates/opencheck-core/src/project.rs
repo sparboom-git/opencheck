@@ -16,9 +16,9 @@
 //! for large federations.
 
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, Cursor, Read, Seek, Write};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -133,6 +133,8 @@ pub enum ModelSource {
     File(PathBuf),
     /// An entry in an existing project file.
     Project { path: PathBuf, entry: String },
+    /// IFC bytes held in memory, where there are no files (the browser).
+    Memory { name: String, bytes: Arc<[u8]> },
 }
 
 /// A model to write into a project.
@@ -144,7 +146,11 @@ pub struct ProjectModel {
 }
 
 pub fn now_rfc3339() -> String {
-    humantime::format_rfc3339_seconds(SystemTime::now()).to_string()
+    // web_time's clock also works in the browser; humantime wants std's type.
+    let since_epoch = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
+        .unwrap_or_default();
+    humantime::format_rfc3339_seconds(std::time::UNIX_EPOCH + since_epoch).to_string()
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -156,7 +162,17 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 
 /// Reads the manifest, rulesets and view state of a project.
 pub fn read_project(path: &Path) -> Result<ProjectContents, ProjectError> {
-    let mut archive = ZipArchive::new(BufReader::new(File::open(path)?))?;
+    read_contents(ZipArchive::new(BufReader::new(File::open(path)?))?)
+}
+
+/// [`read_project`] for a project held in memory.
+pub fn read_project_bytes(bytes: &[u8]) -> Result<ProjectContents, ProjectError> {
+    read_contents(ZipArchive::new(Cursor::new(bytes))?)
+}
+
+fn read_contents<R: Read + Seek>(
+    mut archive: ZipArchive<R>,
+) -> Result<ProjectContents, ProjectError> {
     let manifest: Manifest = serde_json::from_reader(archive.by_name(MANIFEST)?)?;
     if manifest.format != FORMAT_NAME {
         return Err(ProjectError::Format(format!(
@@ -210,7 +226,18 @@ fn read_json<R: Read + io::Seek>(
 
 /// Reads the bytes of one IFC file from a project.
 pub fn read_project_model(path: &Path, entry: &str) -> Result<Vec<u8>, ProjectError> {
-    let mut archive = ZipArchive::new(BufReader::new(File::open(path)?))?;
+    read_entry(ZipArchive::new(BufReader::new(File::open(path)?))?, entry)
+}
+
+/// [`read_project_model`] for a project held in memory.
+pub fn read_project_model_bytes(project: &[u8], entry: &str) -> Result<Vec<u8>, ProjectError> {
+    read_entry(ZipArchive::new(Cursor::new(project))?, entry)
+}
+
+fn read_entry<R: Read + Seek>(
+    mut archive: ZipArchive<R>,
+    entry: &str,
+) -> Result<Vec<u8>, ProjectError> {
     let mut file = archive.by_name(entry)?;
     let mut bytes = Vec::with_capacity(file.size() as usize);
     file.read_to_end(&mut bytes)?;
@@ -230,7 +257,22 @@ pub fn save_project(
     created: Option<&str>,
 ) -> Result<Manifest, ProjectError> {
     let temp = temp_path(path);
-    let result = write_archive(&temp, models, rulesets, requirements, documents, created);
+    let result = File::create(&temp)
+        .map_err(ProjectError::from)
+        .and_then(|file| {
+            write_archive(
+                BufWriter::new(file),
+                models,
+                rulesets,
+                requirements,
+                documents,
+                created,
+            )
+        })
+        .and_then(|(manifest, mut writer)| {
+            writer.flush()?;
+            Ok(manifest)
+        });
     match result {
         Ok(manifest) => {
             std::fs::rename(&temp, path)?;
@@ -243,21 +285,40 @@ pub fn save_project(
     }
 }
 
+/// [`save_project`] into memory: the bytes of the `.opencheck` file.
+pub fn save_project_bytes(
+    models: &[ProjectModel],
+    rulesets: &[RulesetFile],
+    requirements: &[RulesetFile],
+    documents: &ProjectDocuments,
+    created: Option<&str>,
+) -> Result<(Vec<u8>, Manifest), ProjectError> {
+    let (manifest, cursor) = write_archive(
+        Cursor::new(Vec::new()),
+        models,
+        rulesets,
+        requirements,
+        documents,
+        created,
+    )?;
+    Ok((cursor.into_inner(), manifest))
+}
+
 fn temp_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".saving");
     path.with_file_name(name)
 }
 
-fn write_archive(
-    target: &Path,
+fn write_archive<W: Write + Seek>(
+    target: W,
     models: &[ProjectModel],
     rulesets: &[RulesetFile],
     requirements: &[RulesetFile],
     documents: &ProjectDocuments,
     created: Option<&str>,
-) -> Result<Manifest, ProjectError> {
-    let mut zip = ZipWriter::new(BufWriter::new(File::create(target)?));
+) -> Result<(Manifest, W), ProjectError> {
+    let mut zip = ZipWriter::new(target);
     let now = now_rfc3339();
     let text_options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
@@ -280,6 +341,14 @@ fn write_archive(
                     .large_file(size >= u32::MAX as u64);
                 zip.start_file(&file, options)?;
                 io::copy(&mut BufReader::new(File::open(path)?), &mut zip)?;
+            }
+            ModelSource::Memory { bytes, .. } => {
+                let options = SimpleFileOptions::default()
+                    .compression_method(CompressionMethod::Deflated)
+                    .compression_level(Some(3))
+                    .large_file(bytes.len() as u64 >= u32::MAX as u64);
+                zip.start_file(&file, options)?;
+                zip.write_all(bytes)?;
             }
         }
         entries.push(ModelEntry {
@@ -316,8 +385,8 @@ fn write_archive(
     // The manifest goes last so a reader that finds it knows the archive is complete.
     zip.start_file(MANIFEST, text_options)?;
     serde_json::to_writer_pretty(&mut zip, &manifest)?;
-    zip.finish()?.flush()?;
-    Ok(manifest)
+    let writer = zip.finish()?;
+    Ok((manifest, writer))
 }
 
 /// `models/<name>.ifc`, with characters that are awkward in archives replaced
@@ -451,6 +520,29 @@ mod tests {
         assert!(reread.requirements.is_empty());
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn round_trip_in_memory() {
+        let models = vec![ProjectModel {
+            entry: entry("ARK"),
+            source: ModelSource::Memory {
+                name: "ARK.ifc".into(),
+                bytes: Arc::from(IFC),
+            },
+        }];
+        let documents = ProjectDocuments {
+            issues: Some(serde_json::json!({ "issues": [] })),
+            ..Default::default()
+        };
+        let (bytes, written) = save_project_bytes(&models, &[], &[], &documents, None).unwrap();
+        let read = read_project_bytes(&bytes).unwrap();
+        assert_eq!(read.manifest.models, written.models);
+        assert_eq!(read.documents, documents);
+        assert_eq!(
+            read_project_model_bytes(&bytes, &written.models[0].file).unwrap(),
+            IFC
+        );
     }
 
     #[test]

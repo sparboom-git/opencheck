@@ -6,7 +6,9 @@
 //! relationship entities with ifc-lite's STEP decoder.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use glam::{DMat4, DVec3, Vec3};
 use ifc_lite_core::{AttributeValue, DecodedEntity, EntityDecoder, EntityScanner};

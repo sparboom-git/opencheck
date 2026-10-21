@@ -20,6 +20,7 @@ use crate::issues::{
 };
 use crate::jobs::{JobResult, Jobs, SaveRequest};
 use crate::measure::MeasureTool;
+use crate::platform;
 use crate::render::SceneGpu;
 use crate::ruleset_manager::{self, ManagerState};
 use crate::scene::{ElementRef, Focus, SectionPlane, ViewState};
@@ -183,10 +184,16 @@ impl OpenCheckApp {
     }
 
     pub fn open_file_dialog(&mut self, ctx: &egui::Context) {
-        if let Some(paths) = rfd::FileDialog::new()
-            .set_title("Add IFC models")
-            .add_filter("IFC model", &["ifc", "IFC"])
-            .pick_files()
+        if platform::IS_WEB {
+            platform::pick_in_browser(
+                platform::Pick::AddModels,
+                ("IFC model", &["ifc", "IFC"]),
+                true,
+                ctx,
+            );
+            return;
+        }
+        if let Some(paths) = platform::pick_files("Add IFC models", ("IFC model", &["ifc", "IFC"]))
         {
             for path in paths {
                 self.jobs.load_file(path, None, ctx);
@@ -209,11 +216,18 @@ impl OpenCheckApp {
         match action {
             PendingAction::NewProject => self.reset(),
             PendingAction::OpenProject(path) => {
+                // In the browser the file arrives later; see handle_picked_files.
+                if platform::IS_WEB {
+                    platform::pick_in_browser(
+                        platform::Pick::OpenProject,
+                        ("OpenCheck project", &[PROJECT_EXTENSION]),
+                        false,
+                        ctx,
+                    );
+                    return;
+                }
                 let path = path.or_else(|| {
-                    rfd::FileDialog::new()
-                        .set_title("Open project")
-                        .add_filter("OpenCheck project", &[PROJECT_EXTENSION])
-                        .pick_file()
+                    platform::pick_file("Open project", ("OpenCheck project", &[PROJECT_EXTENSION]))
                 });
                 if let Some(path) = path {
                     self.reset();
@@ -265,12 +279,11 @@ impl OpenCheckApp {
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| format!("Project.{PROJECT_EXTENSION}"));
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title("Save project")
-            .add_filter("OpenCheck project", &[PROJECT_EXTENSION])
-            .set_file_name(name)
-            .save_file()
-        {
+        if let Some(path) = platform::save_file(
+            "Save project",
+            ("OpenCheck project", &[PROJECT_EXTENSION]),
+            &name,
+        ) {
             self.save_to(with_extension(path), then, ctx);
         }
     }
@@ -382,10 +395,14 @@ impl OpenCheckApp {
                     Ok(manifest) => {
                         for (id, entry) in ids.iter().zip(manifest.models) {
                             if let Some(record) = self.session.records.get_mut(id) {
-                                record.source = ModelSource::Project {
-                                    path: path.clone(),
-                                    entry: entry.file.clone(),
-                                };
+                                // In the browser the bytes stay in memory; the
+                                // download is not a file that can be read again.
+                                if !platform::IS_WEB {
+                                    record.source = ModelSource::Project {
+                                        path: path.clone(),
+                                        entry: entry.file.clone(),
+                                    };
+                                }
                                 record.entry = entry;
                             }
                         }
@@ -430,7 +447,7 @@ impl OpenCheckApp {
                     visible: true,
                     source_path: match &source {
                         ModelSource::File(p) => Some(p.display().to_string()),
-                        ModelSource::Project { .. } => None,
+                        ModelSource::Project { .. } | ModelSource::Memory { .. } => None,
                     },
                     sha256: model.content_hash.clone(),
                     revision: 1,
@@ -478,11 +495,17 @@ impl OpenCheckApp {
             .get(id)
             .map(|m| m.short_name.clone())
             .unwrap_or_default();
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title(format!("Update {name}: choose the new IFC file"))
-            .add_filter("IFC model", &["ifc", "IFC"])
-            .pick_file()
-        {
+        if platform::IS_WEB {
+            self.errors.push(
+                "Updating a model is not in the browser version yet: remove it and add the new file."
+                    .to_owned(),
+            );
+            return;
+        }
+        if let Some(path) = platform::pick_file(
+            &format!("Update {name}: choose the new IFC file"),
+            ("IFC model", &["ifc", "IFC"]),
+        ) {
             self.jobs.load_file(path, Some(id), ctx);
         }
     }
@@ -1300,7 +1323,78 @@ impl OpenCheckApp {
         self.jobs.is_busy()
     }
 
+    /// Files picked in the browser arrive as bytes, a frame or more later.
+    fn handle_picked_files(&mut self, ctx: &egui::Context) {
+        for (kind, files) in platform::take_picked() {
+            for file in files {
+                match kind {
+                    platform::Pick::OpenProject => {
+                        self.reset();
+                        self.jobs.open_project_bytes(file.name, file.bytes, ctx);
+                    }
+                    // A project dropped on the page opens, unless that would
+                    // discard unsaved work.
+                    platform::Pick::AddModels
+                        if file
+                            .name
+                            .to_ascii_lowercase()
+                            .ends_with(&format!(".{PROJECT_EXTENSION}")) =>
+                    {
+                        if self.session.dirty {
+                            self.errors.push(format!(
+                                "Save the current project (or start a new one) before opening {}",
+                                file.name
+                            ));
+                        } else {
+                            self.reset();
+                            self.jobs.open_project_bytes(file.name, file.bytes, ctx);
+                        }
+                    }
+                    platform::Pick::AddModels => {
+                        if file.name.to_ascii_lowercase().ends_with(".ifc") {
+                            self.jobs.load_bytes(file.name, file.bytes, ctx);
+                        } else {
+                            self.errors.push(format!(
+                                "{} is not an IFC file; in the browser only IFC files can be opened",
+                                file.name
+                            ));
+                        }
+                    }
+                    platform::Pick::ImportRuleset => {
+                        let text = String::from_utf8_lossy(&file.bytes);
+                        match self.checking.add_ruleset(&text, Some(&file.name)) {
+                            Ok(()) => self.session.dirty = true,
+                            Err(e) => self
+                                .errors
+                                .push(format!("{} is not a valid ruleset: {e}", file.name)),
+                        }
+                    }
+                    platform::Pick::ImportIds => {
+                        let text = String::from_utf8_lossy(&file.bytes);
+                        let stem = file
+                            .name
+                            .rsplit_once('.')
+                            .map_or(file.name.as_str(), |(s, _)| s);
+                        match self.checking.add_ids(&text, stem) {
+                            Ok(()) => self.session.dirty = true,
+                            Err(e) => self
+                                .errors
+                                .push(format!("{} is not a valid IDS file: {e}", file.name)),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+        // In the browser dropped files have no path; their bytes arrive later
+        // like picked files.
+        if platform::IS_WEB {
+            let files = ctx.input(|i| i.raw.dropped_files.clone());
+            platform::read_dropped(files, ctx);
+            return;
+        }
         let dropped: Vec<PathBuf> = ctx.input(|i| {
             i.raw
                 .dropped_files
@@ -1407,10 +1501,13 @@ impl OpenCheckApp {
                     }
                 }
             });
-            ui.separator();
-            if item(ui, icon::SIGN_OUT, "Exit", None) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                ui.close();
+            // A browser tab is closed by the browser.
+            if !platform::IS_WEB {
+                ui.separator();
+                if item(ui, icon::SIGN_OUT, "Exit", None) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    ui.close();
+                }
             }
         });
     }
@@ -1609,6 +1706,7 @@ fn source_label(source: &ModelSource) -> String {
     let path: &Path = match source {
         ModelSource::File(p) => p,
         ModelSource::Project { entry, .. } => Path::new(entry),
+        ModelSource::Memory { name, .. } => Path::new(name),
     };
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -1635,6 +1733,7 @@ impl eframe::App for OpenCheckApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
         self.receive_jobs(&ctx);
+        self.handle_picked_files(&ctx);
         self.handle_bcf(&ctx);
         self.step_capture(&ctx);
         self.handle_dropped_files(&ctx);
