@@ -18,6 +18,9 @@ built.
   marked "Solved by update".
 - Working area ("Edit view"): a rectangle drawn in a top view, aligned to an
   element if wanted; only elements touching it are shown and checked.
+- Walk mode: stand on a floor and walk through the model at eye height.
+- Right-click in the model tree to isolate, hide, show, select or zoom to a
+  model, storey, class or element.
 - `.opencheck` project file with File menu (see [file-format.md](file-format.md)).
 
 **Checking**
