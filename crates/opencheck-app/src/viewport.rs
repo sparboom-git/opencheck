@@ -8,7 +8,7 @@ use eframe::egui_wgpu;
 use egui_phosphor::regular as icon;
 use glam::{Vec2 as GVec2, Vec3};
 
-use crate::app::OpenCheckApp;
+use crate::app::{OpenCheckApp, Walk};
 use crate::camera::Ray;
 use crate::measure::{self, MeasureKind, Measurement};
 use crate::render::{CameraUniform, ViewportCallback};
@@ -39,8 +39,14 @@ pub fn show(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         return;
     }
 
+    if app.nav.walk != Walk::Off && app.is_editing_area() {
+        app.nav.walk = Walk::Off;
+    }
+    let placed = handle_walk(app, ui, rect, &response, aspect);
     handle_navigation(app, ui, rect, &response, aspect);
-    if app.is_editing_area() {
+    if placed || app.nav.walk == Walk::Placing {
+        // The click put the walker down; it selects nothing.
+    } else if app.is_editing_area() {
         crate::area_edit::interact(app, ui, rect, &response, aspect);
     } else if app.measure.active {
         handle_measuring(app, ui, rect, &response, aspect);
@@ -98,9 +104,43 @@ pub fn show(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     tool_bar(app, ui, rect);
     if app.measure.active {
         measure_hint(app, ui, rect);
+    } else if app.nav.walk != Walk::Off {
+        walk_hint(app, ui, rect);
     }
     error_toasts(app, ui, rect);
     drop_overlay(ui, rect);
+    web_busy_note(app, ui, rect);
+}
+
+/// In the browser loading and checking run on the page, which stops
+/// responding meanwhile; a clear note says it is working, not stuck.
+fn web_busy_note(app: &OpenCheckApp, ui: &egui::Ui, rect: Rect) {
+    if !crate::platform::IS_WEB || !app.is_busy() {
+        return;
+    }
+    let painter = ui.painter();
+    let card = Rect::from_center_size(rect.center(), Vec2::new(rect.width().min(420.0), 96.0));
+    painter.rect_filled(card, 8.0, theme::surface());
+    painter.rect_stroke(
+        card,
+        8.0,
+        Stroke::new(1.0, theme::border()),
+        egui::StrokeKind::Inside,
+    );
+    painter.text(
+        card.center() - Vec2::new(0.0, 14.0),
+        Align2::CENTER_CENTER,
+        format!("{}  {}", icon::HOURGLASS_MEDIUM, app.busy_text()),
+        FontId::proportional(17.0),
+        theme::text(),
+    );
+    painter.text(
+        card.center() + Vec2::new(0.0, 16.0),
+        Align2::CENTER_CENTER,
+        "The page may not respond until this is done.",
+        FontId::proportional(13.0),
+        theme::text_muted(),
+    );
 }
 
 /// A small progress note below the 3D view while pictures are taken; it is
@@ -140,9 +180,9 @@ fn empty_state(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, response: 
         theme::accent(),
     );
     let message = if app.is_busy() {
-        "Loading…"
+        app.busy_text()
     } else {
-        "Drop IFC files or a project here"
+        "Drop IFC files or a project here".to_owned()
     };
     painter.text(
         center + Vec2::new(0.0, 14.0),
@@ -154,7 +194,12 @@ fn empty_state(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, response: 
     painter.text(
         center + Vec2::new(0.0, 44.0),
         Align2::CENTER_CENTER,
-        "or click anywhere to browse. Several files are combined into one federated model.",
+        if crate::platform::IS_WEB && app.is_busy() {
+            // Loading runs on the page in the browser; say why it may pause.
+            "The page may not respond until this is done."
+        } else {
+            "or click anywhere to browse. Several files are combined into one federated model."
+        },
         FontId::proportional(14.0),
         theme::text_muted(),
     );
@@ -243,8 +288,9 @@ fn handle_navigation(
     let pointer = response.interact_pointer_pos().or(response.hover_pos());
 
     // Orbit with the left button, around the point that was under the cursor.
-    // In the top view of "Edit view" the left button draws instead.
-    let orbit = !app.is_editing_area();
+    // In the top view of "Edit view" the left button draws instead, and while
+    // walking it looks around (see handle_walk).
+    let orbit = !app.is_editing_area() && app.nav.walk == Walk::Off;
     if orbit
         && response.drag_started_by(PointerButton::Primary)
         && let Some(pos) = pointer
@@ -280,8 +326,8 @@ fn handle_navigation(
         app.camera.pan(GVec2::new(d.x, d.y), depth, rect.height());
     }
 
-    // Zoom towards whatever is under the cursor.
-    if response.hovered() {
+    // Zoom towards whatever is under the cursor; walking steps instead.
+    if response.hovered() && app.nav.walk == Walk::Off {
         let scroll = ui.input(|i| i.smooth_scroll_delta.y + i.zoom_delta().ln() * 300.0);
         if scroll.abs() > 0.0
             && let Some(pos) = response.hover_pos()
@@ -296,6 +342,96 @@ fn handle_navigation(
 
     if response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    }
+}
+
+/// Eye height above the floor while walking, metres.
+const EYE_HEIGHT: f32 = 1.6;
+/// Highest step the walker climbs, and deepest it steps down, metres.
+const STEP_UP: f32 = 0.6;
+const STEP_DOWN: f32 = 3.0;
+const LOOK_SPEED: f32 = 0.004;
+
+/// Walking: placing the walker on a floor and looking around. Returns true
+/// when a click placed the walker, so it does not also select.
+fn handle_walk(
+    app: &mut OpenCheckApp,
+    ui: &egui::Ui,
+    rect: Rect,
+    response: &egui::Response,
+    aspect: f32,
+) -> bool {
+    if app.nav.walk == Walk::Off {
+        return false;
+    }
+    if app.nav.walk == Walk::Placing && response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    }
+    // A click on a floor stands there (Ctrl+click while walking, so that a
+    // plain click still selects).
+    let place = match app.nav.walk {
+        Walk::Placing => response.clicked(),
+        _ => response.clicked() && ui.input(|i| i.modifiers.command),
+    };
+    if place
+        && let Some(pos) = response.interact_pointer_pos()
+        && let Some(hit) = pick_at(app, rect, aspect, pos)
+    {
+        // On a floor stand on it; on a wall, on the floor just in front of it.
+        let spot = if hit.normal.z.abs() > 0.7 {
+            hit.point
+        } else {
+            hit.point - pointer_ray(app, rect, aspect, pos).dir * 0.4
+        };
+        let ground = if hit.normal.z.abs() > 0.7 {
+            hit.point.z
+        } else {
+            floor_below(app, spot + Vec3::Z * 0.2).unwrap_or(hit.point.z)
+        };
+        app.camera.eye = Vec3::new(spot.x, spot.y, ground + EYE_HEIGHT);
+        app.camera.pitch = 0.0;
+        app.nav.walk = Walk::Walking;
+        return true;
+    }
+    if app.nav.walk == Walk::Walking {
+        // Drag to turn the head; the eye stays where it is.
+        if response.dragged_by(PointerButton::Primary) {
+            let d = response.drag_delta();
+            app.camera.yaw += d.x * LOOK_SPEED;
+            app.camera.pitch = (app.camera.pitch - d.y * LOOK_SPEED).clamp(-1.4, 1.4);
+        }
+        if response.hovered() {
+            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+            if scroll.abs() > 0.0 {
+                app.camera.walk(scroll * 0.01, 0.0, 0.0);
+                follow_floor(app);
+            }
+        }
+    }
+    false
+}
+
+/// Highest floor surface below `from`, within [`STEP_DOWN`].
+fn floor_below(app: &OpenCheckApp, from: Vec3) -> Option<f32> {
+    let ray = Ray {
+        origin: from,
+        dir: -Vec3::Z,
+    };
+    app.view
+        .pick(&app.federation, &ray)
+        .filter(|h| h.distance <= STEP_DOWN + EYE_HEIGHT)
+        .map(|h| h.point.z)
+}
+
+/// Keeps the eye at eye height over the floor: up small steps and stairs,
+/// down when the floor drops. Without a floor below it stays level.
+fn follow_floor(app: &mut OpenCheckApp) {
+    let eye = app.camera.eye;
+    let feet = eye.z - EYE_HEIGHT;
+    if let Some(z) = floor_below(app, Vec3::new(eye.x, eye.y, feet + STEP_UP))
+        && z >= feet - STEP_DOWN
+    {
+        app.camera.eye.z = z + EYE_HEIGHT;
     }
 }
 
@@ -584,7 +720,9 @@ fn handle_keyboard(app: &mut OpenCheckApp, ui: &egui::Ui, response: &egui::Respo
         app.fit_all();
     }
     if pressed(egui::Key::Escape) {
-        if app.measure.start.is_some() {
+        if app.nav.walk != Walk::Off {
+            app.nav.walk = Walk::Off;
+        } else if app.measure.start.is_some() {
             app.measure.start = None;
         } else if app.measure.active {
             app.measure.toggle();
@@ -638,7 +776,12 @@ fn handle_keyboard(app: &mut OpenCheckApp, ui: &egui::Ui, response: &egui::Respo
         )
     });
     if speed != (0.0, 0.0, 0.0) && !ui.input(|i| i.modifiers.command) {
-        app.camera.walk(speed.0, speed.1, speed.2);
+        if app.nav.walk == Walk::Walking {
+            app.camera.walk(speed.0, speed.1, 0.0);
+            follow_floor(app);
+        } else {
+            app.camera.walk(speed.0, speed.1, speed.2);
+        }
         ui.ctx().request_repaint();
     }
 }
@@ -903,6 +1046,39 @@ fn label_box(painter: &egui::Painter, pos: Pos2, align: Align2, text: &str, colo
     painter.galley(rect.min + Vec2::new(7.0, 4.0), galley, color);
 }
 
+/// The tool bar's size: on a narrow view its buttons wrap onto more rows
+/// instead of being cut off.
+fn tool_bar_size(view: Rect) -> (f32, f32) {
+    const FULL_WIDTH: f32 = 510.0;
+    let width = FULL_WIDTH.min(view.width() - 16.0).max(60.0);
+    let rows = (FULL_WIDTH / width).ceil();
+    (width, 46.0 + (rows - 1.0) * 42.0)
+}
+
+/// Where hint cards go: just above the tool bar.
+fn hint_y(view: Rect) -> f32 {
+    view.bottom() - tool_bar_size(view).1 - 40.0
+}
+
+fn walk_hint(app: &OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
+    let text = if app.nav.walk == Walk::Placing {
+        "Click a floor to stand there  ·  Esc cancels"
+    } else {
+        "W A S D walk (Shift = faster)  ·  drag to look around  ·  scroll steps  ·  Ctrl+click a floor to move there  ·  Esc stops"
+    };
+    let rect = Rect::from_center_size(
+        Pos2::new(view.center().x, hint_y(view)),
+        Vec2::new(620.0_f32.min(view.width() - 16.0), 34.0),
+    );
+    overlay(ui, rect, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(icon::PERSON_SIMPLE_WALK).color(theme::text()));
+            ui.add(egui::Label::new(RichText::new(text).small()).truncate())
+                .on_hover_text(text);
+        });
+    });
+}
+
 fn measure_hint(app: &OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
     let text = if app.measure.start.is_some() {
         "Click the second point  ·  Esc cancels"
@@ -910,7 +1086,7 @@ fn measure_hint(app: &OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
         "Laser: point at a surface, click to keep  ·  Ctrl+click: point to point  ·  Del clears"
     };
     let rect = Rect::from_center_size(
-        Pos2::new(view.center().x, view.bottom() - 86.0),
+        Pos2::new(view.center().x, hint_y(view)),
         Vec2::new(560.0, 34.0),
     );
     overlay(ui, rect, |ui| {
@@ -945,12 +1121,13 @@ fn overlay(ui: &mut egui::Ui, rect: Rect, add: impl FnOnce(&mut egui::Ui)) {
 }
 
 fn tool_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
+    let (width, height) = tool_bar_size(view);
     let rect = Rect::from_center_size(
-        Pos2::new(view.center().x, view.bottom() - 34.0),
-        Vec2::new(470.0, 46.0),
+        Pos2::new(view.center().x, view.bottom() - 11.0 - height / 2.0),
+        Vec2::new(width, height),
     );
     overlay(ui, rect, |ui| {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             if icon_button(ui, icon::HOUSE, false, "Fit everything in view (Home)").clicked() {
                 app.fit_all();
@@ -1012,6 +1189,22 @@ fn tool_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
             if icon_button(ui, icon::SQUARE_HALF, app.view.show_spaces, "Show spaces").clicked() {
                 app.view.show_spaces = !app.view.show_spaces;
                 app.view.modes_dirty = true;
+            }
+            ui.separator();
+            if icon_button(
+                ui,
+                icon::PERSON_SIMPLE_WALK,
+                app.nav.walk != Walk::Off,
+                "Walk: click a floor to stand on it, then W A S D to walk and drag to look \
+                 around (Esc stops)",
+            )
+            .clicked()
+            {
+                app.nav.walk = if app.nav.walk == Walk::Off {
+                    Walk::Placing
+                } else {
+                    Walk::Off
+                };
             }
             let filtered =
                 !app.view.hidden.is_empty() || isolated || app.view.storey_filter.is_some();

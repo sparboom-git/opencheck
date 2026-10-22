@@ -162,6 +162,8 @@ pub struct EditorState {
     row_filter: String,
     show: Show,
     selected: Option<ElementRef>,
+    /// Folded down to a small bar at the bottom, to look at the model.
+    minimized: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,6 +208,7 @@ impl EditorState {
             row_filter: String::new(),
             show: Show::All,
             selected: None,
+            minimized: false,
         }
     }
 }
@@ -267,6 +270,12 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
     let Some(base) = builtin_standard(INFORMATION_STANDARD) else {
         return;
     };
+    if state.minimized {
+        if minimized_bar(ctx, &mut state, base) {
+            app.checking.editor = Some(state);
+        }
+        return;
+    }
     let mut open = true;
     let shown = egui::Window::new(
         RichText::new(format!(
@@ -277,34 +286,54 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
     )
     .id(egui::Id::new("standard_editor"))
     .open(&mut open)
-    .default_size([1240.0, 720.0])
-    .min_size([760.0, 400.0])
+    .default_size(egui::vec2(1240.0, 720.0).min(ctx.content_rect().size() - egui::vec2(40.0, 80.0)))
+    .min_size([560.0, 300.0])
     .resizable(true)
     .collapsible(false)
     .show(ctx, |ui| {
-        ui.label(
-            RichText::new(
-                "Choose where each item is read from. An item counts as present when any of its \
-                 sources has a value. Changes are saved with the project; the built-in standard \
-                 stays as it is.",
-            )
-            .small()
-            .color(theme::text_muted()),
-        );
+        ui.horizontal(|ui| {
+            if ui
+                .button(format!("{}  Minimise", icon::ARROW_LINE_DOWN))
+                .on_hover_text("Fold the window down to a bar at the bottom, to look at the model")
+                .clicked()
+            {
+                state.minimized = true;
+            }
+            ui.add(
+                egui::Label::new(
+                    RichText::new(
+                        "Choose where each item is read from. An item counts as present when any \
+                         of its sources has a value. Changes are saved with the project; the \
+                         built-in standard stays as it is.",
+                    )
+                    .small()
+                    .color(theme::text_muted()),
+                )
+                .wrap(),
+            );
+        });
         ui.add_space(4.0);
+        // The columns share the width, so the window can be made small.
+        let width = ui.available_width();
+        let left = (width * 0.2).clamp(150.0, 250.0);
+        let right = (width * 0.32).clamp(220.0, 390.0);
+        let middle = (width - left - right - 56.0).max(200.0);
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
-                ui.set_width(250.0);
+                ui.set_width(left);
                 item_list(app, ui, &mut state, base);
             });
             ui.separator();
             ui.vertical(|ui| {
-                ui.set_width((ui.available_width() - 410.0).max(380.0));
-                source_editor(app, ui, &mut state, base);
+                ui.set_width(middle);
+                egui::ScrollArea::both()
+                    .id_salt("standard_editor_sources")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| source_editor(app, ui, &mut state, base));
             });
             ui.separator();
             ui.vertical(|ui| {
-                ui.set_width(390.0);
+                ui.set_width(right);
                 ui.horizontal(|ui| {
                     ui.selectable_value(
                         &mut state.side,
@@ -335,6 +364,37 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
     if open {
         app.checking.editor = Some(state);
     }
+}
+
+/// The folded-down window: a bar at the bottom of the screen that opens it
+/// again. Returns false when it was closed.
+fn minimized_bar(ctx: &egui::Context, state: &mut EditorState, base: &InformationStandard) -> bool {
+    let mut keep = true;
+    let item = base
+        .item(&state.item)
+        .map_or_else(String::new, |i| format!(": {}", i.name));
+    egui::Area::new(egui::Id::new("standard_editor_minimized"))
+        // In the middle of the status bar, where it covers nothing.
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -3.0))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            egui::Frame::new().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(format!("{}  Where to look{item}", icon::ARROW_LINE_UP))
+                        .on_hover_text("Open the window again")
+                        .clicked()
+                    {
+                        state.minimized = false;
+                        state.raise = true;
+                    }
+                    if ui.small_button(icon::X).on_hover_text("Close").clicked() {
+                        keep = false;
+                    }
+                });
+            });
+        });
+    keep
 }
 
 fn item_list(

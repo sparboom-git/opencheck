@@ -314,7 +314,7 @@ fn model_tree(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         let header = RichText::new(format!("{}  {}", icon::CUBE, model.short_name))
             .strong()
             .color(color);
-        egui::CollapsingHeader::new(header)
+        let shown = egui::CollapsingHeader::new(header)
             .id_salt(("tree_model", id.0))
             .default_open(app.federation.len() == 1)
             .show(ui, |ui| match &model.spatial_root {
@@ -323,6 +323,12 @@ fn model_tree(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     ui.label(RichText::new("No spatial structure").color(theme::text_muted()));
                 }
             });
+        shown.header_response.context_menu(|ui| {
+            let mut refs = Vec::new();
+            let ids: Vec<u32> = model.elements.iter().map(|e| e.express_id).collect();
+            collect_refs(id, model, &ids, &mut refs);
+            tree_menu(ui, &refs, &mut actions);
+        });
     }
     actions.apply(app);
 }
@@ -332,6 +338,10 @@ struct TreeActions {
     select: Option<(ElementRef, bool)>,
     zoom: Option<ElementRef>,
     toggle_hidden: Vec<(ElementRef, bool)>,
+    /// Show only these elements (right-click > Isolate).
+    isolate: Option<Vec<ElementRef>>,
+    select_many: Option<Vec<ElementRef>>,
+    fit: Option<Vec<ElementRef>>,
 }
 
 impl TreeActions {
@@ -353,7 +363,74 @@ impl TreeActions {
             }
             app.view.modes_dirty = true;
         }
+        if let Some(elements) = self.isolate {
+            // Isolating a group also brings back the parts of it that were hidden.
+            for element in &elements {
+                app.view.hidden.remove(element);
+            }
+            app.view.isolated = Some(elements.into_iter().collect());
+            app.view.modes_dirty = true;
+        }
+        if let Some(elements) = self.select_many {
+            app.select(None, false);
+            for element in elements {
+                app.select(Some(element), true);
+            }
+        }
+        if let Some(elements) = self.fit {
+            let bounds = app.view.bounds_of(&elements);
+            if !bounds.is_empty() {
+                app.camera.fit(&bounds, app.nav.aspect);
+            }
+        }
     }
+}
+
+/// Right-click menu for a tree row: what to do with all its elements.
+fn tree_menu(ui: &mut egui::Ui, refs: &[ElementRef], actions: &mut TreeActions) {
+    ui.set_min_width(190.0);
+    if ui
+        .button(format!(
+            "{}  Isolate (hide everything else)",
+            icon::SELECTION_FOREGROUND
+        ))
+        .clicked()
+    {
+        actions.isolate = Some(refs.to_vec());
+        ui.close();
+    }
+    if ui.button(format!("{}  Hide", icon::EYE_SLASH)).clicked() {
+        actions
+            .toggle_hidden
+            .extend(refs.iter().map(|r| (*r, true)));
+        ui.close();
+    }
+    if ui.button(format!("{}  Show", icon::EYE)).clicked() {
+        actions
+            .toggle_hidden
+            .extend(refs.iter().map(|r| (*r, false)));
+        ui.close();
+    }
+    ui.separator();
+    if ui
+        .button(format!("{}  Select", icon::CURSOR_CLICK))
+        .clicked()
+    {
+        actions.select_many = Some(refs.to_vec());
+        ui.close();
+    }
+    if ui
+        .button(format!("{}  Zoom to", icon::CORNERS_OUT))
+        .clicked()
+    {
+        actions.fit = Some(refs.to_vec());
+        ui.close();
+    }
+}
+
+/// A tree row's name; right-clicking it opens [`tree_menu`].
+fn row_label(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) -> egui::Response {
+    ui.add(egui::Label::new(text).sense(egui::Sense::click()))
 }
 
 /// Eye button for a group of elements. Returns Some(hide) when clicked.
@@ -424,9 +501,10 @@ fn spatial_node(
             if let Some(hide) = group_eye(ui, any_visible) {
                 actions
                     .toggle_hidden
-                    .extend(refs.into_iter().map(|r| (r, hide)));
+                    .extend(refs.iter().map(|r| (*r, hide)));
             }
-            ui.label(format!("{glyph}  {}", node.label()));
+            row_label(ui, format!("{glyph}  {}", node.label()))
+                .context_menu(|ui| tree_menu(ui, &refs, actions));
             ui.label(
                 RichText::new(count.to_string())
                     .small()
@@ -455,9 +533,10 @@ fn spatial_node(
                         if let Some(hide) = group_eye(ui, any_visible) {
                             actions
                                 .toggle_hidden
-                                .extend(refs.into_iter().map(|r| (r, hide)));
+                                .extend(refs.iter().map(|r| (*r, hide)));
                         }
-                        ui.label(class.trim_start_matches("Ifc"));
+                        row_label(ui, class.trim_start_matches("Ifc"))
+                            .context_menu(|ui| tree_menu(ui, &refs, actions));
                         ui.label(
                             RichText::new(elements.len().to_string())
                                 .small()
@@ -500,6 +579,11 @@ fn element_row(
             label = label.family(theme::bold());
         }
         let response = ui.add(egui::Button::selectable(selected, label).frame_when_inactive(false));
+        response.context_menu(|ui| {
+            let mut refs = Vec::new();
+            collect_refs(model_id, model, &[element.express_id], &mut refs);
+            tree_menu(ui, &refs, actions);
+        });
         if response.double_clicked() {
             actions.zoom = Some(r);
         } else if response.clicked() {

@@ -828,15 +828,34 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
             ui.end_row();
 
             ui.label(RichText::new("Compare").color(theme::text_muted()));
-            changed |= segmented(
-                ui,
-                &mut rule.between,
-                &[
-                    (Between::DifferentModels, "Between models"),
-                    (Between::SameModel, "Within a model"),
-                    (Between::Any, "Any pair"),
-                ],
-            );
+            ui.vertical(|ui| {
+                if segmented(
+                    ui,
+                    &mut rule.between,
+                    &[
+                        (Between::DifferentModels, "Between models"),
+                        (Between::SameModel, "Within a model"),
+                        (Between::Any, "Any pair"),
+                    ],
+                ) {
+                    changed = true;
+                    // Within one model both groups come from the same model:
+                    // one discipline for group A, none of its own for group B.
+                    if rule.between == Between::SameModel {
+                        rule.a.disciplines.truncate(1);
+                        if let Some(b) = &mut rule.b {
+                            b.disciplines.clear();
+                        }
+                    }
+                }
+                if rule.between == Between::SameModel {
+                    ui.label(
+                        RichText::new("Pairs are only formed inside one model; each model is checked on its own.")
+                            .small()
+                            .color(theme::text_muted()),
+                    );
+                }
+            });
             ui.end_row();
         });
 
@@ -848,7 +867,20 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
             crate::checking_ui::FOCUS_A,
             count_a,
         );
-        changed |= selector_editor(&mut columns[0], ("a", index, r), &mut rule.a, manager, 0);
+        let within = rule.between == Between::SameModel;
+        let (mode_a, mode_b) = if within {
+            (Disciplines::One, Disciplines::SameAsA)
+        } else {
+            (Disciplines::Any, Disciplines::Any)
+        };
+        changed |= selector_editor(
+            &mut columns[0],
+            ("a", index, r),
+            &mut rule.a,
+            manager,
+            0,
+            mode_a,
+        );
 
         let mut separate = rule.b.is_some();
         match count_b {
@@ -876,7 +908,7 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
             changed = true;
         }
         if let Some(b) = &mut rule.b {
-            changed |= selector_editor(&mut columns[1], ("b", index, r), b, manager, 1);
+            changed |= selector_editor(&mut columns[1], ("b", index, r), b, manager, 1, mode_b);
         }
     });
 
@@ -1122,7 +1154,18 @@ fn group_header(ui: &mut egui::Ui, title: &str, color: Color32, count: (usize, u
         ui.painter().rect_filled(rect, 3.0, color);
         ui.label(RichText::new(title).strong());
         let (elements, models) = count;
-        let text = format!("matches {elements} elements in {models} models");
+        let plural = |n: usize, word: &str| {
+            if n == 1 {
+                format!("{n} {word}")
+            } else {
+                format!("{n} {word}s")
+            }
+        };
+        let text = format!(
+            "matches {} in {}",
+            plural(elements, "element"),
+            plural(models, "model")
+        );
         let text = RichText::new(text).small();
         ui.label(if elements == 0 {
             text.color(theme::danger())
@@ -1158,35 +1201,53 @@ fn cached_count(
     })
 }
 
+/// How a group's disciplines can be chosen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Disciplines {
+    /// Any number (none = any).
+    Any,
+    /// At most one: "within a model" checks one model at a time.
+    One,
+    /// None of its own: the same model as group A.
+    SameAsA,
+}
+
 fn selector_editor(
     ui: &mut egui::Ui,
     id: (&str, usize, usize),
     selector: &mut Selector,
     manager: &mut ManagerState,
     side: usize,
+    mode: Disciplines,
 ) -> bool {
     let mut changed = false;
-    ui.label(
-        RichText::new("Disciplines (none = any)")
-            .small()
-            .color(theme::text_muted()),
-    );
-    ui.horizontal_wrapped(|ui| {
-        for d in Discipline::ALL
-            .iter()
-            .filter(|d| **d != Discipline::Unknown)
-        {
-            let mut on = selector.disciplines.contains(d);
-            if ui.toggle_value(&mut on, d.label()).changed() {
-                if on {
-                    selector.disciplines.push(*d);
-                } else {
-                    selector.disciplines.retain(|x| x != d);
+    let title = match mode {
+        Disciplines::Any => "Disciplines (none = any)",
+        Disciplines::One => "Discipline (one; none = any model)",
+        Disciplines::SameAsA => "Discipline: the same model as group A",
+    };
+    ui.label(RichText::new(title).small().color(theme::text_muted()));
+    if mode != Disciplines::SameAsA {
+        ui.horizontal_wrapped(|ui| {
+            for d in Discipline::ALL
+                .iter()
+                .filter(|d| **d != Discipline::Unknown)
+            {
+                let mut on = selector.disciplines.contains(d);
+                if ui.toggle_value(&mut on, d.label()).changed() {
+                    if on {
+                        if mode == Disciplines::One {
+                            selector.disciplines.clear();
+                        }
+                        selector.disciplines.push(*d);
+                    } else {
+                        selector.disciplines.retain(|x| x != d);
+                    }
+                    changed = true;
                 }
-                changed = true;
             }
-        }
-    });
+        });
+    }
     ui.add_space(4.0);
     ui.label(
         RichText::new("IFC classes, subtypes included (none = any)")

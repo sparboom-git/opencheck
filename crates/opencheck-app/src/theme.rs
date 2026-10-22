@@ -114,9 +114,6 @@ pub fn set_dark(ctx: &egui::Context, dark: bool) {
 }
 
 // Neutrals: the whole interface.
-pub fn ink() -> Color32 {
-    p().ink
-}
 
 /// Selection, primary buttons and active tools. Graphite, not a hue: colour
 /// in this app always means something.

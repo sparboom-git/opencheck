@@ -140,7 +140,25 @@ fn convert_meshes(result: &ProcessingResult) -> Vec<ElementMesh> {
         .iter()
         .filter(|m| !m.indices.is_empty() && !is_void_class(&m.ifc_type))
         .map(|m| {
-            let positions: Vec<[f32; 3]> = m.positions.as_chunks::<3>().0.to_vec();
+            // In its WebAssembly build ifc-lite stores each element relative to
+            // its own centre (`origin`); natively the origin is zero.
+            let [ox, oy, oz] = m.origin;
+            let positions: Vec<[f32; 3]> = if m.origin == [0.0; 3] {
+                m.positions.as_chunks::<3>().0.to_vec()
+            } else {
+                m.positions
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
+                    .map(|p| {
+                        [
+                            (ox + f64::from(p[0])) as f32,
+                            (oy + f64::from(p[1])) as f32,
+                            (oz + f64::from(p[2])) as f32,
+                        ]
+                    })
+                    .collect()
+            };
             let normals = m.normals.as_chunks::<3>().0.to_vec();
             let bounds = Aabb::from_points(positions.iter().map(|p| Vec3::from_array(*p)));
             ElementMesh {

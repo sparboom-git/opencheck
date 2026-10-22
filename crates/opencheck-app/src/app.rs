@@ -43,6 +43,17 @@ pub struct Navigation {
     pub last_pointer: Option<egui::Pos2>,
     /// Aspect ratio of the last drawn viewport, used by keyboard commands.
     pub aspect: f32,
+    pub walk: Walk,
+}
+
+/// First-person walking: stand on a floor and move around at eye height.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Walk {
+    #[default]
+    Off,
+    /// Waiting for a click on the floor to stand on.
+    Placing,
+    Walking,
 }
 
 /// Where findings go when they become issues.
@@ -116,7 +127,13 @@ pub struct OpenCheckApp {
     after_save: Option<PendingAction>,
     allow_close: bool,
     window_title: String,
+    /// The browser version's welcome note is showing.
+    welcome: bool,
+    welcome_never_again: bool,
 }
+
+/// Storage key: the welcome note was turned off.
+const WELCOME_OFF: &str = "welcome_off";
 
 impl OpenCheckApp {
     pub fn new(cc: &eframe::CreationContext<'_>, files: Vec<PathBuf>) -> Self {
@@ -160,6 +177,12 @@ impl OpenCheckApp {
             after_save: None,
             allow_close: false,
             window_title: String::new(),
+            welcome: platform::IS_WEB
+                && !cc
+                    .storage
+                    .and_then(|s| eframe::get_value::<bool>(s, WELCOME_OFF))
+                    .unwrap_or(false),
+            welcome_never_again: false,
         };
         app.checking.ensure_standard();
         for file in files {
@@ -1320,7 +1343,18 @@ impl OpenCheckApp {
     }
 
     pub fn is_busy(&self) -> bool {
-        self.jobs.is_busy()
+        self.jobs.is_busy() || platform::reading_files()
+    }
+
+    /// What is being worked on, for the status bar and the browser's
+    /// loading message.
+    pub fn busy_text(&self) -> String {
+        let labels: Vec<&str> = self.jobs.labels().collect();
+        if labels.is_empty() {
+            "Reading files…".to_owned()
+        } else {
+            labels.join(", ")
+        }
     }
 
     /// Files picked in the browser arrive as bytes, a frame or more later.
@@ -1573,10 +1607,9 @@ impl OpenCheckApp {
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if self.jobs.is_busy() {
+                    if self.is_busy() {
                         ui.spinner();
-                        let labels: Vec<&str> = self.jobs.labels().collect();
-                        ui.label(labels.join(", "));
+                        ui.label(self.busy_text());
                     } else {
                         let file = self
                             .session
@@ -1628,6 +1661,65 @@ impl OpenCheckApp {
                     });
                 });
             });
+    }
+
+    /// What the browser version is, shown when it opens.
+    fn welcome_dialog(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if !self.welcome {
+            return;
+        }
+        let mut close = false;
+        let modal = egui::Modal::new(egui::Id::new("welcome")).show(ctx, |ui| {
+            ui.set_width(460.0);
+            ui.label(
+                RichText::new(format!("{}  OpenCheck in the browser", icon::GLOBE))
+                    .heading()
+                    .strong(),
+            );
+            ui.add_space(8.0);
+            ui.label(
+                "This is the web version of the OpenCheck desktop app, meant mostly for \
+                 testing.",
+            );
+            ui.add_space(6.0);
+            ui.label(
+                "Your files stay on your computer. Nothing is uploaded or sent anywhere: \
+                 the browser only reads the files you open and shows them.",
+            );
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(
+                    "Large models load slower here, and BCF Live is only in the desktop app.",
+                )
+                .color(theme::text_muted()),
+            );
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("Desktop app:").color(theme::text_muted()));
+                ui.hyperlink_to(
+                    "github.com/sparboom-git/opencheck/releases",
+                    "https://github.com/sparboom-git/opencheck/releases",
+                );
+            });
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                let start =
+                    egui::Button::new(RichText::new("Start").strong().color(theme::on_accent()))
+                        .fill(theme::accent());
+                if ui.add(start).clicked() {
+                    close = true;
+                }
+                ui.checkbox(&mut self.welcome_never_again, "Don't show this again");
+            });
+        });
+        if close || modal.should_close() {
+            self.welcome = false;
+            if self.welcome_never_again
+                && let Some(storage) = frame.storage_mut()
+            {
+                eframe::set_value(storage, WELCOME_OFF, &true);
+                storage.flush();
+            }
+        }
     }
 
     fn confirm_dialog(&mut self, ctx: &egui::Context) {
@@ -1774,6 +1866,7 @@ impl eframe::App for OpenCheckApp {
             crate::issue_dialog::window(self, &ctx);
         }
         self.confirm_dialog(&ctx);
+        self.welcome_dialog(&ctx, frame);
         self.sync_gpu();
     }
 }

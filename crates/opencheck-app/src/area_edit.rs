@@ -22,8 +22,14 @@ const EDGE_GRAB: f32 = 9.0;
 /// Smallest area side, metres.
 const MIN_SIDE: f64 = 0.5;
 
+/// The 3D view keeps its light background in both themes, so the area is
+/// always drawn dark, with a light edge so it also reads over dark models.
 fn area_color() -> Color32 {
-    theme::ink()
+    Color32::from_rgb(23, 25, 28)
+}
+
+fn area_halo() -> Color32 {
+    Color32::from_white_alpha(200)
 }
 
 #[derive(Clone, Copy)]
@@ -476,20 +482,24 @@ pub fn draw(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect: f32) 
             let painter = ui.painter_at(rect);
             painter.add(egui::Shape::convex_polygon(
                 corners.clone(),
-                area_color().gamma_multiply(0.10),
-                Stroke::new(2.0, area_color()),
+                area_color().gamma_multiply(0.14),
+                Stroke::new(5.0, area_halo()),
+            ));
+            painter.add(egui::Shape::closed_line(
+                corners.clone(),
+                Stroke::new(2.5, area_color()),
             ));
             for side in 0..4 {
                 let mid = corners[side] + (corners[(side + 1) % 4] - corners[side]) * 0.5;
-                painter.circle_filled(mid, 5.0, Color32::WHITE);
-                painter.circle_stroke(mid, 5.0, Stroke::new(2.0, area_color()));
+                painter.circle_filled(mid, 6.5, Color32::WHITE);
+                painter.circle_stroke(mid, 6.5, Stroke::new(2.5, area_color()));
             }
             let size = format!("{:.1} × {:.1} m", area.half[0] * 2.0, area.half[1] * 2.0);
             painter.text(
                 corners[2] + Vec2::new(0.0, -6.0),
                 egui::Align2::RIGHT_BOTTOM,
                 size,
-                egui::FontId::proportional(12.0),
+                egui::FontId::proportional(13.0),
                 area_color(),
             );
         }

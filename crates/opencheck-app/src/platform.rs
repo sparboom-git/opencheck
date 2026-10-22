@@ -14,13 +14,26 @@ pub const IS_WEB: bool = cfg!(target_arch = "wasm32");
 /// A file type for dialogs, e.g. `("IFC model", &["ifc"])`.
 pub type Filter<'a> = (&'a str, &'a [&'a str]);
 
-/// Runs work in the background on the desktop; in the browser it runs now
-/// (the page waits while it does).
+/// Runs work in the background on the desktop. In the browser it runs on the
+/// page itself, which waits while it does; it starts a moment later so the
+/// "Loading…" message is drawn first.
 pub fn spawn(work: impl FnOnce() + Send + 'static) {
     #[cfg(not(target_arch = "wasm32"))]
     std::thread::spawn(work);
     #[cfg(target_arch = "wasm32")]
-    work();
+    web::after_next_frame(work);
+}
+
+/// Whether files picked or dropped in the browser are still being read.
+pub fn reading_files() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web::reading()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
+    }
 }
 
 /// Asks for one file to open. None when cancelled, and always in the
@@ -151,6 +164,39 @@ mod web {
         /// The last download's address, released at the next download so a
         /// large file has time to start.
         static LAST_DOWNLOAD: RefCell<Option<String>> = const { RefCell::new(None) };
+        /// Picks and drops whose files are still being read.
+        static READING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    pub fn reading() -> bool {
+        READING.with(|r| r.get() > 0)
+    }
+
+    /// Runs `work` once the browser has had time to draw a frame (egui draws
+    /// on the next animation frame, well within the delay).
+    pub fn after_next_frame(work: impl FnOnce() + 'static) {
+        let callback = eframe::wasm_bindgen::closure::Closure::once_into_js(work);
+        let scheduled = web_sys::window().map(|window| {
+            window
+                .set_timeout_with_callback_and_timeout_and_arguments_0(callback.unchecked_ref(), 60)
+        });
+        if !matches!(scheduled, Some(Ok(_))) {
+            log::warn!("could not schedule background work");
+        }
+    }
+
+    /// Counts a read in progress until the returned guard is dropped.
+    fn start_reading(ctx: &eframe::egui::Context) -> impl Drop {
+        struct Reading(eframe::egui::Context);
+        impl Drop for Reading {
+            fn drop(&mut self) {
+                READING.with(|r| r.set(r.get().saturating_sub(1)));
+                self.0.request_repaint();
+            }
+        }
+        READING.with(|r| r.set(r.get() + 1));
+        ctx.request_repaint();
+        Reading(ctx.clone())
     }
 
     pub fn pick(kind: Pick, filter: Filter, multiple: bool, ctx: eframe::egui::Context) {
@@ -161,6 +207,7 @@ mod web {
             } else {
                 dialog.pick_file().await.into_iter().collect()
             };
+            let _reading = (!handles.is_empty()).then(|| start_reading(&ctx));
             let mut files = Vec::new();
             for handle in handles {
                 files.push(PickedFile {
@@ -183,6 +230,7 @@ mod web {
             return;
         }
         wasm_bindgen_futures::spawn_local(async move {
+            let _reading = start_reading(&ctx);
             let mut picked = Vec::new();
             for file in files {
                 if let Ok(bytes) = file.bytes_async().await {

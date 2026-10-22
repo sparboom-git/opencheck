@@ -76,6 +76,8 @@ Navigation that needs no training:
 | M | Laser measure (click keeps a reading). Ctrl+click measures point to point and snaps to corners and edges |
 | Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S | New, open, save, save as project |
 | F12 | Frame time and display scale in the status bar |
+| Walk button (person) | Click a floor to stand there, then walk at eye height: W A S D, drag to look around, scroll to step, Esc stops |
+| Right-click in the model tree | Isolate, hide, show, select or zoom to a storey, a class (e.g. all beams) or an element |
 
 ### Checking
 
