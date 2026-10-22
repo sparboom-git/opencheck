@@ -41,9 +41,16 @@ jobs:
           Copy-Item target/release/opencheck-app.exe, target/release/opencheck.exe, README.md, LICENSE-MIT, LICENSE-APACHE -Destination $name
           Copy-Item crates/opencheck-app/assets/fonts/OFL.txt -Destination "$name/OFL-fonts.txt"
           Compress-Archive -Path $name -DestinationPath "$name.zip"
+      # Hand-written notes in docs/releases/<tag>.md go first, when there are any.
+      - name: Release notes
+        shell: pwsh
+        run: |
+          $notes = "docs/releases/$env:TAG.md"
+          if (Test-Path $notes) { Copy-Item $notes release-notes.md } else { Set-Content release-notes.md "" }
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
           name: OpenCheck ${{ env.TAG }}
           files: OpenCheck-${{ env.TAG }}-windows-x64.zip
+          body_path: release-notes.md
           generate_release_notes: true
