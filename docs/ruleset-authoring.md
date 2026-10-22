@@ -25,6 +25,8 @@ and tests every pair of an element from **a** and an element from **b**:
 | `clearance` | the elements come closer than `clearance_mm` (touching and intersecting included) |
 | `duplicates` | two elements have the same shape in the same place within `tolerance_mm`, whatever their IFC class or tessellation |
 | `information` | (one element at a time) a building part lacks information that an information standard requires at the project's LOD level; see [information-requirements.md](information-requirements.md) |
+| `free_zone` | (one element at a time) a zone beside, above or below an element of **a**, along its whole run, is blocked by **b** for longer than allowed, e.g. the service area beside a cable tray |
+| `script` | whatever a small script decides: for rules the other types cannot express; see [rule-scripts.md](rule-scripts.md) |
 
 Each reported pair is a *finding*. Users review findings, accept or reject
 them, and turn the relevant ones into issues.
@@ -77,14 +79,33 @@ classes = ["IfcBeam", "IfcColumn"]
 | `id` | yes | Unique within the ruleset. Keep it stable: findings are matched between runs by ruleset id, rule id and the two elements. |
 | `name` | yes | Shown in the results list. Phrase it as the requirement ("Ducts must not intersect beams"). |
 | `description` | no | Explanation for the reviewer. |
-| `type` | yes | `clash`, `clearance`, `duplicates` or `information`. |
+| `type` | yes | `clash`, `clearance`, `duplicates`, `information`, `free_zone` or `script`. |
 | `severity` | yes | `critical`, `moderate` or `low`. |
 | `tolerance_mm` | no | Clash: intersections up to this depth are ignored (default 10). Duplicates: largest offset between two copies (default 10). |
 | `clearance_mm` | for `clearance` | Required free distance; must be above 0. |
 | `between` | no | `any` (default), `different_models` or `same_model`. Use `different_models` for coordination between disciplines and `same_model` for model quality checks. |
 | `standard` | for `information` | Id of the information standard, e.g. `opencheck.information.lod-dk`. Group `a` then limits which elements are checked; `b` is not used. |
+| `zone` | for `free_zone` | The zone to keep clear, see below. |
+| `script`, `params` | for `script` | The script and its numbers, see [rule-scripts.md](rule-scripts.md). |
 | `a` | no | Selector for the first group. Omitted: every element. |
-| `b` | no | Selector for the second group. **Omitted: elements of `a` are tested against each other.** |
+| `b` | no | Selector for the second group. **Omitted: elements of `a` are tested against each other** (for `free_zone` and `script`: every element). |
+
+### `[rule.zone]` (free zones)
+
+The zone is measured in the element's own frame: along its run (its longest
+axis), across it and up. It runs along the whole element, 50 mm short of
+each end so the next segment of the same run does not count.
+
+| Key | Required | Meaning |
+|---|---|---|
+| `side` | no | `above` (default), `below`, `both_sides` (each side must be free), `one_side` (at least one side free), `one_face` (in front of either broad face; for vertical runs such as cable ladders). |
+| `depth_mm` | yes | How far the zone reaches out from the element. |
+| `max_blocked_mm` | no | The zone may be blocked over at most this length along the run (default 0: never). |
+| `min_free_mm` | no | Even where the zone is blocked, at least this much must stay free. |
+| `direction` | no | `any` (default), `horizontal` or `vertical`: which elements the rule applies to, by the direction they run in. |
+
+Each blocked stretch that is too long is a finding, shown with the blocked
+part of the zone in the 3D view. Spaces and openings never block.
 
 ### Selectors: `[rule.a]` and `[rule.b]`
 
@@ -214,6 +235,30 @@ disciplines = ["architectural"]
 classes = ["IfcWall"]
 ```
 
+### Service area beside cable trays
+
+```toml
+[[rule]]
+id = "tray-service-area"
+name = "Service area beside cable trays"
+type = "free_zone"
+severity = "moderate"
+
+[rule.zone]
+side = "one_side"
+depth_mm = 500
+max_blocked_mm = 1000
+direction = "horizontal"
+
+[rule.a]
+classes = ["IfcCableCarrierSegment"]
+names = ["tray|ladder|trunking"]
+```
+
+Without `[rule.b]` everything in the models can block the zone. Revit
+exports conduits with the same class as trays; the `names` pattern leaves
+them out.
+
 ## Tips
 
 - One rule per requirement. Several narrow rules give clearer results than one
@@ -224,6 +269,9 @@ classes = ["IfcWall"]
 - Start with a tolerance of 10 mm for clashes; lower values report touching
   elements from rounding in the authoring tool.
 - Keep `id` values stable once a ruleset is in use.
+- For room around elements along their length (service areas, headroom,
+  distances to walls) use `free_zone`. Write a `script` only when no rule type
+  fits; the script reference is [rule-scripts.md](rule-scripts.md).
 
 ## Prompt template
 

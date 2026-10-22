@@ -56,6 +56,15 @@ pub fn rule_summary(rule: &opencheck_core::check::Rule) -> String {
             Some(path) => format!("IDS {}", path.trim_start_matches("requirements/")),
             None => "Information per LOD level".to_owned(),
         },
+        RuleKind::FreeZone => match &rule.zone {
+            Some(z) => format!(
+                "Free zone {} {:.0} mm",
+                z.side.label().to_lowercase(),
+                z.depth_mm
+            ),
+            None => "Free zone".to_owned(),
+        },
+        RuleKind::Script => format!("Script, {} parameters", rule.params.len()),
     };
     let sides = |d: &[Discipline]| {
         if d.is_empty() {

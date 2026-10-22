@@ -23,3 +23,4 @@ toml.workspace = true
 rayon.workspace = true
 regex.workspace = true
 web-time.workspace = true
+rhai.workspace = true

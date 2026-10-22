@@ -83,6 +83,9 @@ pub fn magnitude_text(f: &Finding) -> String {
         FindingKind::Clearance => format!("distance {mm:.0} mm"),
         FindingKind::Duplicate => format!("offset {mm:.0} mm"),
         FindingKind::MissingInformation => format!("{:.0} missing", f.magnitude),
+        FindingKind::FreeZone => format!("blocked {:.2} m", f.magnitude),
+        FindingKind::Script if f.magnitude > 0.0 => format!("{:.2} m", f.magnitude),
+        FindingKind::Script => String::new(),
     }
 }
 
@@ -379,8 +382,9 @@ fn results(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 .filter(|r| std::ptr::eq(r.ruleset, *rs))
                 .copied()
                 .collect();
-            let (info_rows, geo_rows): (Vec<Row>, Vec<Row>) =
-                own.into_iter().partition(|r| r.finding.is_single());
+            let (info_rows, geo_rows): (Vec<Row>, Vec<Row>) = own
+                .into_iter()
+                .partition(|r| r.finding.kind == FindingKind::MissingInformation);
             (
                 *rs,
                 layout(app, &rs.info.id, &geo_rows, false),
@@ -655,6 +659,35 @@ fn ruleset_body(
     let has_geometry_rules = rs.rules.iter().any(|r| r.information.is_none());
     let has_information = rs.rules.iter().any(|r| r.information.is_some());
     let total: usize = rs.rules.iter().map(|r| r.findings.len()).sum();
+    // What script rules printed, and their errors.
+    for rule in rs.rules.iter().filter(|r| !r.notes.is_empty()) {
+        let failed = rule.notes.iter().any(|n| n.starts_with("Script error"));
+        let title = format!(
+            "{}  {}: {} {}",
+            if failed { icon::WARNING } else { icon::NOTE },
+            rule.rule.name,
+            rule.notes.len(),
+            if rule.notes.len() == 1 {
+                "note"
+            } else {
+                "notes"
+            }
+        );
+        let text = RichText::new(title).small();
+        let text = if failed {
+            text.color(theme::danger())
+        } else {
+            text
+        };
+        egui::CollapsingHeader::new(text)
+            .id_salt(("rule_notes", &rs.info.id, &rule.rule.id))
+            .default_open(failed)
+            .show(ui, |ui| {
+                for note in &rule.notes {
+                    ui.label(RichText::new(note).small().monospace());
+                }
+            });
+    }
     if has_geometry_rules {
         if total > 0 {
             section_label(ui, "OVERVIEW (DISCIPLINE VS DISCIPLINE)");
@@ -1140,7 +1173,7 @@ fn pair_section(app: &OpenCheckApp, ui: &mut egui::Ui, pair: &Pair, actions: &mu
                             for d in [d1, d2] {
                                 let selected = pair.group_by == d;
                                 let text =
-                                    RichText::new(format!("■ {}", d.code())).color(if selected {
+                                    RichText::new(format!("• {}", d.code())).color(if selected {
                                         discipline_color(d)
                                     } else {
                                         theme::text_muted()
@@ -1307,13 +1340,26 @@ fn finding_row(app: &OpenCheckApp, ui: &mut egui::Ui, row: &Row, actions: &mut A
         if focused {
             label = label.family(theme::bold());
         }
-        let hover = if f.is_single() {
+        let hover = if f.kind == FindingKind::MissingInformation {
             format!(
                 "{} [{}]\n{}\nMissing: {}",
                 element_label(&f.a),
                 f.a.ifc_class,
                 f.category,
                 f.details.join(", ")
+            )
+        } else if !f.details.is_empty() {
+            let other = if f.is_single() {
+                String::new()
+            } else {
+                format!("\n{} [{}]", element_label(&f.b), f.b.ifc_class)
+            };
+            format!(
+                "{} [{}]{other}\n{}\n{}",
+                element_label(&f.a),
+                f.a.ifc_class,
+                f.details.join("\n"),
+                row.rule.rule.name
             )
         } else {
             format!(
@@ -1334,10 +1380,10 @@ fn finding_row(app: &OpenCheckApp, ui: &mut egui::Ui, row: &Row, actions: &mut A
             )
         })
         .on_hover_text(hover);
-        let size = if f.is_single() {
-            format!("{} missing", f.details.len())
-        } else {
-            format!("{:.0} mm", f.magnitude * 1000.0)
+        let size = match f.kind {
+            FindingKind::MissingInformation => format!("{} missing", f.details.len()),
+            FindingKind::FreeZone | FindingKind::Script => magnitude_text(f),
+            _ => format!("{:.0} mm", f.magnitude * 1000.0),
         };
         ui.label(RichText::new(size).small().color(theme::text_muted()));
         if focused {
@@ -1498,22 +1544,32 @@ fn finding_detail(app: &OpenCheckApp, ui: &mut egui::Ui, id: &str, actions: &mut
     });
     ui.label(RichText::new(&rule.rule.name).color(theme::text_muted()))
         .on_hover_text(&ruleset.info.name);
-    let sides: &[(&FindingElement, Color32)] = if f.is_single() {
-        if crate::checking::uses_levels(&rule.rule) {
-            let level = crate::checking::level_label(&app.checking.level_of(f.a.model));
-            ui.label(RichText::new(format!("{} · {level}", f.category)).strong());
+    let sides: &[(&FindingElement, Color32)] =
+        if matches!(f.kind, FindingKind::FreeZone | FindingKind::Script) {
+            for line in &f.details {
+                ui.label(RichText::new(line).color(severity_color(rule.rule.severity)));
+            }
+            if f.is_single() {
+                &[(&f.a, FOCUS_A)]
+            } else {
+                &[(&f.a, FOCUS_A), (&f.b, FOCUS_B)]
+            }
+        } else if f.is_single() {
+            if crate::checking::uses_levels(&rule.rule) {
+                let level = crate::checking::level_label(&app.checking.level_of(f.a.model));
+                ui.label(RichText::new(format!("{} · {level}", f.category)).strong());
+            } else {
+                ui.label(RichText::new(&f.category).strong());
+            }
+            ui.label(
+                RichText::new(format!("Missing: {}", f.details.join(", ")))
+                    .color(severity_color(rule.rule.severity)),
+            );
+            &[(&f.a, FOCUS_A)]
         } else {
-            ui.label(RichText::new(&f.category).strong());
-        }
-        ui.label(
-            RichText::new(format!("Missing: {}", f.details.join(", ")))
-                .color(severity_color(rule.rule.severity)),
-        );
-        &[(&f.a, FOCUS_A)]
-    } else {
-        ui.label(magnitude_text(f));
-        &[(&f.a, FOCUS_A), (&f.b, FOCUS_B)]
-    };
+            ui.label(magnitude_text(f));
+            &[(&f.a, FOCUS_A), (&f.b, FOCUS_B)]
+        };
     for &(element, color) in sides {
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(12.0), egui::Sense::hover());

@@ -1,0 +1,148 @@
+[ruleset]
+id = "opencheck.electrical.cable-trays"
+name = "Electrical: cable tray clearances"
+description = "Room around cable trays and ladders for installation and service: service area beside them, headroom above, space below and to walls, service area in front of vertical ladders, and heights on a 10 mm grid. Adjust the numbers to the project's own rules."
+version = "1"
+author = "OpenCheck"
+
+[[rule]]
+id = "tray-service-area"
+name = "Service area beside cable trays"
+description = "At least one side of a horizontal tray needs a 500 mm service area. It may be interrupted over at most 1000 mm."
+type = "free_zone"
+severity = "moderate"
+
+[rule.zone]
+side = "one_side"
+depth_mm = 500
+max_blocked_mm = 1000
+direction = "horizontal"
+
+[rule.a]
+classes = ["IfcCableCarrierSegment"]
+# Trays, ladders and trunking; conduits share the class and are left out.
+names = ["tray|ladder|trunking|bakke|stige|kanal"]
+
+[[rule]]
+id = "tray-headroom"
+name = "Headroom above cable trays"
+description = "200 mm free above horizontal trays to other installations, interrupted over at most 1000 mm; even there at least 50 mm must stay free."
+type = "free_zone"
+severity = "moderate"
+
+[rule.zone]
+side = "above"
+depth_mm = 200
+max_blocked_mm = 1000
+min_free_mm = 50
+direction = "horizontal"
+
+[rule.a]
+classes = ["IfcCableCarrierSegment"]
+# Trays, ladders and trunking; conduits share the class and are left out.
+names = ["tray|ladder|trunking|bakke|stige|kanal"]
+
+[rule.b]
+# Other installations: ducts, pipes, cable trays, equipment.
+classes = ["IfcDistributionElement"]
+
+[[rule]]
+id = "tray-space-below"
+name = "Space below cable trays"
+description = "100 mm free under horizontal trays, for the supports (which are not modelled)."
+type = "free_zone"
+severity = "low"
+
+[rule.zone]
+side = "below"
+depth_mm = 100
+direction = "horizontal"
+
+[rule.a]
+classes = ["IfcCableCarrierSegment"]
+# Trays, ladders and trunking; conduits share the class and are left out.
+names = ["tray|ladder|trunking|bakke|stige|kanal"]
+
+[[rule]]
+id = "tray-wall-distance"
+name = "Distance from cable trays to walls"
+description = "At least one side of a horizontal tray keeps 50 mm to walls, for the supports. Walls the tray goes through do not count."
+type = "free_zone"
+severity = "low"
+
+[rule.zone]
+side = "one_side"
+depth_mm = 50
+direction = "horizontal"
+
+[rule.a]
+classes = ["IfcCableCarrierSegment"]
+# Trays, ladders and trunking; conduits share the class and are left out.
+names = ["tray|ladder|trunking|bakke|stige|kanal"]
+
+[rule.b]
+classes = ["IfcWall", "IfcCurtainWall"]
+
+[[rule]]
+id = "ladder-service-area"
+name = "Service area in front of vertical ladders"
+description = "1000 mm free in front of one face of vertical cable ladders."
+type = "free_zone"
+severity = "moderate"
+
+[rule.zone]
+side = "one_face"
+depth_mm = 1000
+direction = "vertical"
+
+[rule.a]
+classes = ["IfcCableCarrierSegment"]
+# Trays, ladders and trunking; conduits share the class and are left out.
+names = ["tray|ladder|trunking|bakke|stige|kanal"]
+
+[[rule]]
+id = "ladder-spacing"
+name = "Space between vertical ladders"
+description = "At least 50 mm beside vertical cable ladders to the next ladder."
+type = "free_zone"
+severity = "low"
+
+[rule.zone]
+side = "both_sides"
+depth_mm = 50
+direction = "vertical"
+
+[rule.a]
+classes = ["IfcCableCarrierSegment"]
+# Trays, ladders and trunking; conduits share the class and are left out.
+names = ["tray|ladder|trunking|bakke|stige|kanal"]
+
+[rule.b]
+classes = ["IfcCableCarrierSegment"]
+names = ["tray|ladder|trunking|bakke|stige|kanal"]
+
+[[rule]]
+id = "tray-height-grid"
+name = "Cable tray heights on a 10 mm grid"
+description = "The underside of horizontal trays is measured from the storey floor and ends on whole 10 mm."
+type = "script"
+severity = "low"
+script = '''
+for tray in subjects() {
+    if !tray.run.horizontal { continue; }
+    let floor = tray.storey_elevation;
+    if floor == () { continue; }
+    let bottom = tray.bounds.min_z - floor;
+    if bottom % param("grid_mm") != 0 {
+        report(tray, `Underside ${bottom} mm above the storey floor is not on the ${param("grid_mm")} mm grid`);
+    }
+}
+'''
+
+[rule.params]
+grid_mm = 10
+
+[rule.a]
+classes = ["IfcCableCarrierSegment"]
+# Trays, ladders and trunking; conduits share the class and are left out.
+names = ["tray|ladder|trunking|bakke|stige|kanal"]

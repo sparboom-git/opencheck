@@ -4,8 +4,8 @@
 use eframe::egui::{self, Color32, RichText};
 use egui_phosphor::regular as icon;
 use opencheck_core::check::{
-    BUILTIN_RULESETS, Between, PropertyFilter, Rule, RuleKind, Ruleset, RulesetInfo, Selector,
-    Severity,
+    BUILTIN_RULESETS, Between, PropertyFilter, Rule, RuleKind, Ruleset, RulesetInfo, RunDirection,
+    SCRIPT_API, Selector, Severity, Zone, ZoneSide, compile_script,
 };
 use opencheck_core::{Discipline, Element, Federation, IfcModel};
 use rustc_hash::FxHashMap;
@@ -84,6 +84,10 @@ pub struct ManagerState {
     catalogue: Catalogue,
     /// Filter text of the open picker menu.
     picker_filter: String,
+    /// Script rules: the language model's answer, pasted to be used.
+    ai_answer: String,
+    /// Script rules: name of the parameter being added.
+    new_param: String,
 }
 
 impl ManagerState {
@@ -329,6 +333,9 @@ fn new_rule(n: usize) -> Rule {
         a: Selector::default(),
         b: Some(Selector::default()),
         standard: String::new(),
+        zone: None,
+        script: String::new(),
+        params: Default::default(),
     }
 }
 
@@ -664,7 +671,8 @@ fn rule_list(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) -> bool {
 
 fn segmented<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) -> bool {
     let mut changed = false;
-    ui.horizontal(|ui| {
+    // Wraps on narrow windows instead of running off the edge.
+    ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         for (option, label) in options {
             if ui
@@ -742,10 +750,25 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
                     (RuleKind::Clearance, "Clearance"),
                     (RuleKind::Duplicates, "Duplicates"),
                     (RuleKind::Information, "Information"),
+                    (RuleKind::FreeZone, "Free zone"),
+                    (RuleKind::Script, "Script"),
                 ],
             );
             if rule.kind == RuleKind::Information && rule.standard.is_empty() {
                 rule.standard = crate::checking::INFORMATION_STANDARD.to_owned();
+                changed = true;
+            }
+            if rule.kind == RuleKind::FreeZone && rule.zone.is_none() {
+                rule.zone = Some(Zone::default());
+                // A zone must be free of everything unless narrowed down.
+                rule.b = None;
+                changed = true;
+            }
+            if rule.kind == RuleKind::Script && rule.script.trim().is_empty() {
+                rule.script = SCRIPT_TEMPLATE.to_owned();
+                rule.params.entry("depth_mm".to_owned()).or_insert(200.0);
+                rule.params.entry("max_blocked_mm".to_owned()).or_insert(1000.0);
+                rule.b = None;
                 changed = true;
             }
             ui.end_row();
@@ -763,6 +786,18 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
             ui.end_row();
 
             match rule.kind {
+                RuleKind::FreeZone => {
+                    let zone = rule.zone.get_or_insert_with(Zone::default);
+                    changed |= zone_fields(ui, zone);
+                }
+                RuleKind::Script => {
+                    ui.label(RichText::new("Script").color(theme::text_muted()));
+                    ui.label(
+                        RichText::new("Parameters and code below; a language model can write the code.")
+                            .small()
+                            .color(theme::text_muted()),
+                    );
+                }
                 RuleKind::Clearance => {
                     ui.label(RichText::new("Clearance").color(theme::text_muted()));
                     ui.horizontal(|ui| {
@@ -827,6 +862,10 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
             }
             ui.end_row();
 
+            // Free zones and scripts look at each element of group A on its own.
+            if matches!(rule.kind, RuleKind::FreeZone | RuleKind::Script) {
+                return;
+            }
             ui.label(RichText::new("Compare").color(theme::text_muted()));
             ui.vertical(|ui| {
                 if segmented(
@@ -860,10 +899,29 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
         });
 
     ui.add_space(8.0);
+    // Free zones and scripts name their groups after what they do.
+    let (title_a, title_b, separate_text) = match rule.kind {
+        RuleKind::FreeZone => (
+            "Checked (group A)",
+            "In the way (group B)",
+            "Only these can block (otherwise everything)",
+        ),
+        RuleKind::Script => (
+            "subjects() (group A)",
+            "others() (group B)",
+            "Only these (otherwise everything)",
+        ),
+        _ => (
+            "Group A",
+            "Group B",
+            "Separate group (otherwise group A against itself)",
+        ),
+    };
+    let everything = matches!(rule.kind, RuleKind::FreeZone | RuleKind::Script);
     ui.columns(2, |columns| {
         group_header(
             &mut columns[0],
-            "Group A",
+            title_a,
             crate::checking_ui::FOCUS_A,
             count_a,
         );
@@ -884,26 +942,31 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
 
         let mut separate = rule.b.is_some();
         match count_b {
-            Some(count) => group_header(
-                &mut columns[1],
-                "Group B",
-                crate::checking_ui::FOCUS_B,
-                count,
-            ),
+            Some(count) => {
+                group_header(&mut columns[1], title_b, crate::checking_ui::FOCUS_B, count)
+            }
+            None if everything => {
+                columns[1].horizontal(|ui| {
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::Vec2::splat(12.0), egui::Sense::hover());
+                    ui.painter()
+                        .rect_filled(rect, 3.0, crate::checking_ui::FOCUS_B);
+                    ui.label(RichText::new(title_b).strong());
+                    ui.label(
+                        RichText::new("everything in the models")
+                            .small()
+                            .color(theme::text_muted()),
+                    );
+                });
+            }
             None => group_header(
                 &mut columns[1],
-                "Group B",
+                title_b,
                 crate::checking_ui::FOCUS_B,
                 count_a,
             ),
         }
-        if columns[1]
-            .checkbox(
-                &mut separate,
-                "Separate group (otherwise group A against itself)",
-            )
-            .changed()
-        {
+        if columns[1].checkbox(&mut separate, separate_text).changed() {
             rule.b = separate.then(Selector::default);
             changed = true;
         }
@@ -911,6 +974,11 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
             changed |= selector_editor(&mut columns[1], ("b", index, r), b, manager, 1, mode_b);
         }
     });
+
+    if rule.kind == RuleKind::Script {
+        ui.add_space(10.0);
+        changed |= script_editor(ui, rule, manager);
+    }
 
     ui.add_space(8.0);
     try_panel(ui, tried.as_ref(), &mut show_matches);
@@ -930,6 +998,324 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
         show_rule_matches(app, &rule);
     }
     changed
+}
+
+/// A new script rule starts from this: a headroom check to adapt.
+const SCRIPT_TEMPLATE: &str = r#"// Example: the zone above each element of group A must be free of
+// group B, apart from interruptions up to max_blocked_mm.
+for e in subjects() {
+    if !e.run.horizontal { continue; }
+    for s in e.blocked("above", param("depth_mm")) {
+        if s.length > param("max_blocked_mm") {
+            report(s, `${param("depth_mm")} mm above is blocked over ${s.length} mm`);
+        }
+    }
+}
+"#;
+
+/// Fields of a free zone rule.
+fn zone_fields(ui: &mut egui::Ui, zone: &mut Zone) -> bool {
+    let mut changed = false;
+    let hint = |ui: &mut egui::Ui, text: &str| {
+        ui.label(RichText::new(text).small().color(theme::text_muted()));
+    };
+    ui.label(RichText::new("Zone").color(theme::text_muted()));
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt("zone_side")
+            .selected_text(zone.side.label())
+            .show_ui(ui, |ui| {
+                for side in ZoneSide::ALL {
+                    changed |= ui
+                        .selectable_value(&mut zone.side, side, side.label())
+                        .changed();
+                }
+            });
+        changed |= ui
+            .add(
+                egui::DragValue::new(&mut zone.depth_mm)
+                    .range(1.0..=10_000.0)
+                    .speed(5.0)
+                    .suffix(" mm"),
+            )
+            .changed();
+        hint(ui, "deep, along the whole element");
+    });
+    ui.end_row();
+
+    ui.label(RichText::new("Interruptions").color(theme::text_muted()));
+    ui.horizontal(|ui| {
+        changed |= ui
+            .add(
+                egui::DragValue::new(&mut zone.max_blocked_mm)
+                    .range(0.0..=100_000.0)
+                    .speed(10.0)
+                    .suffix(" mm"),
+            )
+            .changed();
+        hint(
+            ui,
+            "the zone may be blocked over at most this length (0: never)",
+        );
+    });
+    ui.end_row();
+
+    ui.label(RichText::new("Always free").color(theme::text_muted()));
+    ui.horizontal(|ui| {
+        changed |= ui
+            .add(
+                egui::DragValue::new(&mut zone.min_free_mm)
+                    .range(0.0..=(zone.depth_mm - 1.0).max(0.0))
+                    .speed(1.0)
+                    .suffix(" mm"),
+            )
+            .changed();
+        hint(
+            ui,
+            "even where blocked, at least this much stays free (0: no minimum)",
+        );
+    });
+    ui.end_row();
+
+    ui.label(RichText::new("Elements").color(theme::text_muted()));
+    ui.horizontal(|ui| {
+        for direction in [
+            RunDirection::Any,
+            RunDirection::Horizontal,
+            RunDirection::Vertical,
+        ] {
+            changed |= ui
+                .selectable_value(&mut zone.direction, direction, direction.label())
+                .changed();
+        }
+        hint(ui, "by the direction they run in");
+    });
+    ui.end_row();
+    changed
+}
+
+/// Parameters, code and AI help of a script rule.
+fn script_editor(ui: &mut egui::Ui, rule: &mut Rule, manager: &mut ManagerState) -> bool {
+    let mut changed = false;
+    ui.label(RichText::new("Parameters").strong());
+    ui.label(
+        RichText::new("Numbers the script reads with param(\"name\"); lengths in mm.")
+            .small()
+            .color(theme::text_muted()),
+    );
+    let mut remove = None;
+    egui::Grid::new("script_params")
+        .num_columns(3)
+        .spacing([10.0, 4.0])
+        .show(ui, |ui| {
+            for (name, value) in rule.params.iter_mut() {
+                ui.label(RichText::new(name).monospace());
+                changed |= ui.add(egui::DragValue::new(value).speed(1.0)).changed();
+                if ui.small_button(icon::X).on_hover_text("Remove").clicked() {
+                    remove = Some(name.clone());
+                }
+                ui.end_row();
+            }
+        });
+    if let Some(name) = remove {
+        rule.params.remove(&name);
+        changed = true;
+    }
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(&mut manager.new_param)
+                .hint_text("new_parameter_mm")
+                .desired_width(180.0),
+        );
+        let name = manager.new_param.trim().to_owned();
+        let valid = !name.is_empty()
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && !rule.params.contains_key(&name);
+        if ui
+            .add_enabled(valid, egui::Button::new(format!("{}  Add", icon::PLUS)))
+            .clicked()
+        {
+            rule.params.insert(name, 0.0);
+            manager.new_param.clear();
+            changed = true;
+        }
+    });
+
+    ui.add_space(8.0);
+    ui.label(RichText::new("Code (Rhai)").strong());
+    let editor = egui::TextEdit::multiline(&mut rule.script)
+        .code_editor()
+        .desired_rows(14)
+        .desired_width(f32::INFINITY);
+    changed |= ui.add(editor).changed();
+    match compile_script(&rule.script) {
+        Ok(()) => {
+            ui.label(
+                RichText::new(format!("{}  The code reads correctly", icon::CHECK))
+                    .small()
+                    .color(theme::solved()),
+            );
+        }
+        Err(e) => {
+            ui.label(
+                RichText::new(format!("{}  {e}", icon::WARNING))
+                    .small()
+                    .color(theme::danger()),
+            );
+        }
+    }
+
+    ui.add_space(8.0);
+    ui.label(RichText::new(format!("{}  Write the code with AI", icon::SPARKLE)).strong());
+    ui.label(
+        RichText::new(
+            "1. Describe the rule in the description above. 2. Copy the prompt and give it to \
+             a language model such as Claude. 3. Paste its answer below and use it: the code \
+             and the parameters are filled in.",
+        )
+        .small()
+        .color(theme::text_muted()),
+    );
+    ui.horizontal(|ui| {
+        if ui
+            .button(format!("{}  Copy prompt", icon::COPY))
+            .on_hover_text("The description, the groups, the parameters, the current code and the script reference")
+            .clicked()
+        {
+            ui.ctx().copy_text(ai_prompt(rule));
+        }
+        if ui
+            .button(format!("{}  Copy script reference", icon::BOOK_OPEN))
+            .on_hover_text("Only the reference of the script functions")
+            .clicked()
+        {
+            ui.ctx().copy_text(SCRIPT_API.to_owned());
+        }
+    });
+    ui.add(
+        egui::TextEdit::multiline(&mut manager.ai_answer)
+            .hint_text("Paste the answer here")
+            .desired_rows(4)
+            .desired_width(f32::INFINITY),
+    );
+    let answer = parse_ai_answer(&manager.ai_answer);
+    ui.horizontal(|ui| {
+        let usable = answer.script.is_some() || !answer.params.is_empty();
+        if ui
+            .add_enabled(
+                usable,
+                egui::Button::new(format!("{}  Use the answer", icon::ARROW_DOWN)),
+            )
+            .clicked()
+        {
+            if let Some(script) = answer.script.clone() {
+                rule.script = script;
+            }
+            for (name, value) in &answer.params {
+                rule.params.insert(name.clone(), *value);
+            }
+            manager.ai_answer.clear();
+            changed = true;
+        }
+        if !manager.ai_answer.trim().is_empty() {
+            let found = match (&answer.script, answer.params.len()) {
+                (Some(_), 0) => "code found".to_owned(),
+                (Some(_), n) => format!("code and {n} parameters found"),
+                (None, 0) => "no ```rhai code block found".to_owned(),
+                (None, n) => format!("{n} parameters found"),
+            };
+            ui.label(RichText::new(found).small().color(theme::text_muted()));
+        }
+    });
+    changed
+}
+
+/// The prompt for a language model: what the rule should do and how scripts work.
+fn ai_prompt(rule: &Rule) -> String {
+    let group = |s: Option<&Selector>| match s {
+        Some(s) => toml::to_string(s).unwrap_or_default(),
+        None => "everything in the models\n".to_owned(),
+    };
+    let params: String = rule
+        .params
+        .iter()
+        .map(|(k, v)| format!("{k} = {v}\n"))
+        .collect();
+    format!(
+        "Write a script rule for OpenCheck, an IFC model checker. The script reference \
+         follows below.\n\n\
+         ## What the rule must check\n{}\n\n\
+         ## Rule name\n{}\n\n\
+         ## Group A, subjects()\n{}\n\
+         ## Group B, others()\n{}\n\
+         ## Current parameters\n{}\n\
+         ## Current code\n```rhai\n{}\n```\n\n\
+         ## How to answer\n\
+         Answer with exactly two code blocks: first the parameters as\n\
+         ```toml\n[rule.params]\nname = value\n```\n\
+         with every number the rule needs (lengths in mm, short snake_case names), then the \
+         complete script as\n```rhai\n...\n```\n\
+         Read every number with param(\"name\") instead of writing it in the code. Keep \
+         the code short and explain anything unclear in one or two sentences after the \
+         blocks.\n\n\
+         ---\n\n{}",
+        if rule.description.trim().is_empty() {
+            "(not described yet: describe it here)"
+        } else {
+            rule.description.trim()
+        },
+        rule.name,
+        group(Some(&rule.a)),
+        group(rule.b.as_ref()),
+        if params.is_empty() {
+            "none\n".to_owned()
+        } else {
+            params
+        },
+        rule.script.trim(),
+        SCRIPT_API
+    )
+}
+
+#[derive(Default, PartialEq, Debug)]
+struct AiAnswer {
+    script: Option<String>,
+    params: std::collections::BTreeMap<String, f64>,
+}
+
+/// The code and parameters in a language model's answer: a ```rhai block and
+/// a ```toml block with `[rule.params]`.
+fn parse_ai_answer(text: &str) -> AiAnswer {
+    let mut answer = AiAnswer::default();
+    let mut rest = text;
+    while let Some(start) = rest.find("```") {
+        let after = &rest[start + 3..];
+        let Some(line_end) = after.find('\n') else {
+            break;
+        };
+        let lang = after[..line_end].trim().to_ascii_lowercase();
+        let body_start = &after[line_end + 1..];
+        let Some(end) = body_start.find("```") else {
+            break;
+        };
+        let body = &body_start[..end];
+        rest = &body_start[end + 3..];
+        if lang == "toml" || body.contains("[rule.params]") {
+            let table = body.replace("[rule.params]", "");
+            if let Ok(values) = toml::from_str::<toml::Table>(&table) {
+                for (k, v) in values {
+                    let number = v.as_float().or_else(|| v.as_integer().map(|i| i as f64));
+                    if let Some(n) = number {
+                        answer.params.insert(k, n);
+                    }
+                }
+            }
+        } else if matches!(lang.as_str(), "rhai" | "rust" | "js" | "javascript" | "")
+            && answer.script.is_none()
+        {
+            answer.script = Some(body.trim_end().to_owned() + "\n");
+        }
+    }
+    answer
 }
 
 /// One line of an explanation: whether the condition holds, and how.
@@ -1481,5 +1867,26 @@ mod tests {
         assert_eq!(normalise_class("ductsegment"), "IfcDuctSegment");
         assert_eq!(normalise_class("IfcFooBar"), "IfcFooBar");
         assert_eq!(normalise_class("tendon"), "IfcTendon");
+    }
+}
+
+#[cfg(test)]
+mod ai_tests {
+    use super::*;
+
+    #[test]
+    fn reads_code_and_parameters_from_an_answer() {
+        let text = "Here you go:\n```toml\n[rule.params]\nservice_mm = 500\nfactor = 1.5\n```\n\
+                    ```rhai\nfor e in subjects() { }\n```\nDone.";
+        let answer = parse_ai_answer(text);
+        assert_eq!(answer.script.as_deref(), Some("for e in subjects() { }\n"));
+        assert_eq!(answer.params.get("service_mm"), Some(&500.0));
+        assert_eq!(answer.params.get("factor"), Some(&1.5));
+        assert_eq!(parse_ai_answer("no code"), AiAnswer::default());
+    }
+
+    #[test]
+    fn the_template_compiles() {
+        compile_script(SCRIPT_TEMPLATE).unwrap();
     }
 }

@@ -1,13 +1,14 @@
-//! A working area: a rectangle in plan, possibly turned, that limits what is
-//! shown and checked to one part of the project. Elements whose extent
-//! touches the rectangle are in; nothing is removed from the IFC files.
+//! A working area: a rectangle in plan, possibly turned, and optionally a
+//! range of heights, that limits what is shown and checked to one part of
+//! the project. Elements whose extent touches it are in; nothing is removed
+//! from the IFC files.
 
 use glam::{DVec2, DVec3, Mat4};
 use serde::{Deserialize, Serialize};
 
 use crate::{Aabb, Element, IfcModel};
 
-/// Rectangle in plan, in world (project) coordinates, metres. All heights.
+/// Rectangle in plan, in world (project) coordinates, metres.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct WorkArea {
     pub center: [f64; 2],
@@ -15,6 +16,9 @@ pub struct WorkArea {
     pub half: [f64; 2],
     /// Turn of the rectangle's first axis from world X, radians.
     pub angle: f64,
+    /// Bottom and top, world Z in metres; None means all heights.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heights: Option<[f64; 2]>,
 }
 
 impl WorkArea {
@@ -51,6 +55,13 @@ impl WorkArea {
         })
     }
 
+    /// Whether something from height `z0` to `z1` (world, metres) reaches
+    /// into the area's heights.
+    pub fn reaches(&self, z0: f64, z1: f64) -> bool {
+        self.heights
+            .is_none_or(|[bottom, top]| z1 >= bottom && z0 <= top)
+    }
+
     /// Whether an element is in the area. `transform` places the model in the
     /// federation frame and `origin` is that frame's world position.
     /// Elements without geometry follow their parts; with neither they are in.
@@ -71,6 +82,9 @@ impl WorkArea {
             return true;
         }
         let world: Aabb = bounds.transformed(&transform.as_dmat4());
+        if !self.reaches(world.min.z as f64 + origin.z, world.max.z as f64 + origin.z) {
+            return false;
+        }
         let min = DVec2::new(world.min.x as f64 + origin.x, world.min.y as f64 + origin.y);
         let max = DVec2::new(world.max.x as f64 + origin.x, world.max.y as f64 + origin.y);
         self.touches(min, max)
@@ -95,6 +109,7 @@ mod tests {
             center: [0.0, 0.0],
             half: [10.0, 5.0],
             angle,
+            heights: None,
         }
     }
 
@@ -116,6 +131,18 @@ mod tests {
         assert!(!area.touches(DVec2::new(9.0, -10.0), DVec2::new(10.0, -9.0)));
         // Along the turned long axis it reaches further than 5 in y.
         assert!(area.touches(DVec2::new(6.0, 6.0), DVec2::new(6.5, 6.5)));
+    }
+
+    #[test]
+    fn heights_limit_the_area() {
+        let mut area = square(0.0);
+        assert!(area.reaches(-100.0, -90.0));
+        area.heights = Some([3.0, 9.0]);
+        assert!(area.reaches(2.0, 3.0), "touching the bottom counts");
+        assert!(area.reaches(5.0, 6.0));
+        assert!(area.reaches(0.0, 20.0), "spanning the range counts");
+        assert!(!area.reaches(9.5, 12.0));
+        assert!(!area.reaches(0.0, 2.9));
     }
 
     #[test]

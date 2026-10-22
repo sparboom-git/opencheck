@@ -553,15 +553,16 @@ fn source_editor(
                                 .levels
                                 .get(level)
                                 .is_some_and(|items| items.contains(&item.id));
+                            // A filled mark, painted: the font has no dot glyph.
+                            let (rect, _) = ui
+                                .allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
                             if required {
-                                let dot = RichText::new("●").small();
-                                ui.label(if *level == project_level {
-                                    dot.color(theme::accent())
+                                let color = if *level == project_level {
+                                    theme::accent()
                                 } else {
-                                    dot.color(theme::text_muted())
-                                });
-                            } else {
-                                ui.label("");
+                                    theme::text_muted()
+                                };
+                                ui.painter().rect_filled(rect.shrink(1.5), 2.0, color);
                             }
                         }
                         ui.end_row();
@@ -1067,12 +1068,12 @@ fn elements(app: &mut OpenCheckApp, ui: &mut egui::Ui, state: &mut EditorState) 
                 let rows = state.rows.as_ref().expect("checked above");
                 for &i in &visible[range] {
                     let row = &rows[i];
-                    let (dot, color) = match &row.found {
-                        Some(_) => ("●", crate::checking_ui::accepted()),
-                        None => ("●", theme::danger()),
+                    let color = match &row.found {
+                        Some(_) => crate::checking_ui::accepted(),
+                        None => theme::danger(),
                     };
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(dot).small().color(color));
+                        crate::checking_ui::dot(ui, color);
                         let response = ui
                             .selectable_label(
                                 state.selected == Some(row.element),

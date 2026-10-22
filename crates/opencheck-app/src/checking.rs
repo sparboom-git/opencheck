@@ -15,7 +15,15 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 /// The Markdown guide users can hand to a language model to write rulesets.
-pub const RULESET_GUIDE: &str = include_str!("../../../docs/ruleset-authoring.md");
+pub const RULESET_GUIDE: &str = concat!(
+    include_str!("../../../docs/ruleset-authoring.md"),
+    "
+
+---
+
+",
+    include_str!("../../../docs/rule-scripts.md")
+);
 
 /// Built-in rulesets every project has; they can be switched off but not removed.
 pub const STANDARD_RULESETS: &[&str] = &[
@@ -329,6 +337,9 @@ impl Checking {
                     a: Selector::default(),
                     b: None,
                     standard,
+                    zone: None,
+                    script: String::new(),
+                    params: Default::default(),
                 }],
             };
             self.add_ruleset(&ruleset.to_toml(), Some(&format!("ids-{stem}")))?;

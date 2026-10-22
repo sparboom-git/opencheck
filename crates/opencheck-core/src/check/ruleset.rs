@@ -54,6 +54,101 @@ pub enum RuleKind {
     /// Building parts must carry the information an information standard
     /// requires at the chosen level (LOD).
     Information,
+    /// A zone beside, above or below each element of group `a` must be free
+    /// of group `b`, e.g. the service area along a cable tray.
+    FreeZone,
+    /// A rule written as a script (Rhai) with its own parameters.
+    Script,
+}
+
+/// Where a free zone lies, seen along the element's run (its longest axis).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ZoneSide {
+    /// Over the element.
+    #[default]
+    Above,
+    /// Under the element.
+    Below,
+    /// On both sides; each side must be free.
+    BothSides,
+    /// On the sides; at least one of them must be free.
+    OneSide,
+    /// In front of the element's broad face, on either face: for vertical
+    /// runs, e.g. the service area in front of a vertical cable ladder.
+    OneFace,
+}
+
+impl ZoneSide {
+    pub const ALL: [ZoneSide; 5] = [
+        ZoneSide::Above,
+        ZoneSide::Below,
+        ZoneSide::BothSides,
+        ZoneSide::OneSide,
+        ZoneSide::OneFace,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ZoneSide::Above => "Above",
+            ZoneSide::Below => "Below",
+            ZoneSide::BothSides => "Both sides",
+            ZoneSide::OneSide => "At least one side",
+            ZoneSide::OneFace => "In front (one face)",
+        }
+    }
+}
+
+/// Which elements a free zone rule applies to, by the direction of their run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunDirection {
+    #[default]
+    Any,
+    /// Runs within 30 degrees of horizontal.
+    Horizontal,
+    /// Runs within 30 degrees of vertical.
+    Vertical,
+}
+
+impl RunDirection {
+    pub fn label(self) -> &'static str {
+        match self {
+            RunDirection::Any => "Any",
+            RunDirection::Horizontal => "Horizontal",
+            RunDirection::Vertical => "Vertical",
+        }
+    }
+}
+
+/// The zone a free zone rule keeps clear.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Zone {
+    #[serde(default)]
+    pub side: ZoneSide,
+    /// How far the zone reaches out from the element.
+    pub depth_mm: f32,
+    /// The zone may be blocked over at most this length along the run.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub max_blocked_mm: f32,
+    /// Even where the zone is blocked, at least this much must stay free.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub min_free_mm: f32,
+    #[serde(default)]
+    pub direction: RunDirection,
+}
+
+impl Default for Zone {
+    fn default() -> Self {
+        Self {
+            side: ZoneSide::Above,
+            depth_mm: 200.0,
+            max_blocked_mm: 0.0,
+            min_free_mm: 0.0,
+            direction: RunDirection::Any,
+        }
+    }
 }
 
 /// A property condition, e.g. `Pset_WallCommon.LoadBearing = true`.
@@ -144,7 +239,7 @@ impl Selector {
     }
 }
 
-fn is_subtype(schema: &str, class: &str, parent: &str) -> bool {
+pub(super) fn is_subtype(schema: &str, class: &str, parent: &str) -> bool {
     class.eq_ignore_ascii_case(parent)
         || ifc_lite_core::is_subtype_of_for_schema(schema, class, parent)
         // IFC4X3 renamed IfcBuildingElement; accept either name everywhere.
@@ -211,6 +306,16 @@ pub struct Rule {
     /// for an IDS file stored in the project, e.g. `ids:requirements/x.ids`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub standard: String,
+    /// Free zone: the zone to keep clear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone: Option<Zone>,
+    /// Script: the rule's code (Rhai).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub script: String,
+    /// Script: values the script reads with `param("name")`, shown as input
+    /// fields in the app. Lengths are in millimetres by convention.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub params: std::collections::BTreeMap<String, f64>,
 }
 
 fn is_zero(v: &f32) -> bool {
@@ -297,6 +402,37 @@ impl Ruleset {
                     rule.id, rule.standard
                 ));
             }
+            if rule.kind == RuleKind::FreeZone {
+                match &rule.zone {
+                    None => {
+                        return invalid(format!(
+                            "rule '{}': a free_zone rule needs a [rule.zone] table",
+                            rule.id
+                        ));
+                    }
+                    Some(zone) if zone.depth_mm <= 0.0 => {
+                        return invalid(format!(
+                            "rule '{}': zone.depth_mm must be above 0",
+                            rule.id
+                        ));
+                    }
+                    Some(zone) if zone.min_free_mm >= zone.depth_mm => {
+                        return invalid(format!(
+                            "rule '{}': zone.min_free_mm must be less than zone.depth_mm",
+                            rule.id
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            if rule.kind == RuleKind::Script {
+                if rule.script.trim().is_empty() {
+                    return invalid(format!("rule '{}': a script rule needs a script", rule.id));
+                }
+                if let Err(e) = super::script::compile(&rule.script) {
+                    return invalid(format!("rule '{}': {e}", rule.id));
+                }
+            }
             if rule.tolerance_mm < 0.0 {
                 return invalid(format!(
                     "rule '{}': tolerance_mm cannot be negative",
@@ -335,6 +471,14 @@ pub const BUILTIN_RULESETS: &[BuiltinRuleset] = &[
     BuiltinRuleset {
         file_name: "clearance-mep-structure.toml",
         toml: include_str!("../../rulesets/clearance-mep-structure.toml"),
+    },
+    BuiltinRuleset {
+        file_name: "electrical-cable-trays.toml",
+        toml: include_str!("../../rulesets/electrical-cable-trays.toml"),
+    },
+    BuiltinRuleset {
+        file_name: "ventilation-clearances.toml",
+        toml: include_str!("../../rulesets/ventilation-clearances.toml"),
     },
     BuiltinRuleset {
         file_name: "information-lod-dk.toml",

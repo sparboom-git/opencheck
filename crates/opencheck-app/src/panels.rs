@@ -681,7 +681,7 @@ pub fn properties_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&element.ifc_class).color(theme::text_muted()));
                         ui.label(
-                            RichText::new(format!("● {}", model.short_name))
+                            RichText::new(format!("• {}", model.short_name))
                                 .small()
                                 .color(color),
                         );

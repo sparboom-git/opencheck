@@ -2,3 +2,6 @@
 /testdata
 *.ifc
 !crates/**/tests/fixtures/*.ifc
+
+# Files waiting to be deleted by hand
+/_delete

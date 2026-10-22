@@ -88,7 +88,7 @@ The Checking tab runs rulesets against the loaded models, much like Solibri.
   - *Duplicates*: elements of one model with the same shape lying on top of
     each other, whatever their class or tessellation.
   - *Information: LOD DK*: building parts must carry the information their
-    level of development requires (LOD 200, 300, 325 or 400 DK). The level is
+    level of development requires (LOD 200, 300 or 325 DK). The level is
     set for the project on the ruleset card and per model in the model list.
     Where each item is read from (property, classification, material, …) can
     be adapted per project. See
@@ -97,6 +97,18 @@ The Checking tab runs rulesets against the loaded models, much like Solibri.
   architecture, structure vs architecture, MEP coordination, clearance), your
   own rulesets, and **IDS 1.0** files (buildingSMART Information Delivery
   Specification). Each ruleset can be limited to some of the models.
+- **Free zones**: room an element needs along its whole length, such as the
+  service area beside a cable tray, the headroom above it or the space in
+  front of a vertical ladder. The zone may be interrupted over a set length
+  and can require a minimum that always stays free. The built-in *Electrical:
+  cable tray clearances* ruleset uses them; the blocked part of the zone is
+  drawn in the 3D view.
+- **Script rules** for checks no rule type covers: a short script (Rhai) that
+  measures runs, zones and distances and reports findings. Its numbers are
+  input fields in the Ruleset Manager, and the code is meant to be written by
+  a language model: *Copy prompt* hands it the description, the groups and
+  the script reference, and *Use the answer* puts its code and parameters in
+  place. See [docs/rule-scripts.md](docs/rule-scripts.md).
 - The **Ruleset Manager** creates and edits rulesets and rules in forms (check
   type, severity, tolerance, groups A and B by discipline, IFC class and
   property), shows how many elements each group matches, explains why an

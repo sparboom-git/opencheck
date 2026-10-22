@@ -1689,6 +1689,7 @@ pub(super) fn check_ids(
                 magnitude: details.len() as f32,
                 category: spec.name.clone(),
                 details,
+                zones: Vec::new(),
             });
         }
         checked += elements_seen.len();

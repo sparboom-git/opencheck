@@ -1,5 +1,5 @@
 # Information requirements per building part at the Danish LOD levels
-# (LOD 200 DK, 300 DK, 325 DK and 400 DK).
+# (LOD 200 DK, 300 DK and 325 DK).
 #
 # Each [[item]] lists the places the information may be found in. Projects
 # and exporters store the same information differently (classification as
@@ -13,9 +13,9 @@
 [standard]
 id = "opencheck.information.lod-dk"
 name = "Information requirements, LOD DK"
-description = "Which information each kind of building part must carry at LOD 200, 300, 325 and 400 DK. Information that follows from geometry and placement (levels, positions) counts as present when the element has geometry."
+description = "Which information each kind of building part must carry at LOD 200, 300 and 325 DK. Information that follows from geometry and placement (levels, positions) counts as present when the element has geometry."
 version = "1"
-levels = ["200", "300", "325", "400"]
+levels = ["200", "300", "325"]
 default_level = "300"
 
 # ---- Classification ------------------------------------------------------
@@ -361,7 +361,6 @@ applies = [
 [part.levels]
 "300" = ["classification-code", "type-id", "type-name", "width", "height", "depth", "diameter"]
 "325" = ["classification-code", "type-id", "type-name", "width", "height", "depth", "diameter", "discipline"]
-"400" = ["classification-code", "type-id", "unique-id", "type-name", "width", "height", "depth", "diameter", "discipline", "contract"]
 
 # ---- Landscape (landscape models) -----------------------------------------
 
@@ -373,7 +372,6 @@ applies = [{ disciplines = ["landscape"], names = ["solitær", "\\btræ", "\\btr
 "200" = ["type-name"]
 "300" = ["classification-code", "type-id", "type-name", "dimension"]
 "325" = ["classification-code", "type-id", "type-name", "dimension", "quality", "location"]
-"400" = ["classification-code", "type-id", "type-name", "dimension", "quality", "location"]
 
 [[part]]
 id = "landscape-planting"
@@ -383,7 +381,6 @@ applies = [{ disciplines = ["landscape"], names = ["beplantning", "planting", "\
 "200" = ["type-name"]
 "300" = ["classification-code", "type-id", "type-name", "area", "area-distribution"]
 "325" = ["classification-code", "type-id", "type-name", "area", "area-distribution", "location", "count", "quality"]
-"400" = ["classification-code", "type-id", "type-name", "area", "area-distribution", "location", "count", "quality"]
 
 [[part]]
 id = "landscape-furnishing"
@@ -393,7 +390,6 @@ applies = [{ disciplines = ["landscape"], classes = ["IfcFurnishingElement"] }]
 "200" = ["type-name"]
 "300" = ["classification-code", "type-id", "type-name", "dimension"]
 "325" = ["classification-code", "type-id", "type-name", "dimension", "location"]
-"400" = ["classification-code", "type-id", "type-name", "dimension", "location", "construction"]
 
 [[part]]
 id = "landscape-construction"
@@ -404,7 +400,6 @@ applies = [{ disciplines = ["landscape"], classes = ["IfcWall", "IfcStair", "Ifc
 "200" = ["type-name"]
 "300" = ["classification-code", "type-id", "type-name", "dimension"]
 "325" = ["classification-code", "type-id", "type-name", "dimension", "location", "construction"]
-"400" = ["classification-code", "type-id", "type-name", "dimension", "location", "construction"]
 
 [[part]]
 id = "landscape-surface"
@@ -415,7 +410,6 @@ applies = [{ disciplines = ["landscape"], classes = ["IfcSlab", "IfcCovering", "
 "200" = ["type-name"]
 "300" = ["classification-code", "type-id", "type-name", "area"]
 "325" = ["classification-code", "type-id", "type-name", "area", "location", "construction"]
-"400" = ["classification-code", "type-id", "type-name", "area", "location", "construction"]
 
 # ---- Structure (structural models) ----------------------------------------
 
@@ -428,7 +422,6 @@ applies = [{ disciplines = ["structural"], classes = ["IfcFooting", "IfcPile"] }
 "200" = ["type-name", "length"]
 "300" = ["classification-code", "type-id", "type-name", "length", "load-bearing"]
 "325" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey"]
-"400" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey", "surface-treatment", "surface-class", "concrete-strength", "exposure-class", "max-aggregate", "contract"]
 
 [[part]]
 id = "concrete-wall"
@@ -438,7 +431,6 @@ applies = [{ disciplines = ["structural"], classes = ["IfcWall"] }]
 "200" = ["type-name", "thickness", "height", "length"]
 "300" = ["classification-code", "type-id", "type-name", "thickness", "height", "length", "load-bearing"]
 "325" = ["classification-code", "type-id", "type-name", "thickness", "height", "length", "load-bearing", "storey"]
-"400" = ["classification-code", "type-id", "type-name", "thickness", "height", "length", "load-bearing", "storey", "surface-treatment", "surface-class", "concrete-strength", "exposure-class", "max-aggregate", "contract"]
 
 [[part]]
 id = "steel-column"
@@ -451,7 +443,6 @@ applies = [
 "200" = ["type-name", "length"]
 "300" = ["classification-code", "type-id", "type-name", "length", "load-bearing"]
 "325" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey"]
-"400" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey", "steel-grade", "contract"]
 
 [[part]]
 id = "concrete-column"
@@ -461,7 +452,6 @@ applies = [{ disciplines = ["structural"], classes = ["IfcColumn"] }]
 "200" = ["type-name", "length"]
 "300" = ["classification-code", "type-id", "type-name", "length", "load-bearing"]
 "325" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey"]
-"400" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey", "surface-treatment", "surface-class", "concrete-strength", "exposure-class", "max-aggregate", "contract"]
 
 [[part]]
 id = "steel-beam"
@@ -474,7 +464,6 @@ applies = [
 "200" = ["type-name", "length"]
 "300" = ["classification-code", "type-id", "type-name", "length", "load-bearing"]
 "325" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey"]
-"400" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey", "steel-grade", "contract"]
 
 [[part]]
 id = "concrete-beam"
@@ -484,7 +473,6 @@ applies = [{ disciplines = ["structural"], classes = ["IfcBeam"] }]
 "200" = ["type-name", "length"]
 "300" = ["classification-code", "type-id", "type-name", "length", "load-bearing"]
 "325" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey"]
-"400" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey", "surface-treatment", "surface-class", "concrete-strength", "exposure-class", "max-aggregate", "contract"]
 
 [[part]]
 id = "concrete-slab"
@@ -494,7 +482,6 @@ applies = [{ disciplines = ["structural"], classes = ["IfcSlab"] }]
 "200" = ["type-name", "thickness"]
 "300" = ["classification-code", "type-id", "type-name", "thickness", "load-bearing"]
 "325" = ["classification-code", "type-id", "type-name", "thickness", "load-bearing", "storey"]
-"400" = ["classification-code", "type-id", "type-name", "length", "load-bearing", "storey", "surface-treatment", "surface-class", "concrete-strength", "exposure-class", "max-aggregate", "contract"]
 
 # ---- Electrical -----------------------------------------------------------
 
@@ -510,7 +497,6 @@ applies = [
 "200" = ["type-name", "dimension"]
 "300" = ["classification-code", "type-id", "type-name", "dimension", "centre-level"]
 "325" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "storey"]
-"400" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "storey", "material", "compartments", "contract"]
 
 [[part]]
 id = "electrical-component"
@@ -524,7 +510,6 @@ applies = [
 "200" = ["type-name"]
 "300" = ["classification-code", "type-id", "type-name"]
 "325" = ["classification-code", "type-id", "type-name", "level", "storey"]
-"400" = ["classification-code", "type-id", "type-name", "level", "storey", "board-number", "dimension", "contract"]
 
 # ---- Ventilation ----------------------------------------------------------
 
@@ -540,7 +525,6 @@ applies = [
 "200" = ["type-name", "dimension"]
 "300" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "insulation-thickness", "system"]
 "325" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "insulation-thickness", "insulation-type", "storey", "system", "air-direction"]
-"400" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "insulation-thickness", "insulation-type", "storey", "system", "air-direction", "air-flow", "material", "contract"]
 
 # ---- Plumbing -------------------------------------------------------------
 
@@ -556,7 +540,6 @@ applies = [
 "200" = ["type-name", "dimension"]
 "300" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "insulation-thickness", "system"]
 "325" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "insulation-thickness", "insulation-type", "storey", "system"]
-"400" = ["classification-code", "type-id", "type-name", "dimension", "centre-level", "insulation-thickness", "insulation-type", "storey", "system", "material", "contract"]
 
 # ---- Ventilation equipment and components ---------------------------------
 
@@ -572,7 +555,6 @@ applies = [
 "200" = ["type-name"]
 "300" = ["classification-code", "type-id", "type-name", "system"]
 "325" = ["classification-code", "type-id", "type-name", "level", "storey", "system"]
-"400" = ["classification-code", "type-id", "type-name", "level", "storey", "system", "air-flow", "dimension", "contract"]
 
 [[part]]
 id = "ventilation-component"
@@ -586,7 +568,6 @@ applies = [
 "200" = ["type-name"]
 "300" = ["classification-code", "type-id", "type-name", "system"]
 "325" = ["classification-code", "type-id", "type-name", "level", "storey", "system"]
-"400" = ["classification-code", "type-id", "type-name", "level", "storey", "system", "air-flow", "dimension", "contract"]
 
 # ---- Plumbing equipment and components ------------------------------------
 
@@ -599,7 +580,6 @@ applies = [{ classes = ["IfcSanitaryTerminal", "IfcWasteTerminal", "IfcStackTerm
 "200" = ["type-name"]
 "300" = ["classification-code", "type-id", "type-name"]
 "325" = ["classification-code", "type-id", "type-name", "level", "storey"]
-"400" = ["classification-code", "type-id", "type-name", "level", "storey", "water-flow", "dimension", "contract"]
 
 [[part]]
 id = "plumbing-equipment"
@@ -613,7 +593,6 @@ applies = [
 "200" = ["type-name"]
 "300" = ["classification-code", "type-id", "type-name"]
 "325" = ["classification-code", "type-id", "type-name", "storey", "system"]
-"400" = ["classification-code", "type-id", "type-name", "level", "storey", "system", "dimension", "contract"]
 
 [[part]]
 id = "plumbing-component"
@@ -627,7 +606,6 @@ applies = [
 "200" = ["type-name"]
 "300" = ["classification-code", "type-id", "type-name", "system"]
 "325" = ["classification-code", "type-id", "type-name", "level", "storey", "system"]
-"400" = ["classification-code", "type-id", "type-name", "level", "storey", "system", "dimension", "contract"]
 
 [[part]]
 id = "mep-space"
@@ -638,7 +616,6 @@ applies = [{ disciplines = ["mechanical", "plumbing", "electrical", "fire_protec
 "200" = ["room-name", "area", "supply-area"]
 "300" = ["room-name", "room-number", "area", "supply-area", "room-control"]
 "325" = ["room-name", "room-number", "area", "supply-area", "room-control"]
-"400" = ["room-name", "room-number", "area", "supply-area", "room-control"]
 
 # ---- Architecture ---------------------------------------------------------
 
@@ -651,7 +628,6 @@ applies = [{ classes = ["IfcCurtainWall"] }]
 "200" = ["type-name", "dimension"]
 "300" = ["classification-code", "type-id", "type-name", "dimension"]
 "325" = ["classification-code", "type-id", "type-name", "storey", "dimension", "build-up"]
-"400" = ["classification-code", "type-id", "type-name", "storey", "dimension", "build-up", "contract"]
 
 [[part]]
 id = "window"
@@ -662,7 +638,6 @@ applies = [{ classes = ["IfcWindow"] }]
 "200" = ["type-name", "opening-width", "opening-height"]
 "300" = ["classification-code", "type-id", "type-name", "opening-width", "opening-height"]
 "325" = ["classification-code", "type-id", "type-name", "opening-width", "opening-height", "storey", "fire-exit", "build-up", "fire-rating", "acoustic-rating"]
-"400" = ["classification-code", "type-id", "type-name", "opening-width", "opening-height", "storey", "fire-exit", "build-up", "fire-rating", "acoustic-rating", "contract"]
 
 [[part]]
 id = "door"
@@ -673,7 +648,6 @@ applies = [{ classes = ["IfcDoor"] }]
 "200" = ["type-name", "opening-width", "opening-height"]
 "300" = ["classification-code", "type-id", "type-name", "opening-width", "opening-height"]
 "325" = ["classification-code", "type-id", "type-name", "opening-width", "opening-height", "storey", "fire-exit", "hardware-set", "build-up", "fire-rating", "acoustic-rating"]
-"400" = ["classification-code", "type-id", "type-name", "opening-width", "opening-height", "storey", "fire-exit", "hardware-set", "build-up", "fire-rating", "acoustic-rating", "contract"]
 
 [[part]]
 id = "stair-ramp"
@@ -684,7 +658,6 @@ applies = [{ classes = ["IfcStair", "IfcStairFlight", "IfcRamp", "IfcRampFlight"
 "200" = ["type-name"]
 "300" = ["classification-code", "type-id", "type-name", "slope"]
 "325" = ["classification-code", "type-id", "type-name", "storey", "slope"]
-"400" = ["classification-code", "type-id", "type-name", "storey", "slope", "contract"]
 
 [[part]]
 id = "railing"
@@ -693,7 +666,6 @@ applies = [{ classes = ["IfcRailing"] }]
 [part.levels]
 "300" = ["classification-code", "type-id", "type-name", "height"]
 "325" = ["classification-code", "type-id", "type-name", "height", "storey", "build-up"]
-"400" = ["classification-code", "type-id", "type-name", "height", "storey", "build-up"]
 
 [[part]]
 id = "roof"
@@ -707,7 +679,6 @@ applies = [
 "200" = ["type-name", "thickness"]
 "300" = ["classification-code", "type-id", "type-name", "thickness"]
 "325" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
-"400" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction", "contract"]
 
 [[part]]
 id = "ceiling"
@@ -716,7 +687,6 @@ applies = [{ classes = ["IfcCovering"], names = ["loft", "ceiling", "nedhæng", 
 [part.levels]
 "300" = ["classification-code", "type-id", "type-name", "thickness"]
 "325" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
-"400" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
 
 [[part]]
 id = "floor"
@@ -730,7 +700,6 @@ applies = [
 "200" = ["type-name", "thickness"]
 "300" = ["classification-code", "type-id", "type-name", "thickness"]
 "325" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
-"400" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
 
 [[part]]
 id = "wall"
@@ -741,7 +710,6 @@ applies = [{ classes = ["IfcWall"] }]
 "200" = ["type-name", "thickness"]
 "300" = ["classification-code", "type-id", "type-name", "thickness"]
 "325" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
-"400" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction", "contract"]
 
 [[part]]
 id = "furnishing"
@@ -752,7 +720,6 @@ applies = [{ classes = ["IfcFurnishingElement"] }]
 "200" = ["type-name", "thickness"]
 "300" = ["classification-code", "type-id", "type-name", "thickness"]
 "325" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction"]
-"400" = ["classification-code", "type-id", "type-name", "thickness", "storey", "construction", "contract"]
 
 [[part]]
 id = "gross-area"
@@ -763,7 +730,6 @@ applies = [{ classes = ["IfcSpace"], names = ["brutto", "\\bgross"] }]
 "200" = ["name", "gross-area"]
 "300" = ["classification-code", "type-id", "name", "gross-area"]
 "325" = ["classification-code", "type-id", "name", "gross-area", "storey"]
-"400" = ["classification-code", "type-id", "name", "gross-area", "storey"]
 
 [[part]]
 id = "room"
@@ -774,4 +740,3 @@ applies = [{ classes = ["IfcSpace"] }]
 "200" = ["room-name", "net-area"]
 "300" = ["classification-code", "type-id", "room-name", "room-number", "net-area"]
 "325" = ["classification-code", "type-id", "room-name", "room-number", "net-area", "storey"]
-"400" = ["classification-code", "type-id", "room-name", "room-number", "net-area", "storey"]

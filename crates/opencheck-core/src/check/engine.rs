@@ -16,6 +16,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sha2::{Digest, Sha256};
 
+use super::freezone::{RunFrame, ZoneBox, covered, intersect, merge, subtract};
 use super::geom::{
     Triangle, closest_point_on_triangle, point_in_mesh, triangle_aabb, triangle_intersection,
 };
@@ -24,7 +25,7 @@ use super::information::{
     InformationStandard, InformationSummary, ItemCoverage, ModelFacts, PartCoverage,
     builtin_standard, is_checked,
 };
-use super::ruleset::{Between, Rule, RuleKind, Ruleset, RulesetInfo, Selector};
+use super::ruleset::{Between, Rule, RuleKind, Ruleset, RulesetInfo, Selector, Zone, ZoneSide};
 use crate::{Aabb, IfcModel, ModelId};
 
 /// A model taking part in a check, placed in the federation frame.
@@ -75,6 +76,10 @@ pub enum FindingKind {
     Duplicate,
     /// Required information is missing on the element.
     MissingInformation,
+    /// A zone the element needs is blocked.
+    FreeZone,
+    /// Reported by a script rule.
+    Script,
 }
 
 impl FindingKind {
@@ -85,6 +90,8 @@ impl FindingKind {
             FindingKind::Clearance => "Clearance",
             FindingKind::Duplicate => "Duplicate",
             FindingKind::MissingInformation => "Missing information",
+            FindingKind::FreeZone => "Free zone",
+            FindingKind::Script => "Script",
         }
     }
 }
@@ -116,14 +123,18 @@ pub struct Finding {
     pub magnitude: f32,
     /// Missing information: the kind of building part, e.g. "Cable carriers".
     pub category: String,
-    /// Missing information: names of the missing items.
+    /// Missing information: names of the missing items. Free zones and
+    /// scripts: what is wrong, in lines.
     pub details: Vec<String>,
+    /// Free zones: the blocked part of the zone as boxes (8 corners each,
+    /// federation frame), for drawing.
+    pub zones: Vec<[Vec3; 8]>,
 }
 
 impl Finding {
     /// The finding concerns one element (`a` and `b` are the same).
     pub fn is_single(&self) -> bool {
-        self.kind == FindingKind::MissingInformation
+        self.a.model == self.b.model && self.a.express_id == self.b.express_id
     }
 }
 
@@ -135,6 +146,8 @@ pub struct RuleResult {
     pub duration: Duration,
     /// Information rules: fill rate per building part.
     pub information: Option<InformationSummary>,
+    /// Script rules: what the script printed, and errors.
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -162,12 +175,12 @@ impl CheckReport {
 }
 
 /// An element ready for testing: its triangles in the federation frame.
-struct Prepared {
-    model: usize,
-    element: usize,
-    triangles: Vec<Triangle>,
+pub(super) struct Prepared {
+    pub(super) model: usize,
+    pub(super) element: usize,
+    pub(super) triangles: Arc<[Triangle]>,
     boxes: Vec<Aabb>,
-    bounds: Aabb,
+    pub(super) bounds: Aabb,
 }
 
 impl Prepared {
@@ -198,7 +211,7 @@ impl Prepared {
         Some(Self {
             model,
             element,
-            triangles,
+            triangles: triangles.into(),
             boxes,
             bounds,
         })
@@ -230,6 +243,11 @@ pub fn run_check(
                     let a = select(models, &job.models, &rule.a);
                     let b = match &rule.b {
                         Some(selector) => select(models, &job.models, selector),
+                        // A zone must be free of everything; a script gets the
+                        // whole model as its other group.
+                        None if matches!(rule.kind, RuleKind::FreeZone | RuleKind::Script) => {
+                            select(models, &job.models, &Selector::default())
+                        }
                         None => a.clone(),
                     };
                     (a, b)
@@ -245,10 +263,12 @@ pub fn run_check(
         .flat_map(|(a, b)| a.iter().chain(b.iter()).copied())
         .collect();
     let needed: Vec<(usize, usize)> = needed.into_iter().collect();
-    let prepared: Vec<Prepared> = needed
-        .par_iter()
-        .filter_map(|&(m, e)| Prepared::new(models, m, e))
-        .collect();
+    let prepared: Arc<Vec<Prepared>> = Arc::new(
+        needed
+            .par_iter()
+            .filter_map(|&(m, e)| Prepared::new(models, m, e))
+            .collect(),
+    );
     let index: FxHashMap<(usize, usize), usize> = prepared
         .iter()
         .enumerate()
@@ -276,6 +296,7 @@ pub fn run_check(
                     pairs_tested: checked,
                     duration: rule_started.elapsed(),
                     information: Some(summary),
+                    notes: Vec::new(),
                 });
                 let n = done.fetch_add(1, Ordering::Relaxed) + 1;
                 progress(0.1 + 0.9 * n as f32 / total_rules as f32);
@@ -287,6 +308,31 @@ pub fn run_check(
                     .collect()
             };
             let (a, b) = (resolve(&a), resolve(&b));
+            if matches!(rule.kind, RuleKind::FreeZone | RuleKind::Script) {
+                let ruleset_id = &job.ruleset.ruleset.id;
+                let (mut findings, notes) = match (rule.kind, &rule.zone) {
+                    (RuleKind::FreeZone, Some(zone)) => (
+                        check_free_zone(&prepared, models, rule, zone, &a, &b, ruleset_id),
+                        Vec::new(),
+                    ),
+                    (RuleKind::Script, _) => {
+                        super::script::run(&prepared, models, rule, &a, &b, ruleset_id)
+                    }
+                    _ => (Vec::new(), Vec::new()),
+                };
+                findings.sort_by(|x, y| y.magnitude.total_cmp(&x.magnitude));
+                rules.push(RuleResult {
+                    rule: rule.clone(),
+                    findings,
+                    pairs_tested: a.len(),
+                    duration: rule_started.elapsed(),
+                    information: None,
+                    notes,
+                });
+                let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+                progress(0.1 + 0.9 * n as f32 / total_rules as f32);
+                continue;
+            }
             let pairs = candidate_pairs(&prepared, models, rule, &a, &b, rule.b.is_none());
             let findings: Vec<Finding> = pairs
                 .par_iter()
@@ -308,6 +354,7 @@ pub fn run_check(
                 pairs_tested: pairs.len(),
                 duration: rule_started.elapsed(),
                 information: None,
+                notes: Vec::new(),
             });
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             progress(0.1 + 0.9 * n as f32 / total_rules as f32);
@@ -375,7 +422,7 @@ fn candidate_pairs(
     let margin = match rule.kind {
         RuleKind::Clearance => rule.clearance_mm / 1000.0,
         RuleKind::Duplicates => rule.tolerance_mm / 1000.0,
-        RuleKind::Clash | RuleKind::Information => 0.0,
+        RuleKind::Clash | RuleKind::Information | RuleKind::FreeZone | RuleKind::Script => 0.0,
     };
     let mut sorted_b: Vec<usize> = b.to_vec();
     sorted_b.sort_by(|x, y| {
@@ -430,18 +477,19 @@ fn pair_allowed(a: &Prepared, b: &Prepared, models: &[CheckModel], rule: &Rule) 
         Between::SameModel if !same_model => return false,
         _ => {}
     }
-    if same_model {
-        // Parts touch their assembly and each other by design.
-        let elements = &models[a.model].model.elements;
-        let (ea, eb) = (&elements[a.element], &elements[b.element]);
-        if ea.parent == Some(eb.express_id)
-            || eb.parent == Some(ea.express_id)
-            || (ea.parent.is_some() && ea.parent == eb.parent)
-        {
-            return false;
-        }
+    !same_assembly(a, b, models)
+}
+
+/// Parts touch their assembly and each other by design.
+fn same_assembly(a: &Prepared, b: &Prepared, models: &[CheckModel]) -> bool {
+    if a.model != b.model {
+        return false;
     }
-    true
+    let elements = &models[a.model].model.elements;
+    let (ea, eb) = (&elements[a.element], &elements[b.element]);
+    ea.parent == Some(eb.express_id)
+        || eb.parent == Some(ea.express_id)
+        || (ea.parent.is_some() && ea.parent == eb.parent)
 }
 
 fn test_pair(
@@ -455,21 +503,10 @@ fn test_pair(
         RuleKind::Clash => clash(a, b, rule.tolerance_mm / 1000.0)?,
         RuleKind::Clearance => clearance(a, b, rule.clearance_mm / 1000.0)?,
         RuleKind::Duplicates => duplicate(a, b, rule.tolerance_mm / 1000.0)?,
-        // Checked per element in `check_information`.
-        RuleKind::Information => return None,
+        // Checked per element in their own functions.
+        RuleKind::Information | RuleKind::FreeZone | RuleKind::Script => return None,
     };
-    let element = |p: &Prepared| {
-        let model = &models[p.model];
-        let e = &model.model.elements[p.element];
-        FindingElement {
-            model: model.id,
-            express_id: e.express_id,
-            global_id: e.global_id.clone(),
-            name: e.name.clone(),
-            ifc_class: e.ifc_class.clone(),
-        }
-    };
-    let (ea, eb) = (element(a), element(b));
+    let (ea, eb) = (finding_element(models, a), finding_element(models, b));
     Some(Finding {
         id: finding_id(ruleset_id, &rule.id, &ea.global_id, &eb.global_id),
         kind,
@@ -480,7 +517,329 @@ fn test_pair(
         magnitude,
         category: String::new(),
         details: Vec::new(),
+        zones: Vec::new(),
     })
+}
+
+pub(super) fn finding_element(models: &[CheckModel], p: &Prepared) -> FindingElement {
+    let model = &models[p.model];
+    let e = &model.model.elements[p.element];
+    FindingElement {
+        model: model.id,
+        express_id: e.express_id,
+        global_id: e.global_id.clone(),
+        name: e.name.clone(),
+        ifc_class: e.ifc_class.clone(),
+    }
+}
+
+/// Classes that are never in the way: they are not built things.
+const NOT_IN_THE_WAY: &[&str] = &[
+    "IfcSpace",
+    "IfcOpeningElement",
+    "IfcOpeningStandardCase",
+    "IfcVirtualElement",
+    "IfcAnnotation",
+    "IfcGrid",
+    "IfcSpatialZone",
+    "IfcZone",
+];
+
+/// Elements of `others` that may block the zones of `subject`, with the
+/// stretches each blocks. Parts of the same assembly never block each other.
+pub(super) fn blocked_stretches(
+    prepared: &[Prepared],
+    models: &[CheckModel],
+    subject: usize,
+    zone: &ZoneBox,
+    others: &[usize],
+) -> Vec<(usize, Vec<[f32; 2]>)> {
+    let bounds = zone.bounds();
+    let mut out = Vec::new();
+    for &j in others {
+        let blocker = &prepared[j];
+        if j == subject || !blocker.bounds.intersects(&bounds) {
+            continue;
+        }
+        let element = &models[blocker.model].model.elements[blocker.element];
+        if NOT_IN_THE_WAY
+            .iter()
+            .any(|c| element.ifc_class.eq_ignore_ascii_case(c))
+            || same_assembly(&prepared[subject], blocker, models)
+        {
+            continue;
+        }
+        let mut hits = Vec::new();
+        zone.blocked_by(&blocker.triangles, &blocker.bounds, &mut hits);
+        if hits.is_empty() || connected(&prepared[subject], blocker, models) {
+            continue;
+        }
+        // Where the blocker goes through the element itself (a tray through
+        // a wall, a beam through a duct) it is a crossing, not something
+        // beside, above or below it: those stretches do not count.
+        let mut crossing = Vec::new();
+        zone.core()
+            .blocked_by(&blocker.triangles, &blocker.bounds, &mut crossing);
+        let crossing: Vec<[f32; 2]> = merge(crossing, 0.01)
+            .into_iter()
+            .map(|s| [s[0] - CROSSING_MARGIN, s[1] + CROSSING_MARGIN])
+            .collect();
+        let left = subtract(&merge(hits, 0.01), &crossing);
+        if !left.is_empty() {
+            out.push((j, left));
+        }
+    }
+    out
+}
+
+/// Blocked stretches per zone and blocker. For a pair of opposite zones
+/// (both sides, both faces) an element that blocks both on the same stretch
+/// surrounds the element: the edges of the hole it passes through, as where
+/// a tray goes through an opening in a wall. That is a crossing too.
+pub(super) fn blocked_zones(
+    prepared: &[Prepared],
+    models: &[CheckModel],
+    subject: usize,
+    zones: &[ZoneBox],
+    others: &[usize],
+) -> Vec<Vec<(usize, Vec<[f32; 2]>)>> {
+    let mut per_zone: Vec<Vec<(usize, Vec<[f32; 2]>)>> = zones
+        .iter()
+        .map(|z| blocked_stretches(prepared, models, subject, z, others))
+        .collect();
+    if let [first, second] = per_zone.as_mut_slice() {
+        for (j, a) in first.iter_mut() {
+            let Some((_, b)) = second.iter_mut().find(|(k, _)| k == j) else {
+                continue;
+            };
+            let around: Vec<[f32; 2]> = intersect(a, b)
+                .into_iter()
+                .map(|s| [s[0] - CROSSING_MARGIN, s[1] + CROSSING_MARGIN])
+                .collect();
+            if around.is_empty() {
+                continue;
+            }
+            *a = subtract(a, &around);
+            *b = subtract(b, &around);
+        }
+        first.retain(|(_, s)| !s.is_empty());
+        second.retain(|(_, s)| !s.is_empty());
+    }
+    per_zone
+}
+
+/// Segments and fittings that touch the element continue its run (a bend,
+/// a riser, the next segment); they are part of it, not in its way.
+pub(super) fn connected(subject: &Prepared, other: &Prepared, models: &[CheckModel]) -> bool {
+    if subject.model != other.model {
+        return false;
+    }
+    let model = &models[other.model].model;
+    let element = &model.elements[other.element];
+    let is_run_part = |class: &str| {
+        ["IfcFlowSegment", "IfcFlowFitting"]
+            .iter()
+            .any(|p| super::ruleset::is_subtype(&model.schema, class, p))
+    };
+    (is_run_part(&element.ifc_class) || is_run_part(element.occurrence_class()))
+        && distance(subject, other, 0.005).is_some()
+}
+
+/// A crossing also frees the zone this far on each side of it, metres, so
+/// the faces of a wall the element passes through do not count.
+const CROSSING_MARGIN: f32 = 0.02;
+
+/// Shortest blocked stretch worth reporting, metres; anything shorter is a
+/// touch at a joint.
+const MIN_STRETCH: f32 = 0.01;
+
+/// Free zone rule: for each element of `a`, the zone beside, above or below
+/// it along its run must be free of `b`, apart from interruptions up to
+/// `max_blocked_mm`; and where blocked, `min_free_mm` must stay free.
+fn check_free_zone(
+    prepared: &[Prepared],
+    models: &[CheckModel],
+    rule: &Rule,
+    zone: &Zone,
+    a: &[usize],
+    b: &[usize],
+    ruleset_id: &str,
+) -> Vec<Finding> {
+    let allowed = zone.max_blocked_mm / 1000.0;
+    let min_free = zone.min_free_mm / 1000.0;
+    a.par_iter()
+        .flat_map_iter(|&i| {
+            let mut findings = Vec::new();
+            let Some(frame) = RunFrame::of(&prepared[i].triangles) else {
+                return findings;
+            };
+            if !frame.matches(zone.direction) {
+                return findings;
+            }
+            let checks = [
+                (zone.depth_mm / 1000.0, allowed, false),
+                (min_free, 0.0, true),
+            ];
+            for (depth, allowed, is_minimum) in checks {
+                if depth <= 0.0 {
+                    continue;
+                }
+                let zones = ZoneBox::around(&frame, zone.side, depth);
+                for problem in zone_problems(prepared, models, i, &zones, zone.side, b) {
+                    let (stretch, _, _) = &problem;
+                    if stretch[1] - stretch[0] <= allowed + MIN_STRETCH {
+                        continue;
+                    }
+                    let text = zone_text(zone, &frame, *stretch, is_minimum);
+                    findings.push(zone_finding(
+                        prepared, models, rule, ruleset_id, i, problem, text, is_minimum,
+                    ));
+                }
+            }
+            findings
+        })
+        .collect()
+}
+
+/// Lines describing a blocked stretch of a free zone.
+fn zone_text(zone: &Zone, frame: &RunFrame, stretch: [f32; 2], is_minimum: bool) -> Vec<String> {
+    let length = stretch[1] - stretch[0];
+    let place = match zone.side {
+        ZoneSide::Above => "above",
+        ZoneSide::Below => "below",
+        ZoneSide::BothSides => "beside",
+        ZoneSide::OneSide => "on either side",
+        ZoneSide::OneFace => "in front",
+    };
+    let from = stretch[0] - frame.along[0];
+    let to = stretch[1] - frame.along[0];
+    let first = if is_minimum {
+        format!(
+            "Less than {:.0} mm free {place} over {:.2} m",
+            zone.min_free_mm, length
+        )
+    } else if zone.max_blocked_mm > 0.0 {
+        format!(
+            "{:.0} mm {place} is blocked over {:.2} m (allowed {:.2} m)",
+            zone.depth_mm,
+            length,
+            zone.max_blocked_mm / 1000.0
+        )
+    } else {
+        format!(
+            "{:.0} mm {place} is blocked over {:.2} m",
+            zone.depth_mm, length
+        )
+    };
+    vec![
+        first,
+        format!(
+            "From {from:.2} m to {to:.2} m along the element ({:.2} m long)",
+            frame.length()
+        ),
+    ]
+}
+
+/// A finding for one blocked stretch; the element blocking most of it is
+/// the other side of the finding.
+#[allow(clippy::too_many_arguments)]
+fn zone_finding(
+    prepared: &[Prepared],
+    models: &[CheckModel],
+    rule: &Rule,
+    ruleset_id: &str,
+    subject: usize,
+    problem: ZoneProblem,
+    details: Vec<String>,
+    is_minimum: bool,
+) -> Finding {
+    let (stretch, blockers, boxes) = problem;
+    let main = blockers
+        .iter()
+        .map(|(j, s)| (*j, covered(stretch, s)))
+        .max_by(|x, y| x.1.total_cmp(&y.1))
+        .map_or(subject, |(j, _)| j);
+    let a = finding_element(models, &prepared[subject]);
+    let b = finding_element(models, &prepared[main]);
+    let zones: Vec<[Vec3; 8]> = boxes.iter().map(ZoneBox::corners).collect();
+    let region = zones.iter().flatten().fold(Aabb::EMPTY, |mut acc, p| {
+        acc.expand(*p);
+        acc
+    });
+    let tag = format!(
+        "{}{}@{:.1}",
+        b.global_id,
+        if is_minimum { "!min" } else { "" },
+        stretch[0] - boxes.first().map_or(0.0, |z| z.frame.along[0])
+    );
+    Finding {
+        id: finding_id(ruleset_id, &rule.id, &a.global_id, &tag),
+        kind: FindingKind::FreeZone,
+        a,
+        b,
+        point: region.center(),
+        region,
+        magnitude: stretch[1] - stretch[0],
+        category: format!(
+            "{} {:.0} mm",
+            rule.zone.map_or("", |z| z.side.label()),
+            rule.zone.map_or(0.0, |z| if is_minimum {
+                z.min_free_mm
+            } else {
+                z.depth_mm
+            })
+        ),
+        details,
+        zones,
+    }
+}
+
+type ZoneProblem = ([f32; 2], Vec<(usize, Vec<[f32; 2]>)>, Vec<ZoneBox>);
+
+/// Blocked stretches of the zones, with who blocks them and the zone boxes
+/// to draw. For "one side" and "one face" a stretch counts only where all
+/// alternatives are blocked; otherwise each zone counts on its own.
+fn zone_problems(
+    prepared: &[Prepared],
+    models: &[CheckModel],
+    subject: usize,
+    zones: &[ZoneBox],
+    side: ZoneSide,
+    others: &[usize],
+) -> Vec<ZoneProblem> {
+    let per_zone = blocked_zones(prepared, models, subject, zones, others);
+    let union = |list: &Vec<(usize, Vec<[f32; 2]>)>| {
+        merge(
+            list.iter().flat_map(|(_, s)| s.iter().copied()).collect(),
+            0.02,
+        )
+    };
+    let mut out = Vec::new();
+    if matches!(side, ZoneSide::OneSide | ZoneSide::OneFace) {
+        let mut both = union(&per_zone[0]);
+        for list in &per_zone[1..] {
+            both = intersect(&both, &union(list));
+        }
+        let blockers: Vec<(usize, Vec<[f32; 2]>)> = per_zone.concat();
+        for stretch in merge(both, 0.02) {
+            let boxes = zones
+                .iter()
+                .map(|z| z.stretch(stretch[0], stretch[1]))
+                .collect();
+            out.push((stretch, blockers.clone(), boxes));
+        }
+    } else {
+        for (z, list) in zones.iter().zip(&per_zone) {
+            for stretch in union(list) {
+                out.push((
+                    stretch,
+                    list.clone(),
+                    vec![z.stretch(stretch[0], stretch[1])],
+                ));
+            }
+        }
+    }
+    out
 }
 
 /// Checks every element in the job's models against the rule's information
@@ -652,6 +1011,7 @@ fn check_information(
                     .iter()
                     .map(|&i| standard.items[i].name.clone())
                     .collect(),
+                zones: Vec::new(),
             });
         }
     }
@@ -770,7 +1130,7 @@ fn vertex_penetration(a: &Prepared, b: &Prepared, region: &Aabb) -> f32 {
     const MAX_VERTICES: usize = 128;
     let mut depth = 0.0f32;
     let mut tested = 0;
-    for t in &a.triangles {
+    for t in a.triangles.iter() {
         for &v in t {
             if tested >= MAX_VERTICES {
                 return depth;
@@ -807,20 +1167,35 @@ fn containment(inner: &Prepared, outer: &Prepared) -> Option<Detection> {
     ))
 }
 
+/// The shortest distance between two elements, if less than `limit` metres.
+pub(super) fn distance(a: &Prepared, b: &Prepared, limit: f32) -> Option<f32> {
+    clearance(a, b, limit).map(|(_, _, _, d)| d)
+}
+
 fn clearance(a: &Prepared, b: &Prepared, required: f32) -> Option<Detection> {
-    let near_a = triangles_in(a, &grow(&b.bounds, required));
-    let near_b = triangles_in(b, &grow(&a.bounds, required));
+    let (p, q, best) = closest_points(a, b, required)?;
+    let region = Aabb::from_points([p, q]);
+    Some((FindingKind::Clearance, (p + q) * 0.5, region, best))
+}
+
+/// The closest points on `a` and on `b` and their distance, if less than
+/// `limit` metres.
+fn closest_points(a: &Prepared, b: &Prepared, limit: f32) -> Option<(Vec3, Vec3, f32)> {
+    let near_a = triangles_in(a, &grow(&b.bounds, limit));
+    let near_b = triangles_in(b, &grow(&a.bounds, limit));
     if near_a.is_empty() || near_b.is_empty() {
         return None;
     }
-    let mut best = required;
-    let mut closest: Option<(Vec3, Vec3)> = None;
+    let mut best = limit;
+    // (point on `from`, point on `to`), as found.
+    let mut closest: Option<(Vec3, Vec3, bool)> = None;
     let probe = |from: &Prepared,
                  from_tris: &[usize],
                  to: &Prepared,
                  to_tris: &[usize],
+                 swapped: bool,
                  best: &mut f32,
-                 closest: &mut Option<(Vec3, Vec3)>| {
+                 closest: &mut Option<(Vec3, Vec3, bool)>| {
         for &i in from_tris {
             for &v in &from.triangles[i] {
                 for &j in to_tris {
@@ -831,17 +1206,41 @@ fn clearance(a: &Prepared, b: &Prepared, required: f32) -> Option<Detection> {
                     let d = p.distance(v);
                     if d < *best {
                         *best = d;
-                        *closest = Some((v, p));
+                        *closest = Some((v, p, swapped));
                     }
                 }
             }
         }
     };
-    probe(a, &near_a, b, &near_b, &mut best, &mut closest);
-    probe(b, &near_b, a, &near_a, &mut best, &mut closest);
-    let (p, q) = closest?;
-    let region = Aabb::from_points([p, q]);
-    Some((FindingKind::Clearance, (p + q) * 0.5, region, best))
+    probe(a, &near_a, b, &near_b, false, &mut best, &mut closest);
+    probe(b, &near_b, a, &near_a, true, &mut best, &mut closest);
+    let (from, to, swapped) = closest?;
+    Some(if swapped {
+        (to, from, best)
+    } else {
+        (from, to, best)
+    })
+}
+
+/// Whether `b` continues `a`'s run across a small gap of at most `limit`
+/// metres: they meet end to end, or one ends at the other's side (a branch).
+/// The gap then lies in line with the end of one of them; elements side by
+/// side have it across their run instead.
+pub(super) fn joins(a: &Prepared, b: &Prepared, limit: f32) -> bool {
+    let Some((pa, pb, d)) = closest_points(a, b, limit) else {
+        return false;
+    };
+    let dir = if d > 1e-4 { (pb - pa) / d } else { Vec3::ZERO };
+    let at_end = |p: &Prepared, point: Vec3, dir: Vec3| {
+        let Some(f) = RunFrame::of(&p.triangles) else {
+            return false;
+        };
+        let reach = (f.length() * 0.1).clamp(0.02, 0.1);
+        let t = (point - f.origin).dot(f.axis);
+        let near_end = t < f.along[0] + reach || t > f.along[1] - reach;
+        near_end && (d <= 1e-4 || dir.dot(f.axis).abs() > 0.7)
+    };
+    at_end(a, pa, dir) || at_end(b, pb, -dir)
 }
 
 /// Most point-triangle tests the surface comparison may spend on one pair.
@@ -920,7 +1319,7 @@ mod tests {
             model: 0,
             element: 0,
             bounds: Aabb { min, max },
-            triangles,
+            triangles: triangles.into(),
             boxes,
         }
     }
@@ -975,7 +1374,7 @@ mod tests {
         Prepared {
             model: 0,
             element: 0,
-            triangles,
+            triangles: triangles.into(),
             boxes,
             bounds,
         }

@@ -30,13 +30,16 @@ built.
   Manager with form editor, element pickers, "Try the rule" and a personal
   library; downloadable ruleset guide for language models.
 - Standard rulesets in every project: duplicates compared by geometry, and
-  information requirements per building part and LOD level (200, 300, 325,
-  400 DK) with the level per project and per model.
+  information requirements per building part and LOD level (200, 300,
+  325 DK) with the level per project and per model.
 - Information requirements adapted per project: where each item is read
   from, for all building parts or one; "found in" per item in the results.
 - IDS 1.0: import `.ids` files and check them (app and `check --ids`);
   export the built-in standard as IDS (`export-ids` and the Add menu). The
   official buildingSMART test cases run against the implementation.
+- Free zone rules (service areas, headroom, room in front, along the whole
+  element, with allowed interruptions and a hard minimum) and script rules
+  (Rhai) written with a language model; built-in cable tray clearances.
 - Results with a tab and a section per ruleset, discipline matrix, grouping
   by component, multi-select, accept / reject kept between runs.
 
@@ -88,6 +91,10 @@ built.
 - **IDS, next steps**: `IFCRELNESTS`, voids and fills relations; predefined
   types and classification hierarchies from type objects; storeys and other
   spatial nodes as applicable elements.
+- **Free zones and scripts, next steps**: follow a run across its segments
+  and fittings, so interruptions that continue into the next segment add up;
+  zones in front of panels and switchboards (which face is the front); stair
+  and door clearances; tray-to-tray spacing by system type (power, IT).
 - More rule types: space checks, model QA (missing storeys, elements without
   containment).
 - Model update report: what changed between two revisions (added, removed

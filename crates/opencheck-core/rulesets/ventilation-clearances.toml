@@ -1,0 +1,177 @@
+[ruleset]
+id = "opencheck.ventilation.clearances"
+name = "Ventilation: clearances"
+description = "Room around ducts and air handling units: between ducts (more for parallel runs than at crossings), to pipes, to cable trays, to structure above, to the ceiling below, and service zones beside units. Distances are measured from the outside of the duct, insulation included when it is modelled; agree the numbers with the other disciplines and adjust them to the project."
+version = "1"
+author = "OpenCheck"
+
+[[rule]]
+id = "duct-duct"
+name = "Distance between ducts"
+description = "60 mm between ducts running in parallel, 20 mm where they cross. Ducts of the same run (bends, tees, the next segment, also across a small gap) do not count."
+type = "script"
+severity = "moderate"
+script = '''
+for a in subjects() {
+    for b in a.nearby(param("parallel_mm")) {
+        // Each pair once, and never the next part of the same run, also
+        // across a coupling or saddle that is not modelled.
+        if a.global_id >= b.global_id || a.connected(b) || a.joins(b) { continue; }
+        let parallel = a.angle(b) <= param("parallel_angle");
+        let need = if parallel { param("parallel_mm") } else { param("crossing_mm") };
+        let d = a.distance(b, need);
+        if d < need {
+            let how = if parallel { "parallel" } else { "crossing" };
+            report(a, b, `Ducts ${d} mm apart (${how}, at least ${need} mm)`);
+        }
+    }
+}
+'''
+
+[rule.params]
+parallel_mm = 60
+crossing_mm = 20
+parallel_angle = 30
+
+[rule.a]
+classes = ["IfcDuctSegment", "IfcDuctFitting"]
+
+[rule.b]
+classes = ["IfcDuctSegment", "IfcDuctFitting"]
+
+[[rule]]
+id = "duct-pipe"
+name = "Distance from ducts to pipes"
+description = "50 mm between ducts and pipes (heating, water, cooling, sprinkler)."
+type = "clearance"
+severity = "moderate"
+clearance_mm = 50
+
+[rule.a]
+classes = ["IfcDuctSegment", "IfcDuctFitting"]
+
+[rule.b]
+classes = ["IfcPipeSegment", "IfcPipeFitting"]
+
+[[rule]]
+id = "duct-cable-tray"
+name = "Distance from ducts to cable trays"
+description = "100 mm between ducts and cable trays."
+type = "clearance"
+severity = "moderate"
+clearance_mm = 100
+
+[rule.a]
+classes = ["IfcDuctSegment", "IfcDuctFitting"]
+
+[rule.b]
+classes = ["IfcCableCarrierSegment", "IfcCableCarrierFitting"]
+names = ["tray|ladder|trunking|bakke|stige|kanal"]
+
+[[rule]]
+id = "cable-tray-room-above"
+name = "Room above cable trays free of ducts"
+description = "300 mm free above cable trays for pulling cables, no ducts in it."
+type = "free_zone"
+severity = "low"
+
+[rule.zone]
+side = "above"
+depth_mm = 300
+direction = "horizontal"
+
+[rule.a]
+classes = ["IfcCableCarrierSegment"]
+# Trays, ladders and trunking; conduits share the class and are left out.
+names = ["tray|ladder|trunking|bakke|stige|kanal"]
+
+[rule.b]
+classes = ["IfcDuctSegment", "IfcDuctFitting"]
+
+[[rule]]
+id = "duct-structure"
+name = "Room above ducts to structure"
+description = "50 mm between the top of horizontal ducts and slabs and beams, for hangers and installation. Ducts passing through the structure do not count."
+type = "free_zone"
+severity = "moderate"
+
+[rule.zone]
+side = "above"
+depth_mm = 50
+direction = "horizontal"
+
+[rule.a]
+classes = ["IfcDuctSegment"]
+
+[rule.b]
+classes = ["IfcSlab", "IfcBeam", "IfcRoof"]
+
+[[rule]]
+id = "duct-ceiling"
+name = "Room below ducts to the ceiling"
+description = "50 mm between the underside of horizontal ducts and suspended ceilings, for installing the ceiling."
+type = "free_zone"
+severity = "low"
+
+[rule.zone]
+side = "below"
+depth_mm = 50
+direction = "horizontal"
+
+[rule.a]
+classes = ["IfcDuctSegment"]
+
+[rule.b]
+classes = ["IfcCovering"]
+names = ["ceiling|loft"]
+
+[[rule]]
+id = "unit-service-zone"
+name = "Service zone beside air handling units"
+description = "Free service zone on at least one long side of air handling units: 0.4 times the unit's height, at least 500 mm."
+type = "script"
+severity = "moderate"
+script = '''
+for unit in subjects() {
+    let h = unit.run.height;
+    if unit.run.vertical { h = unit.run.length; }
+    let depth = (param("factor") * h.to_float()).round().to_int();
+    if depth < param("min_mm") { depth = param("min_mm"); }
+    for s in unit.blocked("one_side", depth) {
+        report(s, `Service zone ${depth} mm blocked on both sides over ${s.length} mm`);
+    }
+}
+'''
+
+[rule.params]
+factor = 0.4
+min_mm = 500
+
+[rule.a]
+names = ["aggregat|air handling|ahu"]
+exclude_classes = ["IfcDuctSegment", "IfcDuctFitting", "IfcFlowSegment", "IfcFlowFitting"]
+
+[[rule]]
+id = "unit-unit"
+name = "Distance between units with combustible insulation"
+description = "1.0 m between air handling units with combustible insulation. Units insulated with class A2-s1,d0 have no distance requirement: limit group A to the others or reject those findings."
+type = "script"
+severity = "low"
+script = '''
+let units = subjects();
+for i in 0..units.len() {
+    for j in (i + 1)..units.len() {
+        let d = units[i].distance(units[j], param("min_mm"));
+        if d < param("min_mm") {
+            report(units[i], units[j], `Units ${d} mm apart (at least ${param("min_mm")} mm)`);
+        }
+    }
+}
+'''
+
+[rule.params]
+min_mm = 1000
+
+[rule.a]
+names = ["aggregat|air handling|ahu"]
+exclude_classes = ["IfcDuctSegment", "IfcDuctFitting", "IfcFlowSegment", "IfcFlowFitting"]

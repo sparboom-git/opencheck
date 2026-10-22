@@ -35,7 +35,7 @@ pub struct StandardInfo {
     pub description: String,
     #[serde(default = "default_version")]
     pub version: String,
-    /// Level names, lowest first, e.g. `["200", "300", "325", "400"]`.
+    /// Level names, lowest first, e.g. `["200", "300", "325"]`.
     pub levels: Vec<String>,
     /// Level used when the project does not choose one.
     pub default_level: String,

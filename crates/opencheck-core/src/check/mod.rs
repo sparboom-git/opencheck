@@ -1,11 +1,13 @@
 //! Model checking: rulesets and the engine that runs them.
 
 mod engine;
+pub mod freezone;
 mod geom;
 mod ids;
 mod ids_export;
 mod information;
 mod ruleset;
+mod script;
 
 pub use engine::{
     CheckJob, CheckModel, CheckReport, Finding, FindingElement, FindingKind, RuleResult,
@@ -24,5 +26,6 @@ pub use information::{
 };
 pub use ruleset::{
     BUILTIN_RULESETS, Between, BuiltinRuleset, PropertyFilter, Rule, RuleKind, Ruleset,
-    RulesetError, RulesetInfo, Selector, Severity,
+    RulesetError, RulesetInfo, RunDirection, Selector, Severity, Zone, ZoneSide,
 };
+pub use script::{SCRIPT_API, compile as compile_script};

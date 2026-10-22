@@ -98,6 +98,7 @@ pub fn show(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         return;
     }
     draw_measurements(app, ui, rect, aspect);
+    draw_focus_zones(app, ui, rect, aspect);
     draw_focus_marker(app, ui, rect, aspect);
     section_handle(app, ui, rect, aspect);
     storey_bar(app, ui, rect);
@@ -892,6 +893,35 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
 }
 
 /// A target ring on the point of the finding under review.
+/// The blocked part of a free zone, as a wire box.
+fn draw_focus_zones(app: &OpenCheckApp, ui: &egui::Ui, rect: Rect, aspect: f32) {
+    let zones = app.focus_zones();
+    if zones.is_empty() {
+        return;
+    }
+    let painter = ui.painter_at(rect);
+    let color = Color32::from_rgb(214, 40, 60);
+    for corners in &zones {
+        let screen: Vec<Option<Pos2>> = corners
+            .iter()
+            .map(|c| project(app, rect, aspect, *c))
+            .collect();
+        // Corner i has bit 0 along the run, bit 1 across, bit 2 up: an edge
+        // joins corners that differ in one bit.
+        for i in 0..8 {
+            for bit in [1, 2, 4] {
+                if i & bit != 0 {
+                    continue;
+                }
+                if let (Some(p), Some(q)) = (screen[i], screen[i | bit]) {
+                    painter.line_segment([p, q], Stroke::new(4.0, Color32::from_white_alpha(170)));
+                    painter.line_segment([p, q], Stroke::new(2.0, color));
+                }
+            }
+        }
+    }
+}
+
 fn draw_focus_marker(app: &OpenCheckApp, ui: &egui::Ui, rect: Rect, aspect: f32) {
     let Some(p) = app
         .focus_point()

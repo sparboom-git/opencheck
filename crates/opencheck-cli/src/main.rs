@@ -9,8 +9,9 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use opencheck_core::check::{
-    BUILTIN_RULESETS, BUILTIN_STANDARDS, CheckJob, CheckModel, IDS_PREFIX, Ids, Rule, RuleKind,
-    Ruleset, RulesetInfo, Selector, Severity, builtin_standard, run_check, standard_to_ids,
+    BUILTIN_RULESETS, BUILTIN_STANDARDS, CheckJob, CheckModel, FindingKind, IDS_PREFIX, Ids, Rule,
+    RuleKind, Ruleset, RulesetInfo, Selector, Severity, builtin_standard, run_check,
+    standard_to_ids,
 };
 use opencheck_core::{Federation, IfcModel, SpatialNode, load_ifc_file};
 
@@ -166,6 +167,9 @@ fn ids_ruleset(path: &PathBuf) -> Result<(Ruleset, (String, Arc<Ids>))> {
             a: Selector::default(),
             b: None,
             standard: format!("{IDS_PREFIX}{key}"),
+            zone: None,
+            script: String::new(),
+            params: Default::default(),
         }],
     };
     Ok((ruleset, (key, Arc::new(ids))))
@@ -291,7 +295,32 @@ fn check(
                     }
                 }
             }
+            for note in rule.notes.iter().take(limit.max(5)) {
+                println!("    note: {note}");
+            }
             for f in rule.findings.iter().take(limit) {
+                if f.kind != FindingKind::MissingInformation && !f.details.is_empty() {
+                    let other = if f.is_single() {
+                        String::new()
+                    } else {
+                        format!(
+                            "  <->  {} [{}] {}",
+                            f.b.name,
+                            f.b.ifc_class,
+                            name_of(f.b.model)
+                        )
+                    };
+                    println!(
+                        "    {:<9} {} [{}] {}{other}
+              {}",
+                        f.kind.label(),
+                        f.a.name,
+                        f.a.ifc_class,
+                        name_of(f.a.model),
+                        f.details.join(" · ")
+                    );
+                    continue;
+                }
                 if f.is_single() {
                     println!(
                         "    {:<9} {} [{}] {} ({}): missing {}",

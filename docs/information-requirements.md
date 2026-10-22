@@ -7,7 +7,7 @@ storey and so on. Unlike clash rules it looks at one element at a time.
 ## Levels
 
 OpenCheck ships one standard, `opencheck.information.lod-dk`, with the Danish
-levels LOD 200 DK, LOD 300 DK, LOD 325 DK and LOD 400 DK. Each kind of
+levels LOD 200 DK, LOD 300 DK and LOD 325 DK. Each kind of
 building part (wall, door, cable carrier, duct, ...) lists the information
 it needs at each level.
 

@@ -1003,6 +1003,20 @@ impl OpenCheckApp {
         self.focus_marker
     }
 
+    /// Boxes of the blocked zone of the finding under review (free zone and
+    /// script findings), for drawing in the 3D view.
+    pub fn focus_zones(&self) -> Vec<[Vec3; 8]> {
+        if self.view.focus.is_none() {
+            return Vec::new();
+        }
+        self.checking
+            .selected
+            .as_ref()
+            .and_then(|id| self.checking.find(id))
+            .map(|(_, _, f)| f.zones.clone())
+            .unwrap_or_default()
+    }
+
     /// Turns findings into issues and marks them accepted: an issue is a
     /// problem someone has to handle. Returns the issue they went into.
     pub fn add_issues(&mut self, finding_ids: &[String], target: IssueTarget) -> Option<String> {

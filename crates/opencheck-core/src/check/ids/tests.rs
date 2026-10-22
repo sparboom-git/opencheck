@@ -870,7 +870,11 @@ fn official_test_cases() {
 fn information_rules_report_and_follow_overrides() {
     use crate::check::{InformationStandard, Source, StandardOverrides, builtin_standard};
 
-    let ruleset = Ruleset::from_toml(crate::check::BUILTIN_RULESETS[5].toml).unwrap();
+    let builtin = crate::check::BUILTIN_RULESETS
+        .iter()
+        .find(|b| b.file_name == "information-lod-dk.toml")
+        .unwrap();
+    let ruleset = Ruleset::from_toml(builtin.toml).unwrap();
     let models = vec![CheckModel {
         id: ModelId(1),
         model: Arc::new(model()),

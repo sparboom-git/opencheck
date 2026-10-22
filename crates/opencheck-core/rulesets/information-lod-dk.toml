@@ -1,7 +1,7 @@
 [ruleset]
 id = "opencheck.information.lod-dk"
 name = "Information: LOD DK"
-description = "Building parts must carry the information their LOD level (200, 300, 325 or 400 DK) requires: classification, type, dimensions and so on. The level is chosen for the project and can be changed per model."
+description = "Building parts must carry the information their LOD level (200, 300 or 325 DK) requires: classification, type, dimensions and so on. The level is chosen for the project and can be changed per model."
 version = "1"
 author = "OpenCheck"
 
