@@ -373,16 +373,7 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     changed |= ui.checkbox(&mut entry.enabled, "").changed();
                     ui.label(RichText::new(&entry.ruleset.ruleset.name).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if checking::is_standard(&entry.ruleset.ruleset.id) {
-                            ui.label(
-                                RichText::new("Standard")
-                                    .small()
-                                    .color(theme::accent()),
-                            )
-                            .on_hover_text(
-                                "Part of every project. Untick it to skip it; it cannot be removed.",
-                            );
-                        } else if ui
+                        if ui
                             .add(
                                 egui::Button::new(RichText::new(icon::X).color(theme::text_muted()))
                                     .frame(false),

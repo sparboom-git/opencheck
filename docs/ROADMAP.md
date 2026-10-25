@@ -29,9 +29,11 @@ built.
   information rules; built-in rulesets; model scope per ruleset; Ruleset
   Manager with form editor, element pickers, "Try the rule" and a personal
   library; downloadable ruleset guide for language models.
-- Standard rulesets in every project: duplicates compared by geometry, and
-  information requirements per building part and LOD level (200, 300,
-  325 DK) with the level per project and per model.
+- Built-in rulesets, none added by default: clashes between disciplines and
+  within each model (joined installation parts and coverings left out),
+  duplicates compared by geometry, and information requirements per building
+  part and LOD level (200, 300, 325 DK) with the level per project and per
+  model.
 - Information requirements adapted per project: where each item is read
   from, for all building parts or one; "found in" per item in the results.
 - IDS 1.0: import `.ids` files and check them (app and `check --ids`);

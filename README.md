@@ -83,8 +83,15 @@ Navigation that needs no training:
 
 The Checking tab runs rulesets against the loaded models, much like Solibri.
 
-- **Standard rulesets** in every project, which can be switched off but not
-  removed:
+- A new project has no rulesets; *Add* offers the **built-in rulesets**, your
+  own rulesets and **IDS 1.0** files (buildingSMART Information Delivery
+  Specification). Each ruleset can be limited to some of the models.
+  - *Clash: between disciplines*: every loaded model against the others.
+  - *Clash: within each model*: an internal check of each model on its own.
+    Fittings, terminals and dampers joined to the duct or pipe of their own
+    system, and coverings such as insulation, are not reported.
+  - Results are grouped by the discipline each model is set to in OpenCheck,
+    not by the ruleset.
   - *Duplicates*: elements of one model with the same shape lying on top of
     each other, whatever their class or tessellation.
   - *Information: LOD DK*: building parts must carry the information their
@@ -93,10 +100,8 @@ The Checking tab runs rulesets against the loaded models, much like Solibri.
     Where each item is read from (property, classification, material, …) can
     be adapted per project. See
     [docs/information-requirements.md](docs/information-requirements.md).
-- **Built-in rulesets** for clashes and clearances (MEP vs structure, MEP vs
-  architecture, structure vs architecture, MEP coordination, clearance), your
-  own rulesets, and **IDS 1.0** files (buildingSMART Information Delivery
-  Specification). Each ruleset can be limited to some of the models.
+  - *Clearance: MEP near structure*, *Electrical: cable tray clearances* and
+    *Ventilation: clearances*.
 - **Free zones**: room an element needs along its whole length, such as the
   service area beside a cable tray, the headroom above it or the space in
   front of a vertical ladder. The zone may be interrupted over a set length

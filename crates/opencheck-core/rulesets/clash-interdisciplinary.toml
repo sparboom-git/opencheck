@@ -1,0 +1,20 @@
+[ruleset]
+id = "opencheck.clash.interdisciplinary"
+name = "Clash: between disciplines"
+description = "Every loaded discipline model against the others: elements of different models must not intersect. Results are grouped by the discipline each model is set to in OpenCheck."
+version = "1"
+author = "OpenCheck"
+
+[[rule]]
+id = "interdisciplinary"
+name = "Elements of different models must not intersect"
+type = "clash"
+severity = "critical"
+tolerance_mm = 10
+between = "different_models"
+
+[rule.a]
+# Every built element. Openings and virtual elements are not built; spaces
+# are not elements at all.
+classes = ["IfcElement"]
+exclude_classes = ["IfcFeatureElement", "IfcVirtualElement"]

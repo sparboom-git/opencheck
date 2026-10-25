@@ -1,7 +1,7 @@
 [ruleset]
 id = "opencheck.quality.duplicates"
 name = "Model quality: duplicates"
-description = "Standard check, always part of a project: the same element modelled twice in one model, lying exactly on top of each other. Duplicates inflate quantities and hide clashes."
+description = "The same element modelled twice in one model, lying exactly on top of each other. Duplicates inflate quantities and hide clashes."
 version = "2"
 author = "OpenCheck"
 

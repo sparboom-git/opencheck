@@ -184,7 +184,6 @@ impl OpenCheckApp {
                     .unwrap_or(false),
             welcome_never_again: false,
         };
-        app.checking.ensure_standard();
         for file in files {
             app.open_path(file, &cc.egui_ctx);
         }
@@ -279,7 +278,6 @@ impl OpenCheckApp {
         self.measure = MeasureTool::default();
         self.session = Session::default();
         self.checking = Checking::default();
-        self.checking.ensure_standard();
         self.issues = Issues::default();
         self.focus_marker = None;
         self.scene_bounds = Aabb::EMPTY;
@@ -389,8 +387,6 @@ impl OpenCheckApp {
                             contents.documents.checking,
                         );
                         self.errors.extend(errors);
-                        // Older projects get the standard rulesets too.
-                        self.checking.ensure_standard();
                         self.issues = Issues::load(contents.documents.issues);
                         self.session.pending_view = contents.documents.view;
                         self.session.dirty = false;

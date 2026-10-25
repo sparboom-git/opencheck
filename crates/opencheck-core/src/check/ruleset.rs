@@ -453,20 +453,12 @@ pub struct BuiltinRuleset {
 /// The default rulesets, in the order they are offered.
 pub const BUILTIN_RULESETS: &[BuiltinRuleset] = &[
     BuiltinRuleset {
-        file_name: "clash-mep-vs-structure.toml",
-        toml: include_str!("../../rulesets/clash-mep-vs-structure.toml"),
+        file_name: "clash-interdisciplinary.toml",
+        toml: include_str!("../../rulesets/clash-interdisciplinary.toml"),
     },
     BuiltinRuleset {
-        file_name: "clash-mep-vs-architecture.toml",
-        toml: include_str!("../../rulesets/clash-mep-vs-architecture.toml"),
-    },
-    BuiltinRuleset {
-        file_name: "clash-structure-vs-architecture.toml",
-        toml: include_str!("../../rulesets/clash-structure-vs-architecture.toml"),
-    },
-    BuiltinRuleset {
-        file_name: "clash-mep-coordination.toml",
-        toml: include_str!("../../rulesets/clash-mep-coordination.toml"),
+        file_name: "clash-internal.toml",
+        toml: include_str!("../../rulesets/clash-internal.toml"),
     },
     BuiltinRuleset {
         file_name: "clearance-mep-structure.toml",

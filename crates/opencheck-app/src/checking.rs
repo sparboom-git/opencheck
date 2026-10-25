@@ -25,12 +25,6 @@ pub const RULESET_GUIDE: &str = concat!(
     include_str!("../../../docs/rule-scripts.md")
 );
 
-/// Built-in rulesets every project has; they can be switched off but not removed.
-pub const STANDARD_RULESETS: &[&str] = &[
-    "opencheck.quality.duplicates",
-    "opencheck.information.lod-dk",
-];
-
 /// The information standard whose levels the project chooses between.
 pub const INFORMATION_STANDARD: &str = "opencheck.information.lod-dk";
 
@@ -56,10 +50,6 @@ pub fn information_levels() -> Vec<String> {
     builtin_standard(INFORMATION_STANDARD)
         .map(|s| s.standard.levels.clone())
         .unwrap_or_default()
-}
-
-pub fn is_standard(ruleset_id: &str) -> bool {
-    STANDARD_RULESETS.contains(&ruleset_id)
 }
 
 /// A reviewer's verdict on a finding. Undecided findings have none.
@@ -354,36 +344,15 @@ impl Checking {
             .expect("built-in rulesets are tested to parse");
     }
 
-    /// Adds the standard rulesets a project lacks, and replaces older
-    /// versions of them with the built-in one. Returns whether anything changed.
-    pub fn ensure_standard(&mut self) -> bool {
-        let stale = self.stale;
-        let mut changed = false;
-        for id in STANDARD_RULESETS {
-            let Some(builtin) = BUILTIN_RULESETS
-                .iter()
-                .find(|b| Ruleset::from_toml(b.toml).is_ok_and(|r| r.ruleset.id == *id))
-            else {
-                continue;
-            };
-            let version = |text: &str| {
-                Ruleset::from_toml(text)
-                    .ok()
-                    .and_then(|r| r.ruleset.version.parse::<u32>().ok())
-                    .unwrap_or(0)
-            };
-            let current = self.rulesets.iter().find(|r| r.ruleset.ruleset.id == *id);
-            if current.is_none_or(|r| version(&r.text) < version(builtin.toml)) {
-                self.add_ruleset(builtin.toml, Some(builtin.file_name))
-                    .expect("built-in rulesets are tested to parse");
-                changed = true;
-            }
+    /// Adds the built-in ruleset with this file name.
+    #[cfg(test)]
+    pub fn add_builtin_file(&mut self, file_name: &str) {
+        if let Some(index) = BUILTIN_RULESETS
+            .iter()
+            .position(|b| b.file_name == file_name)
+        {
+            self.add_builtin(index);
         }
-        // A project without results is not out of date.
-        if self.report.is_none() {
-            self.stale = stale;
-        }
-        changed
     }
 
     pub fn remove_ruleset(&mut self, index: usize) {
@@ -828,7 +797,7 @@ mod tests {
     fn adapted_standard_is_saved_and_used_by_jobs() {
         use opencheck_core::check::Source;
         let mut checking = Checking::default();
-        checking.ensure_standard();
+        checking.add_builtin_file("information-lod-dk.toml");
         let mut overrides = checking.overrides();
         overrides.parts.entry("wall".into()).or_default().insert(
             "thickness".into(),
@@ -929,39 +898,9 @@ mod standard_tests {
     use super::*;
 
     #[test]
-    fn standard_rulesets_are_added_once_and_upgraded() {
-        let mut checking = Checking::default();
-        assert!(checking.ensure_standard());
-        assert!(!checking.ensure_standard());
-        assert_eq!(checking.rulesets.len(), STANDARD_RULESETS.len());
-        assert!(
-            checking
-                .rulesets
-                .iter()
-                .all(|r| is_standard(&r.ruleset.ruleset.id))
-        );
-        assert!(!checking.stale);
-
-        // A project saved with an older version gets the current one.
-        let duplicates = checking
-            .rulesets
-            .iter()
-            .position(|r| r.ruleset.ruleset.id == "opencheck.quality.duplicates")
-            .unwrap();
-        let old = checking.rulesets[duplicates]
-            .text
-            .replace("version = \"2\"", "version = \"1\"");
-        checking.rulesets[duplicates].ruleset = Ruleset::from_toml(&old).unwrap();
-        checking.rulesets[duplicates].text = old;
-        assert!(checking.ensure_standard());
-        assert_eq!(checking.rulesets.len(), STANDARD_RULESETS.len());
-        assert_eq!(checking.rulesets[duplicates].ruleset.ruleset.version, "2");
-    }
-
-    #[test]
     fn levels_follow_the_project_unless_a_model_has_its_own() {
         let mut checking = Checking::default();
-        checking.ensure_standard();
+        checking.add_builtin_file("information-lod-dk.toml");
         let (a, b) = (ModelId(1), ModelId(2));
         assert_eq!(checking.level_of(a), "300");
         checking.set_project_level("325".into());

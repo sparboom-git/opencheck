@@ -1,0 +1,21 @@
+[ruleset]
+id = "opencheck.clash.internal"
+name = "Clash: within each model"
+description = "Internal check: elements of the same discipline model must not intersect each other. Parts never clash with their own assembly, and coverings such as insulation are left out."
+version = "1"
+author = "OpenCheck"
+
+[[rule]]
+id = "internal"
+name = "Elements of one model must not intersect each other"
+type = "clash"
+severity = "moderate"
+tolerance_mm = 10
+between = "same_model"
+
+[rule.a]
+# Every built element. Openings and virtual elements are not built; spaces
+# are not elements at all. Coverings (insulation, ceilings, cladding) belong
+# to what they cover and are exported around it, so they always overlap it.
+classes = ["IfcElement"]
+exclude_classes = ["IfcFeatureElement", "IfcVirtualElement", "IfcCovering"]

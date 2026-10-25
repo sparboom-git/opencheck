@@ -500,7 +500,13 @@ fn test_pair(
     ruleset_id: &str,
 ) -> Option<Finding> {
     let (kind, point, region, magnitude) = match rule.kind {
-        RuleKind::Clash => clash(a, b, rule.tolerance_mm / 1000.0)?,
+        RuleKind::Clash => {
+            let found = clash(a, b, rule.tolerance_mm / 1000.0)?;
+            if fitted_joint(a, b, models, found.1) {
+                return None;
+            }
+            found
+        }
         RuleKind::Clearance => clearance(a, b, rule.clearance_mm / 1000.0)?,
         RuleKind::Duplicates => duplicate(a, b, rule.tolerance_mm / 1000.0)?,
         // Checked per element in their own functions.
@@ -626,6 +632,42 @@ pub(super) fn blocked_zones(
         second.retain(|(_, s)| !s.is_empty());
     }
     per_zone
+}
+
+/// Installation parts of one model that overlap because they are joined: a
+/// fitting's spigot pushed into a duct, a saddle on its side, a terminal or
+/// damper set into it. They belong to the same system, or overlap where one
+/// of them ends. That is how they are built, not a clash.
+fn fitted_joint(a: &Prepared, b: &Prepared, models: &[CheckModel], at: Vec3) -> bool {
+    if a.model != b.model {
+        return false;
+    }
+    let model = &models[a.model].model;
+    let is = |p: &Prepared, class: &str| {
+        let e = &model.elements[p.element];
+        [e.ifc_class.as_str(), e.occurrence_class()]
+            .iter()
+            .any(|c| super::ruleset::is_subtype(&model.schema, c, class))
+    };
+    let installation = "IfcDistributionFlowElement";
+    if !is(a, installation) || !is(b, installation) {
+        return false;
+    }
+    // Two straight runs of one system crossing each other still clash; a
+    // fitting, terminal or damper on the run does not.
+    let (ea, eb) = (&model.elements[a.element], &model.elements[b.element]);
+    let same_system = ea.systems.iter().any(|s| eb.systems.contains(s));
+    if same_system && !(is(a, "IfcFlowSegment") && is(b, "IfcFlowSegment")) {
+        return true;
+    }
+    let near_end = |p: &Prepared| {
+        RunFrame::of(&p.triangles).is_some_and(|f| {
+            let reach = (f.length() * 0.25).clamp(0.05, 0.2);
+            let t = (at - f.origin).dot(f.axis);
+            t < f.along[0] + reach || t > f.along[1] - reach
+        })
+    };
+    near_end(a) || near_end(b)
 }
 
 /// Segments and fittings that touch the element continue its run (a bend,

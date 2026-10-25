@@ -50,7 +50,7 @@ enum Command {
         #[arg(required = true)]
         files: Vec<PathBuf>,
         /// Ruleset file, or the file name of a built-in ruleset
-        /// (e.g. clash-mep-vs-structure.toml). Repeat for several.
+        /// (e.g. clash-interdisciplinary.toml). Repeat for several.
         #[arg(long = "ruleset", short)]
         rulesets: Vec<String>,
         /// Run all built-in rulesets.
