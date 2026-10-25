@@ -54,11 +54,18 @@ that is always on.
    file and no check changed, the run stops there.
 4. **Checks**: all chosen rulesets on all files, with the disciplines from
    the configuration.
-5. **History**: one file per run, `history/run_YYYY-MM-DD_HHMM.json`, never
-   changed afterwards. It holds figures per file (size, IFC schema, hash,
-   date, objects in all and per class, elements missing information) and
-   every finding (stable id, check type, disciplines, objects with GlobalId
-   and class, severity, measured value).
+5. **History**: one file per run, `history/run_YYYY-MM-DD_HHMM.json.gz`,
+   never changed afterwards. It holds figures per file (size, IFC schema,
+   hash, date, objects in all and per class, elements missing information)
+   and every finding (stable id, check type, disciplines, objects with
+   GlobalId and class, severity, measured value). To stay small with many
+   findings it is gzip-compressed JSON (format 2) made of tables: `rules`
+   (ruleset, rule, check type, severity), `objects` (GlobalId, class, name,
+   index into `files`, each object once) and `findings`, one row
+   `[rule, a, b, value, id]` of indexes per finding; `b` is `a` for a
+   finding about one element, and the id is left out when it follows from
+   the rule and the two GlobalIds. Plain `.json` files of earlier versions
+   are still read.
 6. **Dashboard**: `dashboard.html` is written again from the whole history,
    first under a temporary name, then renamed, so nobody opens a half
    written page.

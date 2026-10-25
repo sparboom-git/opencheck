@@ -1,5 +1,5 @@
-//! Autorun: checks that run without the app, on a schedule, against IFC
-//! files in a (network) folder. Each run is kept as one JSON file of
+//! Autorun: checks that run without the app, on a schedule, against a
+//! project's IFC files. Each run is kept as one compact JSON file of
 //! findings and figures per file; a dashboard shows how a project develops
 //! from run to run: how many findings are new and how many were solved.
 //!
@@ -25,17 +25,14 @@ pub struct AutorunConfig {
     pub format: u32,
     /// Project name, shown in the dashboard.
     pub name: String,
-    /// Folder for files given by name only, and for `new_files`.
+    /// Folder for files given by name only (configurations made before each
+    /// file had its own path). The folder is never scanned.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source: String,
     /// The files to check and their disciplines. Only these are read: other
     /// IFC files lying in the same folders are left alone.
     #[serde(default)]
     pub files: Vec<SourceFile>,
-    /// Also check IFC files in `source` that are not listed, with a
-    /// discipline guessed from the file name. Off unless asked for.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub new_files: bool,
     /// Folder for the history, the dashboard, the log and the lock file.
     pub output: String,
     /// The rulesets to run, as TOML.
@@ -141,7 +138,6 @@ impl AutorunConfig {
             name: name.to_owned(),
             source: String::new(),
             files: Vec::new(),
-            new_files: false,
             output: String::new(),
             rulesets: Vec::new(),
             ids: Vec::new(),
@@ -231,6 +227,238 @@ pub struct RunObject {
     pub class: String,
     pub name: String,
     pub file: String,
+}
+
+/// Version of the history files [`RunRecord::to_json`] writes. Version 1
+/// spelled every finding out in full; it is still read.
+pub const RUN_FORMAT: u32 = 2;
+
+/// A run as it is kept in the history: tables instead of repeated text, so
+/// a run with hundreds of thousands of findings stays small. Each object is
+/// written once, each finding is a short row of indexes, and a finding's id
+/// only when it cannot be worked out from its rule and objects.
+#[derive(Serialize, Deserialize)]
+struct RunFile {
+    format: u32,
+    run_id: String,
+    machine: String,
+    generator: String,
+    files: Vec<FileFacts>,
+    /// Ruleset id, rule id, check type, severity.
+    rules: Vec<[String; 4]>,
+    /// Global id, IFC class, name, index into `files`.
+    objects: Vec<(String, String, String, usize)>,
+    findings: Vec<Row>,
+}
+
+/// `[rule, a, b]`, then the value (or null) and the id when there is one.
+/// `b` is `a` for a finding about one element. Indexes are into `rules` and
+/// `objects`.
+struct Row {
+    rule: usize,
+    a: usize,
+    b: usize,
+    value: Option<f64>,
+    id: Option<String>,
+}
+
+impl Serialize for Row {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let len = if self.id.is_some() {
+            5
+        } else if self.value.is_some() {
+            4
+        } else {
+            3
+        };
+        let mut seq = s.serialize_seq(Some(len))?;
+        seq.serialize_element(&self.rule)?;
+        seq.serialize_element(&self.a)?;
+        seq.serialize_element(&self.b)?;
+        if len > 3 {
+            seq.serialize_element(&self.value)?;
+        }
+        if let Some(id) = &self.id {
+            seq.serialize_element(id)?;
+        }
+        seq.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Row {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Row;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a finding row [rule, a, b, value?, id?]")
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Row, A::Error> {
+                let missing = || serde::de::Error::custom("a finding row needs rule, a and b");
+                Ok(Row {
+                    rule: seq.next_element()?.ok_or_else(missing)?,
+                    a: seq.next_element()?.ok_or_else(missing)?,
+                    b: seq.next_element()?.ok_or_else(missing)?,
+                    value: seq.next_element::<Option<f64>>()?.flatten(),
+                    id: seq.next_element()?,
+                })
+            }
+        }
+        d.deserialize_seq(Visitor)
+    }
+}
+
+impl RunRecord {
+    /// The run as compact JSON for the history (format [`RUN_FORMAT`]).
+    pub fn to_json(&self) -> String {
+        let mut files = self.files.clone();
+        let mut file_index: BTreeMap<String, usize> = files
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (f.name.clone(), i))
+            .collect();
+        let mut rules: Vec<[String; 4]> = Vec::new();
+        let mut rule_index: BTreeMap<[&str; 4], usize> = BTreeMap::new();
+        let mut objects = Vec::new();
+        let mut object_index: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+        let mut rows = Vec::with_capacity(self.findings.len());
+        for f in &self.findings {
+            let discipline = &f.disciplines;
+            let key = [
+                f.ruleset.as_str(),
+                f.rule.as_str(),
+                f.check_type.as_str(),
+                f.severity.as_str(),
+            ];
+            let rule = *rule_index.entry(key).or_insert_with(|| {
+                rules.push(key.map(str::to_owned));
+                rules.len() - 1
+            });
+            let mut index = |side: usize| {
+                let o = &f.objects[side];
+                let discipline = &discipline[side];
+                *object_index
+                    .entry((o.file.as_str(), o.global_id.as_str()))
+                    .or_insert_with(|| {
+                        // Findings only name loaded files, which all have
+                        // figures; keep the name should one not.
+                        let file = *file_index.entry(o.file.clone()).or_insert_with(|| {
+                            files.push(FileFacts {
+                                name: o.file.clone(),
+                                discipline: discipline.to_owned(),
+                                size_bytes: 0,
+                                ifc_schema: String::new(),
+                                hash: String::new(),
+                                modified: String::new(),
+                                object_count: 0,
+                                objects_by_class: BTreeMap::new(),
+                                missing_properties: None,
+                            });
+                            files.len() - 1
+                        });
+                        objects.push((o.global_id.clone(), o.class.clone(), o.name.clone(), file));
+                        objects.len() - 1
+                    })
+            };
+            if f.objects.is_empty() {
+                continue;
+            }
+            let a = index(0);
+            let b = if f.objects.len() > 1 { index(1) } else { a };
+            let first = &f.objects[0];
+            let second = f.objects.get(1).unwrap_or(first);
+            let id = (f.id
+                != crate::check::finding_id(
+                    &f.ruleset,
+                    &f.rule,
+                    &first.global_id,
+                    &second.global_id,
+                ))
+            .then(|| f.id.clone());
+            rows.push(Row {
+                rule,
+                a,
+                b,
+                value: f.value,
+                id,
+            });
+        }
+        let file = RunFile {
+            format: RUN_FORMAT,
+            run_id: self.run_id.clone(),
+            machine: self.machine.clone(),
+            generator: self.generator.clone(),
+            files,
+            rules,
+            objects,
+            findings: rows,
+        };
+        serde_json::to_string(&file).expect("a run always serialises")
+    }
+
+    /// Reads a history file of any format so far.
+    pub fn from_json(text: &str) -> Result<Self, String> {
+        #[derive(Deserialize)]
+        struct Format {
+            #[serde(default = "format")]
+            format: u32,
+        }
+        let version = serde_json::from_str::<Format>(text)
+            .map_err(|e| e.to_string())?
+            .format;
+        if version > RUN_FORMAT {
+            return Err(format!(
+                "history file format {version} is newer than this OpenCheck reads ({RUN_FORMAT})"
+            ));
+        }
+        if version < 2 {
+            return serde_json::from_str(text).map_err(|e| e.to_string());
+        }
+        let file: RunFile = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        let bad = || "a finding points outside the tables".to_owned();
+        let mut findings = Vec::with_capacity(file.findings.len());
+        for row in file.findings {
+            let [ruleset, rule, check_type, severity] = file.rules.get(row.rule).ok_or_else(bad)?;
+            let object = |i: usize| -> Result<(RunObject, String), String> {
+                let (global_id, class, name, f) = file.objects.get(i).ok_or_else(bad)?;
+                let facts = file.files.get(*f).ok_or_else(bad)?;
+                Ok((
+                    RunObject {
+                        global_id: global_id.clone(),
+                        class: class.clone(),
+                        name: name.clone(),
+                        file: facts.name.clone(),
+                    },
+                    facts.discipline.clone(),
+                ))
+            };
+            let (a, da) = object(row.a)?;
+            let (b, db) = object(row.b)?;
+            let id = row.id.unwrap_or_else(|| {
+                crate::check::finding_id(ruleset, rule, &a.global_id, &b.global_id)
+            });
+            let objects = if row.a == row.b { vec![a] } else { vec![a, b] };
+            findings.push(RunFinding {
+                id,
+                ruleset: ruleset.clone(),
+                rule: rule.clone(),
+                check_type: check_type.clone(),
+                disciplines: [da, db],
+                objects,
+                severity: severity.clone(),
+                value: row.value,
+            });
+        }
+        Ok(Self {
+            format: file.format,
+            run_id: file.run_id,
+            machine: file.machine,
+            generator: file.generator,
+            files: file.files,
+            findings,
+        })
+    }
 }
 
 /// The check type a finding counts under in the dashboard.
@@ -524,6 +752,66 @@ mod tests {
         let data = dashboard_data("P", "now", &runs);
         let last = data.cells.iter().find(|c| c.run == 1).unwrap();
         assert_eq!((last.count, last.new, last.solved), (0, 0, 1));
+    }
+
+    #[test]
+    fn a_run_round_trips_through_the_compact_format() {
+        let object = |id: &str, file: &str| RunObject {
+            global_id: id.to_owned(),
+            class: "IfcWall".to_owned(),
+            name: format!("Wall {id}"),
+            file: file.to_owned(),
+        };
+        let facts = |name: &str, discipline: &str| FileFacts {
+            name: name.to_owned(),
+            discipline: discipline.to_owned(),
+            size_bytes: 1,
+            ifc_schema: "IFC4".to_owned(),
+            hash: "h".to_owned(),
+            modified: "m".to_owned(),
+            object_count: 2,
+            objects_by_class: BTreeMap::new(),
+            missing_properties: None,
+        };
+        let clash = |a: &str, b: &str| RunFinding {
+            id: crate::check::finding_id("s", "clash", a, b),
+            ruleset: "s".to_owned(),
+            rule: "clash".to_owned(),
+            check_type: "clash".to_owned(),
+            disciplines: ["STR".to_owned(), "VEN".to_owned()],
+            objects: vec![object(a, "KON.ifc"), object(b, "VEN.ifc")],
+            severity: "critical".to_owned(),
+            value: Some(25.0),
+        };
+        let mut record = run(
+            "2026-10-25T06:00:00",
+            vec![clash("A", "B"), clash("C", "B")],
+        );
+        record.format = RUN_FORMAT;
+        record.files = vec![facts("KON.ifc", "STR"), facts("VEN.ifc", "VEN")];
+        // One element, with an id that names what is missing as well.
+        record.findings.push(RunFinding {
+            id: "own-id".to_owned(),
+            ruleset: "s".to_owned(),
+            rule: "info".to_owned(),
+            check_type: "information".to_owned(),
+            disciplines: ["STR".to_owned(), "STR".to_owned()],
+            objects: vec![object("A", "KON.ifc")],
+            severity: "low".to_owned(),
+            value: None,
+        });
+        let json = record.to_json();
+        assert_eq!(RunRecord::from_json(&json).unwrap(), record);
+        // Objects once, computable ids left out.
+        assert_eq!(json.matches("Wall B").count(), 1);
+        assert_eq!(json.matches("own-id").count(), 1);
+        assert!(!json.contains(&record.findings[0].id));
+
+        // Format 1 files are still read.
+        let mut old = record.clone();
+        old.format = 1;
+        let back = RunRecord::from_json(&serde_json::to_string(&old).unwrap()).unwrap();
+        assert_eq!(back, old);
     }
 
     #[test]

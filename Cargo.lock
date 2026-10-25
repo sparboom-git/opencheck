@@ -2900,6 +2900,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "flate2",
  "opencheck-core",
  "serde",
  "serde_json",

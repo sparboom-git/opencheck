@@ -29,6 +29,8 @@ regex = "1"
 # Instant and SystemTime that also work in the browser (WebAssembly).
 web-time = "1"
 # Scripting language for script rules: sandboxed, pure Rust, runs in the browser too.
+# Compresses the autorun history; the same backend zip uses.
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 rhai = { version = "1.24", default-features = false, features = ["std", "no_time", "no_module"] }
 rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }

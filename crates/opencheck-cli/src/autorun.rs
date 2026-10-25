@@ -2,20 +2,23 @@
 //!
 //! Takes the lock file, waits until the IFC files are completely copied,
 //! checks whether they changed since the last run, runs the checks, keeps
-//! the run as a JSON file in the history and writes the dashboard.
+//! the run as a compressed JSON file in the history and writes the dashboard.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Local};
+use flate2::Compression;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
 use opencheck_core::autorun::{
-    AutorunConfig, FORMAT, RunRecord, dashboard_data, dashboard_html, file_facts, missing_per_file,
-    run_findings,
+    AutorunConfig, RUN_FORMAT, RunRecord, dashboard_data, dashboard_html, file_facts,
+    missing_per_file, run_findings,
 };
 use opencheck_core::check::{
     CheckJob, CheckModel, Ids, Ruleset, StandardOverrides, builtin_standard, run_check,
@@ -32,6 +35,8 @@ const SETTLE_TRIES: u32 = 30;
 const HISTORY: &str = "history";
 const LOCK: &str = "autorun.lock";
 const STATE: &str = "state.json";
+/// History files: `run_YYYY-MM-DD_HHMM.json.gz`.
+const RUN_EXT: &str = ".json.gz";
 const LOG: &str = "autorun.log";
 pub const DASHBOARD: &str = "dashboard.html";
 
@@ -149,7 +154,7 @@ pub fn autorun(config_path: &Path, force: bool) -> Result<()> {
 }
 
 fn run(config: &AutorunConfig, output: &Path, force: bool, log: &mut Log) -> Result<()> {
-    let files = source_files(config, log)?;
+    let files = source_files(config, log);
     if files.is_empty() {
         bail!("none of the IFC files in the configuration could be found");
     }
@@ -295,7 +300,7 @@ fn run(config: &AutorunConfig, output: &Path, force: bool, log: &mut Log) -> Res
         .collect();
     let started = Local::now();
     let record = RunRecord {
-        format: FORMAT,
+        format: RUN_FORMAT,
         run_id: started.format("%Y-%m-%dT%H:%M:%S").to_string(),
         machine: machine(),
         generator: format!("OpenCheck {}", env!("CARGO_PKG_VERSION")),
@@ -305,12 +310,14 @@ fn run(config: &AutorunConfig, output: &Path, force: bool, log: &mut Log) -> Res
 
     // History files are never overwritten.
     let history = output.join(HISTORY);
-    let mut path = history.join(format!("run_{}.json", started.format("%Y-%m-%d_%H%M")));
+    let mut path = history.join(format!("run_{}{RUN_EXT}", started.format("%Y-%m-%d_%H%M")));
     if path.exists() {
-        path = history.join(format!("run_{}.json", started.format("%Y-%m-%d_%H%M%S")));
+        path = history.join(format!(
+            "run_{}{RUN_EXT}",
+            started.format("%Y-%m-%d_%H%M%S")
+        ));
     }
-    fs::write(&path, serde_json::to_string_pretty(&record)?)
-        .with_context(|| format!("writing {}", path.display()))?;
+    write_run(&path, &record).with_context(|| format!("writing {}", path.display()))?;
     log.line(&format!(
         "{} findings in {:.1} s; kept as {}",
         record.findings.len(),
@@ -321,10 +328,10 @@ fn run(config: &AutorunConfig, output: &Path, force: bool, log: &mut Log) -> Res
     write_dashboard(config, output, log)
 }
 
-/// The IFC files to check: the listed ones, each from its own path. Other
-/// files in the same folders are left alone, unless the configuration asks
-/// for new files in its `source` folder. (name, path, size, modified)
-fn source_files(config: &AutorunConfig, log: &mut Log) -> Result<Vec<Found>> {
+/// The IFC files to check: the listed ones, each from its own path. Folders
+/// are never scanned, so other files in them are left alone.
+/// (name, path, size, modified)
+fn source_files(config: &AutorunConfig, log: &mut Log) -> Vec<Found> {
     let mut out = Vec::new();
     for f in &config.files {
         let path = f.location(&config.source);
@@ -334,27 +341,8 @@ fn source_files(config: &AutorunConfig, log: &mut Log) -> Result<Vec<Found>> {
             log.line(&format!("Missing: {} ({}).", f.name, path.display()));
         }
     }
-    if config.new_files && !config.source.is_empty() {
-        let dir = Path::new(&config.source);
-        let entries =
-            fs::read_dir(dir).with_context(|| format!("reading the folder {}", dir.display()))?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if !name.to_ascii_lowercase().ends_with(".ifc")
-                || !path.is_file()
-                || out.iter().any(|(n, ..)| n.eq_ignore_ascii_case(&name))
-            {
-                continue;
-            }
-            log.line(&format!(
-                "New file {name}: checked with a guessed discipline."
-            ));
-            out.push((name, path, 0, String::new()));
-        }
-    }
     out.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(out)
+    out
 }
 
 /// Waits until each file's size stops changing and it can be opened, so a
@@ -458,17 +446,37 @@ fn save_state(path: &Path, files: &BTreeMap<String, SeenFile>, config: &str) -> 
         .with_context(|| format!("writing {}", path.display()))
 }
 
+/// A run as compact JSON, gzip-compressed: a run with many findings stays a
+/// few megabytes.
+fn write_run(path: &Path, record: &RunRecord) -> Result<()> {
+    let mut gz = GzEncoder::new(File::create(path)?, Compression::default());
+    gz.write_all(record.to_json().as_bytes())?;
+    gz.finish()?;
+    Ok(())
+}
+
+/// A history file: `.json.gz`, or plain `.json` from earlier versions.
+fn read_run(path: &Path) -> Option<RunRecord> {
+    let mut text = String::new();
+    if path.to_string_lossy().ends_with(RUN_EXT) {
+        GzDecoder::new(File::open(path).ok()?)
+            .read_to_string(&mut text)
+            .ok()?;
+    } else {
+        text = fs::read_to_string(path).ok()?;
+    }
+    RunRecord::from_json(&text).ok()
+}
+
 /// Writes the dashboard from all runs in the history. It is written to a
 /// temporary name first, so nobody opens a half-written page.
 fn write_dashboard(config: &AutorunConfig, output: &Path, log: &mut Log) -> Result<()> {
     let mut runs: Vec<RunRecord> = Vec::new();
     for entry in fs::read_dir(output.join(HISTORY))?.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "json") {
-            match fs::read_to_string(&path)
-                .ok()
-                .and_then(|t| serde_json::from_str::<RunRecord>(&t).ok())
-            {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        if name.ends_with(".json") || name.ends_with(RUN_EXT) {
+            match read_run(&path) {
                 Some(run) => runs.push(run),
                 None => log.line(&format!(
                     "Skipped unreadable history file {}",
