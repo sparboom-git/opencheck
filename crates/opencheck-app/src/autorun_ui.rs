@@ -168,18 +168,16 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
 
     let mut open = true;
     let mut action = None;
-    egui::Window::new(
-        RichText::new(format!("{}  Autorun", icon::CLOCK_COUNTER_CLOCKWISE)).strong(),
-    )
-    .id(egui::Id::new("autorun"))
-    .open(&mut open)
-    .default_size([720.0, 640.0])
-    .resizable(true)
-    .collapsible(false)
-    .show(ctx, |ui| {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            action = form(app, ui);
-        });
+    let dialog = crate::dialog::Dialog {
+        id: "autorun",
+        icon: icon::CLOCK_COUNTER_CLOCKWISE,
+        title: "Autorun",
+        size: egui::vec2(720.0, 680.0),
+        min: egui::vec2(420.0, 300.0),
+        scroll: crate::dialog::Scroll::Both,
+    };
+    crate::dialog::show(ctx, &dialog, &mut open, |ui| {
+        action = form(app, ui);
     });
     if !open {
         app.autorun.open = false;
@@ -227,7 +225,7 @@ fn folder_field(ui: &mut egui::Ui, value: &mut String, id: &str) {
             egui::TextEdit::singleline(value)
                 .id_salt(id)
                 .hint_text(r"\\server\share\project\IFC")
-                .desired_width(ui.available_width() - 90.0),
+                .desired_width(460.0),
         );
         if ui
             .button(format!("{}  Browse…", icon::FOLDER_OPEN))
@@ -377,7 +375,7 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Option<Action> {
         "Program",
         "The command line program the task starts. On a machine that is always on (e.g. a PAM machine), put OpenCheck where that machine can reach it.",
     );
-    ui.add(egui::TextEdit::singleline(&mut state.program).desired_width(f32::INFINITY));
+    ui.add(egui::TextEdit::singleline(&mut state.program).desired_width(560.0));
 
     ui.add_space(12.0);
     let valid = !config.source.trim().is_empty()

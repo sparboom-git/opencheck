@@ -103,65 +103,56 @@ pub fn show(app: &mut OpenCheckApp, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    egui::Window::new(RichText::new(format!("{}  Ruleset Manager", icon::LIST_CHECKS)).strong())
-        .id(egui::Id::new("ruleset_manager"))
-        .open(&mut open)
-        .default_size([
-            1120.0f32.min(ctx.content_rect().width() - 40.0),
-            740.0f32.min(ctx.content_rect().height() - 40.0),
-        ])
-        .min_size([
-            820.0f32.min(ctx.content_rect().width() - 40.0),
-            480.0f32.min(ctx.content_rect().height() - 40.0),
-        ])
-        .max_size(ctx.content_rect().size() - egui::vec2(20.0, 20.0))
-        .constrain(true)
-        .resizable(true)
-        .collapsible(false)
-        .show(ctx, |ui| {
-            footer(app, ui);
-            ui.horizontal_top(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_width(250.0);
-                    item_list(app, ui);
-                });
-                ui.separator();
-                ui.vertical(|ui| match app.manager.item {
-                    Item::Project(i) if i < app.checking.rulesets.len() => {
-                        project_editor(app, ui, i)
-                    }
-                    Item::Builtin(i) => {
-                        let ruleset = Ruleset::from_toml(BUILTIN_RULESETS[i].toml).ok();
-                        read_only(app, ui, ruleset, None);
-                    }
-                    Item::Library(i) if i < app.manager.library.len() => {
-                        let ruleset = app.manager.library[i].ruleset.clone();
-                        match ruleset {
-                            Ok(r) => read_only(app, ui, Some(r), Some(i)),
-                            Err(e) => {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "{}  This file is not a valid ruleset",
-                                        icon::WARNING
-                                    ))
-                                    .color(theme::danger()),
-                                );
-                                ui.label(e);
-                            }
+    let dialog = crate::dialog::Dialog {
+        id: "ruleset_manager",
+        icon: icon::LIST_CHECKS,
+        title: "Ruleset Manager",
+        size: egui::vec2(1120.0, 740.0),
+        min: egui::vec2(700.0, 420.0),
+        scroll: crate::dialog::Scroll::Own,
+    };
+    crate::dialog::show(ctx, &dialog, &mut open, |ui| {
+        footer(app, ui);
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(250.0);
+                item_list(app, ui);
+            });
+            ui.separator();
+            ui.vertical(|ui| match app.manager.item {
+                Item::Project(i) if i < app.checking.rulesets.len() => project_editor(app, ui, i),
+                Item::Builtin(i) => {
+                    let ruleset = Ruleset::from_toml(BUILTIN_RULESETS[i].toml).ok();
+                    read_only(app, ui, ruleset, None);
+                }
+                Item::Library(i) if i < app.manager.library.len() => {
+                    let ruleset = app.manager.library[i].ruleset.clone();
+                    match ruleset {
+                        Ok(r) => read_only(app, ui, Some(r), Some(i)),
+                        Err(e) => {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}  This file is not a valid ruleset",
+                                    icon::WARNING
+                                ))
+                                .color(theme::danger()),
+                            );
+                            ui.label(e);
                         }
                     }
-                    _ => {
-                        ui.add_space(40.0);
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                RichText::new("Select a ruleset on the left, or create a new one.")
-                                    .color(theme::text_muted()),
-                            );
-                        });
-                    }
-                });
+                }
+                _ => {
+                    ui.add_space(40.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            RichText::new("Select a ruleset on the left, or create a new one.")
+                                .color(theme::text_muted()),
+                        );
+                    });
+                }
             });
         });
+    });
     app.manager.open = open;
 }
 

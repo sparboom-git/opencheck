@@ -2,13 +2,16 @@
 
 OpenCheck is an open source BIM model checker written in Rust. It loads several
 IFC files into one federated model, lets you browse and inspect them in an
-easy 3D viewer, checks them for clashes, duplicates and missing information,
-and turns what it finds into issues that can be reported, exported as BCF or
-shared with an issue server such as Dalux.
+easy 3D viewer, checks them for clashes, clearances, free zones, duplicates
+and missing information, and turns what it finds into issues that can be
+reported, exported as BCF or shared with an issue server such as Dalux. Checks
+can also run on a schedule without the app, with a dashboard of how a project
+develops.
 
-> Status: early but usable. Viewing, checking, information requirements, IDS,
-> issues, reports, BCF files and BCF Live with Dalux work. See
-> [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next.
+> Status: early but usable. Viewing, checking (including free zones and
+> script rules), information requirements, IDS, issues, reports, BCF files,
+> BCF Live with Dalux and autorun work, on the desktop and largely in the
+> browser. See [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next.
 
 ## Download
 
@@ -34,9 +37,10 @@ Models are opened (picked or dropped on the page), viewed and checked; issues,
 reports and BCF files are downloaded. *Save* downloads the project as an
 `.opencheck` file and *Open project* (or dropping the file on the page) opens
 it again, so projects move freely between the browser and the desktop
-program. Not yet in the browser: updating a model in place, BCF Live, and
-remembering the theme. Large models load slower, and the page waits while a
-model loads or a check runs.
+program. A note on the first visit says what the web version is; it can be
+turned off. Not in the browser: updating a model in place, BCF Live, autorun,
+dialogs in windows of their own, and remembering the theme. Large models load
+slower, and the page waits while a model loads or a check runs.
 
 ## What it does
 
@@ -53,9 +57,12 @@ model loads or a check runs.
 - **Working area** (*Edit view* at the bottom of the model list): drag a
   rectangle in a top view around the area you want; drag inside to move it,
   drag its edges to resize, and *Align to element* turns the view and the
-  rectangle along an element such as a wall. After *Save*, only elements
-  touching the area are shown and checked. *Reset view* brings everything
-  back. The IFC files are not changed.
+  rectangle along an element such as a wall. In the *Side view* the heights
+  can be limited too: drag the bottom and top lines (they snap to the
+  storeys), or choose *From* one storey *to* another, e.g. to check only two
+  floors. After *Save*, only elements touching the area are shown and
+  checked. *Reset view* brings everything back. The IFC files are not
+  changed.
 
 ### Viewer
 
@@ -98,8 +105,9 @@ The Checking tab runs rulesets against the loaded models, much like Solibri.
     level of development requires (LOD 200, 300 or 325 DK). The level is
     set for the project on the ruleset card and per model in the model list.
     Where each item is read from (property, classification, material, …) can
-    be adapted per project. See
-    [docs/information-requirements.md](docs/information-requirements.md).
+    be adapted per project in *Where to look*, a window that can be made small
+    or folded down to a button in the status bar while you look at the model.
+    See [docs/information-requirements.md](docs/information-requirements.md).
   - *Clearance: MEP near structure*, *Electrical: cable tray clearances* and
     *Ventilation: clearances*.
 - **Free zones**: room an element needs along its whole length, such as the
@@ -176,11 +184,19 @@ The "Grafit" design: graphite on paper, IBM Plex fonts, colour only where it
 means something. *File → Theme* switches between the light design and a dark
 one; the 3D view keeps its background in both.
 
+The larger dialogs (Ruleset Manager, Where to look, BCF Live, Issue report,
+Autorun) open within the screen, can be made smaller and scroll what does not
+fit. On the desktop the button next to a dialog's close button opens it in a
+window of its own, which can be moved outside OpenCheck's window, for
+example onto a second screen; *Back into OpenCheck* puts it back. The choice
+is remembered.
+
 ## Projects
 
 A project is saved as one `.opencheck` file: a ZIP archive holding the IFC
 files unchanged, the rulesets, IDS files, information requirements, checking
-decisions, issues and the view state. See
+decisions, the working area, the autorun configuration, issues and the view
+state. See
 [docs/file-format.md](docs/file-format.md). Sign-ins to BCF servers are kept
 per user, never in the project file.
 
@@ -204,9 +220,9 @@ opencheck autorun \\server\share\project\OpenCheck\autorun.json
 
 | Crate | Purpose |
 |---|---|
-| `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine, information requirements and IDS, BCF data and files, project files |
-| `opencheck-cli` | The `opencheck` command line tool |
-| `opencheck-app` | The application, for the desktop and the browser: federated 3D viewer (egui + wgpu), checking, issues, reports and BCF Live |
+| `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine (clashes, clearances, duplicates, free zones, Rhai script rules), information requirements and IDS, BCF data and files, project files, autorun runs and the dashboard |
+| `opencheck-cli` | The `opencheck` command line tool, including `autorun` |
+| `opencheck-app` | The application, for the desktop and the browser: federated 3D viewer (egui + wgpu), checking, issues, reports, BCF Live and the autorun setup |
 
 IFC parsing and tessellation are provided by
 [ifc-lite](https://github.com/LTplus-AG/ifc-lite) (MPL-2.0). OpenCheck wraps it

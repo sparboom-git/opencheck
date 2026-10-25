@@ -17,7 +17,9 @@ built.
 - Update a model to a newer revision; issue findings that disappear are
   marked "Solved by update".
 - Working area ("Edit view"): a rectangle drawn in a top view, aligned to an
-  element if wanted; only elements touching it are shown and checked.
+  element if wanted, and heights limited in a side view (dragged, snapping to
+  storeys, or from one storey to another); only elements touching it are
+  shown and checked.
 - Walk mode: stand on a floor and walk through the model at eye height.
 - Right-click in the model tree to isolate, hide, show, select or zoom to a
   model, storey, class or element.
@@ -75,6 +77,8 @@ built.
 **Look and feel**
 
 - "Grafit" design with IBM Plex fonts; light and dark theme.
+- Dialogs that fit the screen, shrink and scroll, and on the desktop open in
+  a window of their own that can be moved outside OpenCheck.
 
 ## In progress
 
@@ -92,8 +96,8 @@ built.
   automatic sync.
 - **Reports, next steps**: report templates (layout and fields), the IKT
   manager's summary report, PDF without going through the browser.
-- **Working area, next steps**: limits in height (storeys), several areas,
-  named areas to switch between.
+- **Working area, next steps**: several areas, named areas to switch
+  between.
 - **Information requirements, next steps**: allowed values and value
   patterns; choosing which items each part requires per level in the
   project.

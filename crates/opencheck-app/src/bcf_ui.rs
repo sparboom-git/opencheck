@@ -582,20 +582,15 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    // Never taller than the app window; the contents scroll instead, and the
-    // window can be made smaller.
-    let screen = ctx.content_rect();
-    egui::Window::new(RichText::new(format!("{}  BCF Live", icon::CLOUD)).strong())
-        .open(&mut open)
-        .default_width(480.0)
-        .default_height((screen.height() * 0.75).min(720.0))
-        .max_height(screen.height() - 40.0)
-        .default_pos(screen.center_top() + egui::vec2(-240.0, 40.0))
-        .constrain(true)
-        .resizable(true)
-        .collapsible(false)
-        .vscroll(true)
-        .show(ctx, |ui| contents(app, ui));
+    let dialog = crate::dialog::Dialog {
+        id: "bcf_live",
+        icon: icon::CLOUD,
+        title: "BCF Live",
+        size: egui::vec2(500.0, 720.0),
+        min: egui::vec2(360.0, 300.0),
+        scroll: crate::dialog::Scroll::Both,
+    };
+    crate::dialog::show(ctx, &dialog, &mut open, |ui| contents(app, ui));
     app.bcf.window_open = open;
 }
 

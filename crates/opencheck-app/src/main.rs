@@ -11,6 +11,7 @@ mod c402;
 mod camera;
 mod checking;
 mod checking_ui;
+mod dialog;
 mod export;
 mod issue_dialog;
 mod issues;

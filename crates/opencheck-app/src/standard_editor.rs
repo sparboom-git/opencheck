@@ -277,20 +277,15 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    let shown = egui::Window::new(
-        RichText::new(format!(
-            "{}  Information requirements: where to look",
-            icon::SLIDERS_HORIZONTAL
-        ))
-        .strong(),
-    )
-    .id(egui::Id::new("standard_editor"))
-    .open(&mut open)
-    .default_size(egui::vec2(1240.0, 720.0).min(ctx.content_rect().size() - egui::vec2(40.0, 80.0)))
-    .min_size([560.0, 300.0])
-    .resizable(true)
-    .collapsible(false)
-    .show(ctx, |ui| {
+    let dialog = crate::dialog::Dialog {
+        id: "standard_editor",
+        icon: icon::SLIDERS_HORIZONTAL,
+        title: "Information requirements: where to look",
+        size: egui::vec2(1240.0, 720.0),
+        min: egui::vec2(560.0, 300.0),
+        scroll: crate::dialog::Scroll::Own,
+    };
+    let layer = crate::dialog::show(ctx, &dialog, &mut open, |ui| {
         ui.horizontal(|ui| {
             if ui
                 .button(format!("{}  Minimise", icon::ARROW_LINE_DOWN))
@@ -356,10 +351,10 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
             });
         });
     });
-    if let Some(shown) = shown
-        && std::mem::take(&mut state.raise)
+    if std::mem::take(&mut state.raise)
+        && let Some(layer) = layer
     {
-        ctx.move_to_top(shown.response.layer_id);
+        ctx.move_to_top(layer);
     }
     if open {
         app.checking.editor = Some(state);

@@ -296,83 +296,84 @@ pub fn report_window(app: &mut OpenCheckApp, ctx: &egui::Context) {
     let mut open = true;
     let mut export = false;
     let count = app.export_scope().len();
-    egui::Window::new(RichText::new(format!("{}  Issue report", icon::FILE_TEXT)).strong())
-        .open(&mut open)
-        .default_width(460.0)
-        .max_height(ctx.content_rect().height() - 40.0)
-        .constrain(true)
-        .vscroll(true)
-        .collapsible(false)
-        .show(ctx, |ui| {
-            ui.label(
+    let dialog = crate::dialog::Dialog {
+        id: "issue_report",
+        icon: icon::FILE_TEXT,
+        title: "Issue report",
+        size: egui::vec2(480.0, 640.0),
+        min: egui::vec2(340.0, 260.0),
+        scroll: crate::dialog::Scroll::Both,
+    };
+    crate::dialog::show(ctx, &dialog, &mut open, |ui| {
+        ui.label(
                 RichText::new(
                     "Documentation of the consistency and clash check: introduction, models and software, then each issue with picture, criticality (C1–C3), responsible disciplines and the GlobalIds of its objects. The report is in Danish.",
                 )
                 .small()
                 .color(theme::text_muted()),
             );
-            ui.add_space(6.0);
-            let r = &mut app.issues.report;
-            let before = r.clone();
-            egui::Grid::new("report_fields")
-                .num_columns(2)
-                .spacing([10.0, 6.0])
-                .show(ui, |ui| {
-                    for (label, value, hint) in [
-                        ("Project", &mut r.project, "Projektnavn"),
-                        ("Prepared by", &mut r.author, "Name or initials"),
-                        ("Company", &mut r.company, "Firmanavn"),
-                        ("Revision", &mut r.revision, "e.g. A, 01"),
-                        ("Disciplines", &mut r.disciplines, "Own discipline(s)"),
-                        ("Phase", &mut r.phase, "e.g. Projektforslag"),
-                    ] {
-                        ui.label(label);
-                        ui.add(
-                            egui::TextEdit::singleline(value)
-                                .hint_text(hint)
-                                .desired_width(280.0),
-                        );
-                        ui.end_row();
-                    }
-                });
-            ui.label("How the check was done (besides OpenCheck)");
-            ui.add(
-                egui::TextEdit::multiline(&mut r.method)
-                    .desired_rows(2)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("e.g. visual review of the combined model"),
-            );
-            ui.label("General remarks");
-            ui.add(
-                egui::TextEdit::multiline(&mut r.remarks)
-                    .desired_rows(3)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("Project conditions, tolerances, areas left out …"),
-            );
-            if *r != before {
-                app.session.dirty = true;
-            }
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let scope = if app.issues.marked.is_empty() {
-                    format!("All {count} issues")
-                } else {
-                    format!("{count} ticked issues")
-                };
-                ui.label(RichText::new(scope).color(theme::text_muted()));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let button = egui::Button::new(
-                        RichText::new(format!("{}  Export report…", icon::EXPORT))
-                            .strong()
-                            .color(theme::on_accent()),
-                    )
-                    .fill(theme::accent());
-                    if ui.add_enabled(count > 0, button).clicked() {
-                        export = true;
-                    }
-                });
+        ui.add_space(6.0);
+        let r = &mut app.issues.report;
+        let before = r.clone();
+        egui::Grid::new("report_fields")
+            .num_columns(2)
+            .spacing([10.0, 6.0])
+            .show(ui, |ui| {
+                for (label, value, hint) in [
+                    ("Project", &mut r.project, "Projektnavn"),
+                    ("Prepared by", &mut r.author, "Name or initials"),
+                    ("Company", &mut r.company, "Firmanavn"),
+                    ("Revision", &mut r.revision, "e.g. A, 01"),
+                    ("Disciplines", &mut r.disciplines, "Own discipline(s)"),
+                    ("Phase", &mut r.phase, "e.g. Projektforslag"),
+                ] {
+                    ui.label(label);
+                    ui.add(
+                        egui::TextEdit::singleline(value)
+                            .hint_text(hint)
+                            .desired_width(280.0),
+                    );
+                    ui.end_row();
+                }
+            });
+        ui.label("How the check was done (besides OpenCheck)");
+        ui.add(
+            egui::TextEdit::multiline(&mut r.method)
+                .desired_rows(2)
+                .desired_width(f32::INFINITY)
+                .hint_text("e.g. visual review of the combined model"),
+        );
+        ui.label("General remarks");
+        ui.add(
+            egui::TextEdit::multiline(&mut r.remarks)
+                .desired_rows(3)
+                .desired_width(f32::INFINITY)
+                .hint_text("Project conditions, tolerances, areas left out …"),
+        );
+        if *r != before {
+            app.session.dirty = true;
+        }
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let scope = if app.issues.marked.is_empty() {
+                format!("All {count} issues")
+            } else {
+                format!("{count} ticked issues")
+            };
+            ui.label(RichText::new(scope).color(theme::text_muted()));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let button = egui::Button::new(
+                    RichText::new(format!("{}  Export report…", icon::EXPORT))
+                        .strong()
+                        .color(theme::on_accent()),
+                )
+                .fill(theme::accent());
+                if ui.add_enabled(count > 0, button).clicked() {
+                    export = true;
+                }
             });
         });
+    });
     app.report_window = open && !export;
     if export {
         app.export_report_dialog(ctx);
