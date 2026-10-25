@@ -21,6 +21,8 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 glam = "0.31"
 humantime = "2"
+# Local time for autorun runs and their file names.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 quick-xml = "0.41"
 rayon = "1"
 regex = "1"

@@ -159,6 +159,17 @@ window shows the rights the server gives you in the project, and a
 connection log helps when a server refuses something. See
 [docs/bcf-live.md](docs/bcf-live.md).
 
+### Autorun and dashboard
+
+*File → Autorun…* sets up checks that run without the app on a schedule:
+the IFC files are read from a (network) folder, every run is kept as a JSON
+file in a history, and a dashboard (one HTML file) shows the findings per
+pair of disciplines, what is new and what was solved since the run before,
+and the files' objects and sizes over time. The task runs `opencheck
+autorun` from a bat file the app writes, and can be added to Windows Task
+Scheduler from the dialog. A lock file keeps two machines from checking a
+project at the same time. See [docs/autorun.md](docs/autorun.md).
+
 ### Look and feel
 
 The "Grafit" design: graphite on paper, IBM Plex fonts, colour only where it
@@ -186,6 +197,7 @@ opencheck check ARK.ifc KON.ifc VEN.ifc --all
 opencheck check ARK.ifc KON.ifc --ruleset information-lod-dk.toml --level 325
 opencheck check ARK.ifc KON.ifc --ids delivery.ids
 opencheck export-ids lod-300.ids --level 300
+opencheck autorun \\server\share\project\OpenCheck\autorun.json
 ```
 
 ## Workspace layout

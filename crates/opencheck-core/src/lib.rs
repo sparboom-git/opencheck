@@ -11,6 +11,7 @@
 //! shared world frame.
 
 pub mod area;
+pub mod autorun;
 pub mod bcf;
 pub mod bcf_file;
 pub mod check;

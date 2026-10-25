@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}} · OpenCheck</title>
+<style>
+  :root {
+    --ink: #17191c; --ink-2: #4a4e55; --muted: #6b6f76; --line: #dcdcd6; --line-2: #c4c4bc;
+    --paper: #f4f4f1; --panel: #ffffff; --sunken: #ececE8;
+    --new: #b42318; --solved: #1e7a4c; --accent: #17191c;
+    --s1: #2f5fd1; --s2: #e06b1f; --s3: #1e7a4c; --s4: #8a3fc2; --s5: #c2185b; --s6: #0f8a8a; --s7: #7a6a00; --s8: #555b66;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e4e4de; --ink-2: #c4c6c9; --muted: #969aa0; --line: #3a3d42; --line-2: #52555a;
+      --paper: #1b1c1f; --panel: #232428; --sunken: #2c2e33;
+      --new: #f07167; --solved: #5cc08b; --accent: #e4e4de;
+      --s1: #7aa2ff; --s2: #ff9d5c; --s3: #5cc08b; --s4: #c48cff; --s5: #ff7aa8; --s6: #4fd1d1; --s7: #d6c34a; --s8: #a0a6b0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink);
+    font: 14px/1.45 "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 20px; }
+  h1 { font-size: 24px; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .types { display: flex; flex-wrap: wrap; gap: 4px; }
+  .types button { font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--line-2); background: var(--panel); color: var(--ink); }
+  .types button[aria-pressed="true"] { background: var(--accent); color: var(--paper); border-color: var(--accent); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .card .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .card .v { font-size: 30px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .new { color: var(--new); } .solved { color: var(--solved); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; }
+  .grid2 section { margin-bottom: 0; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; }
+  td.num, th.num { text-align: right; }
+  .matrix td, .matrix th { text-align: center; border: 1px solid var(--line); }
+  .matrix th { background: var(--sunken); }
+  .matrix td.cell { min-width: 92px; }
+  .matrix .count { font-size: 18px; font-weight: 600; }
+  .matrix .delta { font-size: 12px; }
+  .matrix td.off { background: var(--sunken); color: var(--line-2); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12px; color: var(--ink-2); }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; background: var(--c); vertical-align: -1px; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  svg text { fill: var(--muted); font-size: 11px; }
+  .empty { color: var(--muted); padding: 12px 0; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
+  .notice { border: 1px dashed var(--line-2); border-radius: 8px; padding: 8px 12px; margin-bottom: 16px;
+    color: var(--ink-2); background: var(--sunken); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="notice"><strong>Preliminary view.</strong> This page only shows the data from the runs; its design is not finished.</div>
+  <header>
+    <div>
+      <h1 id="title"></h1>
+      <div class="sub" id="lastrun"></div>
+    </div>
+    <div class="types" id="types" role="group" aria-label="Check type"></div>
+  </header>
+  <div class="cards" id="cards"></div>
+  <section>
+    <h2>Discipline against discipline, latest run</h2>
+    <div class="scroll" id="matrix"></div>
+  </section>
+  <div class="grid2">
+    <section>
+      <h2>Findings per run</h2>
+      <div id="trend"></div>
+    </section>
+    <section>
+      <h2>New and solved per run</h2>
+      <div id="changes"></div>
+    </section>
+  </div>
+  <section style="margin-top:16px">
+    <h2>Files, latest run</h2>
+    <div class="scroll" id="files"></div>
+  </section>
+  <div class="grid2">
+    <section>
+      <h2>Objects per file</h2>
+      <div id="objects"></div>
+    </section>
+    <section>
+      <h2>File size per file (MB)</h2>
+      <div id="sizes"></div>
+    </section>
+  </div>
+  <footer id="footer"></footer>
+</main>
+<script>
+const DATA = /*DATA*/null;
+const TYPES = [
+  ["all", "All checks"], ["clash", "Clashes"], ["clearance", "Clearances"],
+  ["free_zone", "Free zones"], ["duplicate", "Duplicates"],
+  ["information", "Information"], ["script", "Scripts"],
+];
+const COLORS = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7", "--s8"];
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const el = (tag, attrs = {}, ...children) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  for (const c of children) e.append(c);
+  return e;
+};
+const fmt = n => n.toLocaleString("en-US");
+const when = id => id.replace("T", " ").slice(0, 16);
+let current = "all";
+
+function cellsOf(type) {
+  return DATA.cells.filter(c => type === "all" || c.check_type === type);
+}
+
+// Per run and pair: count, new, solved, summed over the chosen types.
+function pairs(type) {
+  const out = new Map();
+  for (const c of cellsOf(type)) {
+    const key = c.a + "|" + c.b;
+    if (!out.has(key)) out.set(key, DATA.runs.map(() => ({ count: 0, new: 0, solved: 0 })));
+    const v = out.get(key)[c.run];
+    v.count += c.count; v.new += c.new; v.solved += c.solved;
+  }
+  return out;
+}
+
+function totals(type) {
+  const t = DATA.runs.map(() => ({ count: 0, new: 0, solved: 0 }));
+  for (const c of cellsOf(type)) {
+    t[c.run].count += c.count; t[c.run].new += c.new; t[c.run].solved += c.solved;
+  }
+  return t;
+}
+
+function renderTypes() {
+  const present = new Set(DATA.cells.map(c => c.check_type));
+  const box = document.getElementById("types");
+  box.replaceChildren();
+  for (const [key, label] of TYPES) {
+    if (key !== "all" && !present.has(key)) continue;
+    const b = el("button", { type: "button", "aria-pressed": String(key === current) }, label);
+    b.onclick = () => { current = key; render(); };
+    box.append(b);
+  }
+}
+
+function renderCards() {
+  const t = totals(current);
+  const last = t[t.length - 1] || { count: 0, new: 0, solved: 0 };
+  const files = DATA.runs.length ? DATA.runs[DATA.runs.length - 1].files.length : 0;
+  const card = (k, v, cls = "") => el("div", { class: "card" }, el("div", { class: "k" }, k), el("div", { class: "v " + cls }, v));
+  document.getElementById("cards").replaceChildren(
+    card("Findings now", fmt(last.count)),
+    card("New since last run", "+" + fmt(last.new), "new"),
+    card("Solved since last run", "−" + fmt(last.solved), "solved"),
+    card("Files", fmt(files)),
+  );
+}
+
+function renderMatrix() {
+  const box = document.getElementById("matrix");
+  const last = DATA.runs.length - 1;
+  if (last < 0) { box.replaceChildren(el("div", { class: "empty" }, "No runs yet.")); return; }
+  const cells = cellsOf(current).filter(c => c.run === last);
+  const disciplines = [...new Set([
+    ...DATA.runs[last].files.map(f => f.discipline),
+    ...cells.flatMap(c => [c.a, c.b]),
+  ])].sort();
+  const at = (a, b) => {
+    const [x, y] = a <= b ? [a, b] : [b, a];
+    return cells.filter(c => c.a === x && c.b === y)
+      .reduce((s, c) => ({ count: s.count + c.count, new: s.new + c.new, solved: s.solved + c.solved }), { count: 0, new: 0, solved: 0 });
+  };
+  const table = el("table", { class: "matrix" });
+  table.append(el("tr", {}, el("th", {}, ""), ...disciplines.map(d => el("th", {}, d))));
+  disciplines.forEach((row, i) => {
+    const tr = el("tr", {}, el("th", {}, row));
+    disciplines.forEach((col, j) => {
+      if (j < i) { tr.append(el("td", { class: "off" }, "")); return; }
+      const v = at(row, col);
+      const td = el("td", { class: "cell" });
+      if (v.count === 0 && v.new === 0 && v.solved === 0) {
+        td.append(el("div", { class: "count", style: "color:var(--line-2)" }, "–"));
+      } else {
+        td.append(el("div", { class: "count" }, fmt(v.count)));
+        const d = el("div", { class: "delta" });
+        d.append(el("span", { class: "new" }, "+" + fmt(v.new)), " ", el("span", { class: "solved" }, "−" + fmt(v.solved)));
+        td.append(d);
+      }
+      td.title = `${row} – ${col}: ${v.count} findings, ${v.new} new, ${v.solved} solved since the last run`;
+      tr.append(td);
+    });
+    table.append(tr);
+  });
+  box.replaceChildren(table);
+}
+
+// A line chart; series = [{name, values, color}], one value per run.
+function lineChart(box, series, unit = "") {
+  const n = DATA.runs.length;
+  if (n === 0 || series.length === 0) { box.replaceChildren(el("div", { class: "empty" }, "Nothing to show yet.")); return; }
+  const W = 560, H = 230, L = 46, R = 12, T = 10, B = 28;
+  const max = Math.max(1, ...series.flatMap(s => s.values));
+  const x = i => n === 1 ? L + (W - L - R) / 2 : L + i * (W - L - R) / (n - 1);
+  const y = v => T + (H - T - B) * (1 - v / max);
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const add = (tag, attrs, text) => {
+    const e = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (text !== undefined) e.textContent = text;
+    svg.append(e); return e;
+  };
+  for (let k = 0; k <= 4; k++) {
+    const v = max * k / 4;
+    add("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: css("--line"), "stroke-width": 1 });
+    const label = max >= 10 ? Math.round(v) : Math.round(v * 10) / 10;
+    add("text", { x: L - 6, y: y(v) + 4, "text-anchor": "end" }, label.toLocaleString("en-US"));
+  }
+  const step = Math.max(1, Math.ceil(n / 6));
+  for (let i = 0; i < n; i += step) add("text", { x: x(i), y: H - 8, "text-anchor": "middle" }, DATA.runs[i].id.slice(5, 10));
+  for (const s of series) {
+    const color = css(s.color);
+    if (n > 1) add("polyline", { points: s.values.map((v, i) => `${x(i)},${y(v)}`).join(" "), fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round" });
+    s.values.forEach((v, i) => {
+      const c = add("circle", { cx: x(i), cy: y(v), r: n > 40 ? 1.5 : 3, fill: color });
+      const t = document.createElementNS(ns, "title");
+      t.textContent = `${s.name}, ${when(DATA.runs[i].id)}: ${(Math.round(v * 10) / 10).toLocaleString("en-US")}${unit}`;
+      c.append(t);
+    });
+  }
+  const legend = el("div", { class: "legend" }, ...series.map(s => el("span", { style: `--c:${css(s.color)}` }, s.name)));
+  box.replaceChildren(svg, legend);
+}
+
+function renderTrend() {
+  const t = totals(current);
+  const byPair = [...pairs(current).entries()]
+    .sort((a, b) => b[1][b[1].length - 1].count - a[1][a[1].length - 1].count)
+    .slice(0, 6);
+  const series = [{ name: "All pairs", values: t.map(v => v.count), color: "--s8" }]
+    .concat(byPair.map(([key, values], i) => ({ name: key.replace("|", " – "), values: values.map(v => v.count), color: COLORS[i] })));
+  lineChart(document.getElementById("trend"), series);
+}
+
+function renderChanges() {
+  const box = document.getElementById("changes");
+  const t = totals(current);
+  const n = t.length;
+  if (n === 0) { box.replaceChildren(el("div", { class: "empty" }, "Nothing to show yet.")); return; }
+  const W = 560, H = 230, L = 46, R = 12, T = 10, B = 28;
+  const max = Math.max(1, ...t.map(v => Math.max(v.new, v.solved)));
+  const mid = T + (H - T - B) / 2;
+  const scale = v => (H - T - B) / 2 * v / max;
+  const slot = (W - L - R) / n, bar = Math.max(2, Math.min(28, slot * 0.6));
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const add = (tag, attrs, text) => {
+    const e = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (text !== undefined) e.textContent = text;
+    svg.append(e); return e;
+  };
+  add("line", { x1: L, x2: W - R, y1: mid, y2: mid, stroke: css("--line-2"), "stroke-width": 1 });
+  add("text", { x: L - 6, y: T + 10, "text-anchor": "end" }, "+" + max);
+  add("text", { x: L - 6, y: H - B, "text-anchor": "end" }, "−" + max);
+  const step = Math.max(1, Math.ceil(n / 6));
+  t.forEach((v, i) => {
+    const cx = L + slot * (i + 0.5);
+    const up = add("rect", { x: cx - bar / 2, y: mid - scale(v.new), width: bar, height: scale(v.new), fill: css("--new"), rx: 2 });
+    up.append(Object.assign(document.createElementNS(ns, "title"), { textContent: `${when(DATA.runs[i].id)}: ${v.new} new` }));
+    const down = add("rect", { x: cx - bar / 2, y: mid, width: bar, height: scale(v.solved), fill: css("--solved"), rx: 2 });
+    down.append(Object.assign(document.createElementNS(ns, "title"), { textContent: `${when(DATA.runs[i].id)}: ${v.solved} solved` }));
+    if (i % step === 0) add("text", { x: cx, y: H - 8, "text-anchor": "middle" }, DATA.runs[i].id.slice(5, 10));
+  });
+  const legend = el("div", { class: "legend" },
+    el("span", { style: `--c:${css("--new")}` }, "New"),
+    el("span", { style: `--c:${css("--solved")}` }, "Solved"));
+  box.replaceChildren(svg, legend);
+}
+
+function renderFiles() {
+  const box = document.getElementById("files");
+  const n = DATA.runs.length;
+  if (n === 0) { box.replaceChildren(el("div", { class: "empty" }, "No runs yet.")); return; }
+  const last = DATA.runs[n - 1].files;
+  const before = n > 1 ? DATA.runs[n - 2].files : [];
+  const table = el("table");
+  table.append(el("tr", {},
+    el("th", {}, "File"), el("th", {}, "Discipline"), el("th", { class: "num" }, "Size (MB)"),
+    el("th", { class: "num" }, "Objects"), el("th", { class: "num" }, "Change"),
+    el("th", { class: "num" }, "Missing information"), el("th", {}, "IFC"), el("th", {}, "Changed")));
+  for (const f of last) {
+    const prev = before.find(p => p.name === f.name);
+    const change = prev ? f.object_count - prev.object_count : null;
+    const changeCell = el("td", { class: "num" }, change === null ? "new" : change === 0 ? "–" : (change > 0 ? "+" : "−") + fmt(Math.abs(change)));
+    table.append(el("tr", {},
+      el("td", {}, f.name), el("td", {}, f.discipline),
+      el("td", { class: "num" }, (f.size_bytes / 1048576).toFixed(1)),
+      el("td", { class: "num" }, fmt(f.object_count)), changeCell,
+      el("td", { class: "num" }, f.missing_properties == null ? "–" : fmt(f.missing_properties)),
+      el("td", {}, f.ifc_schema), el("td", {}, f.modified.replace("T", " ").slice(0, 16))));
+  }
+  box.replaceChildren(table);
+}
+
+function renderPerFile() {
+  const names = [...new Set(DATA.runs.flatMap(r => r.files.map(f => f.name)))].sort();
+  const series = (pick) => names.map((name, i) => ({
+    name,
+    color: COLORS[i % COLORS.length],
+    values: DATA.runs.map(r => { const f = r.files.find(f => f.name === name); return f ? pick(f) : 0; }),
+  }));
+  lineChart(document.getElementById("objects"), series(f => f.object_count));
+  lineChart(document.getElementById("sizes"), series(f => Math.round(f.size_bytes / 104857.6) / 10), " MB");
+}
+
+function render() {
+  renderTypes(); renderCards(); renderMatrix(); renderTrend(); renderChanges(); renderFiles(); renderPerFile();
+}
+
+document.getElementById("title").textContent = DATA.name;
+const lastRun = DATA.runs[DATA.runs.length - 1];
+document.getElementById("lastrun").textContent = lastRun
+  ? `Latest run ${when(lastRun.id)} on ${lastRun.machine} · ${DATA.runs.length} run${DATA.runs.length === 1 ? "" : "s"} in the history`
+  : "No runs yet";
+document.getElementById("footer").textContent = `Made by OpenCheck autorun, ${when(DATA.generated)}. The history is kept as one JSON file per run next to this page.`;
+render();
+</script>
+</body>
+</html>

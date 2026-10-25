@@ -188,6 +188,8 @@ pub struct Checking {
     pub model_levels: FxHashMap<ModelId, String>,
     /// Working area: only elements touching it are shown and checked.
     pub area: Option<opencheck_core::area::WorkArea>,
+    /// Scheduled runs without the app, as last saved from File > Autorun.
+    pub autorun: Option<opencheck_core::autorun::AutorunConfig>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -204,6 +206,9 @@ struct SavedChecking {
     /// Working area in world coordinates.
     #[serde(skip_serializing_if = "Option::is_none")]
     area: Option<opencheck_core::area::WorkArea>,
+    /// Autorun configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    autorun: Option<opencheck_core::autorun::AutorunConfig>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -646,6 +651,7 @@ impl Checking {
             },
             level: self.level.clone(),
             area: self.area,
+            autorun: self.autorun.clone(),
             model_levels: {
                 let mut list: Vec<SavedLevel> = self
                     .model_levels
@@ -738,6 +744,7 @@ impl Checking {
             .collect();
         self.level = saved.level;
         self.area = saved.area;
+        self.autorun = saved.autorun;
         self.model_levels = saved
             .model_levels
             .into_iter()

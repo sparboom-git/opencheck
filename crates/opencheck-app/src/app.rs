@@ -90,6 +90,8 @@ pub struct OpenCheckApp {
     pub measure: MeasureTool,
     pub checking: Checking,
     pub manager: ManagerState,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub autorun: crate::autorun_ui::AutorunUi,
     pub issues: Issues,
     /// Connection to a BCF server (Dalux) for sharing issues.
     pub bcf: crate::bcf_live::BcfLive,
@@ -153,6 +155,8 @@ impl OpenCheckApp {
             measure: MeasureTool::default(),
             checking: Checking::default(),
             manager: ManagerState::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            autorun: Default::default(),
             issues: Issues::default(),
             bcf: crate::bcf_live::BcfLive::default(),
             capture: None,
@@ -1533,6 +1537,12 @@ impl OpenCheckApp {
                 self.open_file_dialog(&ctx);
                 ui.close();
             }
+            // Scheduled runs need the desktop: files on a drive, Task Scheduler.
+            #[cfg(not(target_arch = "wasm32"))]
+            if item(ui, icon::CLOCK_COUNTER_CLOCKWISE, "Autorun…", None) {
+                self.autorun.open();
+                ui.close();
+            }
             ui.separator();
             ui.menu_button(format!("{}  Theme", icon::PALETTE), |ui| {
                 ui.set_min_width(180.0);
@@ -1874,6 +1884,8 @@ impl eframe::App for OpenCheckApp {
             crate::bcf_ui::window(self, &ctx);
             crate::issues_ui::report_window(self, &ctx);
             crate::issue_dialog::window(self, &ctx);
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::autorun_ui::window(self, &ctx);
         }
         self.confirm_dialog(&ctx);
         self.welcome_dialog(&ctx, frame);

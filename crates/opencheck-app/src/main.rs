@@ -3,6 +3,8 @@
 
 mod app;
 mod area_edit;
+#[cfg(not(target_arch = "wasm32"))]
+mod autorun_ui;
 mod bcf_live;
 mod bcf_ui;
 mod c402;

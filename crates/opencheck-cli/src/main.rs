@@ -7,6 +7,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+mod autorun;
+
 use clap::{Parser, Subcommand};
 use opencheck_core::check::{
     BUILTIN_RULESETS, BUILTIN_STANDARDS, CheckJob, CheckModel, FindingKind, IDS_PREFIX, Ids, Rule,
@@ -68,6 +70,14 @@ enum Command {
     },
     /// List the built-in rulesets.
     Rulesets,
+    /// Run the checks of an autorun configuration (autorun.json, made in the
+    /// app): history, dashboard and log go to its output folder.
+    Autorun {
+        config: PathBuf,
+        /// Run even when no file and no check changed since the last run.
+        #[arg(long)]
+        force: bool,
+    },
     /// Write a built-in information standard as an IDS 1.0 file.
     ExportIds {
         /// Output file, e.g. lod-300.ids.
@@ -106,6 +116,7 @@ fn main() -> Result<()> {
             standard,
             levels,
         } => export_ids(&output, standard.as_deref(), &levels),
+        Command::Autorun { config, force } => autorun::autorun(&config, force),
     }
 }
 

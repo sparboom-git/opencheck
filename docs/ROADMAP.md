@@ -65,6 +65,13 @@ built.
   opened again from the file. File dialogs, downloads and
   background work go through one small layer (`platform.rs`).
 
+**Autorun and dashboard**
+
+- Scheduled runs without the app (`opencheck autorun`), set up in the app:
+  lock file, waiting for copied files, version check by size, date and
+  SHA-256, one JSON file per run, and a self-contained HTML dashboard with
+  new and solved findings per pair of disciplines and figures per file.
+
 **Look and feel**
 
 - "Grafit" design with IBM Plex fonts; light and dark theme.
@@ -102,6 +109,11 @@ built.
 - Model update report: what changed between two revisions (added, removed
   and changed elements).
 - Performance on large models: a triangle BVH per element for clash checks.
+
+- **Autorun, next steps**: a dashboard designed to fit one screen without
+  scrolling (the current page is a preliminary view of the data); tidying old history (e.g. only weekly runs after
+  half a year); a list of the new and solved findings in the dashboard;
+  reusing unchanged models between runs.
 
 ## Later
 
