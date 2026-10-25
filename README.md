@@ -88,7 +88,7 @@ Navigation that needs no training:
 
 ### Checking
 
-The Checking tab runs rulesets against the loaded models, much like Solibri.
+The Check tab runs rulesets against the loaded models, much like Solibri.
 
 - A new project has no rulesets; *Add* offers the **built-in rulesets**, your
   own rulesets and **IDS 1.0** files (buildingSMART Information Delivery
@@ -166,6 +166,17 @@ back status, assignee, title and priority changes and the comments. The
 window shows the rights the server gives you in the project, and a
 connection log helps when a server refuses something. See
 [docs/bcf-live.md](docs/bcf-live.md).
+
+### Visual Check
+
+The *Visual Check* tab colours the model by rules instead of listing
+findings. The first rule checks the **alignment of walls and columns** in
+the structural models: elements standing in line from storey to storey
+share a colour, those out of line with the one above or below are red, and
+those with nothing above or below are grey. Choose centre line or face
+alignment and a tolerance, for all walls and columns or only the selected
+ones; a click in the result list zooms to the element or group. See
+[docs/visual-checking.md](docs/visual-checking.md).
 
 ### Autorun and dashboard
 

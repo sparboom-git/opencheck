@@ -31,6 +31,8 @@ use crate::{checking_ui, panels, results_ui, theme, viewport};
 pub enum Tab {
     Model,
     Checking,
+    /// Visual checking: rules that colour elements.
+    Visual,
 }
 
 /// Navigation state carried between frames.
@@ -92,6 +94,7 @@ pub struct OpenCheckApp {
     pub manager: ManagerState,
     #[cfg(not(target_arch = "wasm32"))]
     pub autorun: crate::autorun_ui::AutorunUi,
+    pub visual: crate::visual_ui::VisualUi,
     pub issues: Issues,
     /// Connection to a BCF server (Dalux) for sharing issues.
     pub bcf: crate::bcf_live::BcfLive,
@@ -157,6 +160,7 @@ impl OpenCheckApp {
             manager: ManagerState::default(),
             #[cfg(not(target_arch = "wasm32"))]
             autorun: Default::default(),
+            visual: Default::default(),
             issues: Issues::default(),
             bcf: crate::bcf_live::BcfLive::default(),
             capture: None,
@@ -283,6 +287,7 @@ impl OpenCheckApp {
         self.session = Session::default();
         self.checking = Checking::default();
         self.issues = Issues::default();
+        self.visual = Default::default();
         self.focus_marker = None;
         self.scene_bounds = Aabb::EMPTY;
         self.recheck_after_update = false;
@@ -867,6 +872,7 @@ impl OpenCheckApp {
             (Tab::Checking, Some(id)) => self.show_finding(&id, false),
             _ => self.clear_finding_focus(),
         }
+        crate::visual_ui::apply_paint(self);
     }
 
     /// Runs the enabled rulesets, or only the one with id `only`.
@@ -1586,7 +1592,11 @@ impl OpenCheckApp {
                     ui.add_space(12.0);
                     ui.separator();
                     ui.add_space(12.0);
-                    for (tab, label) in [(Tab::Model, "Model"), (Tab::Checking, "Checking")] {
+                    for (tab, label) in [
+                        (Tab::Model, "Model"),
+                        (Tab::Checking, "Check"),
+                        (Tab::Visual, "Visual Check"),
+                    ] {
                         let selected = self.tab == tab;
                         let text = RichText::new(label).size(14.5);
                         let text = if selected {
@@ -1871,6 +1881,10 @@ impl eframe::App for OpenCheckApp {
             Tab::Checking => {
                 checking_ui::rulesets_panel(self, ui);
                 results_ui::results_panel(self, ui);
+            }
+            Tab::Visual => {
+                crate::visual_ui::rules_panel(self, ui);
+                crate::visual_ui::results_panel(self, ui);
             }
         }
         egui::CentralPanel::default()

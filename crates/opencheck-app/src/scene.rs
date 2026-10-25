@@ -6,7 +6,7 @@ use opencheck_core::{Aabb, Element, Federation, IfcModel, ModelId};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::camera::Ray;
-use crate::render::{DisplayMode, GeometryChunk, MAX_CHUNK_VERTICES, Vertex};
+use crate::render::{DisplayMode, GeometryChunk, MAX_CHUNK_VERTICES, PAINTED, Vertex};
 
 /// Identifies one element in the federation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -71,6 +71,10 @@ pub struct ViewState {
     pub focus: Option<Focus>,
     /// While reviewing a finding: show the rest of the model normally instead of ghosted.
     pub show_context: bool,
+    /// Colours from a visual check, drawn instead of the model's own.
+    pub paint: Option<FxHashMap<ElementRef, [u8; 3]>>,
+    /// With `paint`: ghost the elements it does not colour.
+    pub paint_ghost_rest: bool,
     /// Set whenever something that affects element modes changes.
     pub modes_dirty: bool,
 }
@@ -230,12 +234,41 @@ impl ViewState {
             .unwrap_or(DisplayMode::Hidden)
     }
 
+    /// What the GPU gets for a slot: its display mode, or a painted colour
+    /// (see [`PAINTED`]) where a visual check colours the element.
+    fn mode_word(&self, model: &ViewModel, local: usize) -> u32 {
+        let mode = self.mode_of(model, local);
+        let Some(paint) = &self.paint else {
+            return mode as u32;
+        };
+        let element = ElementRef {
+            model: model.id,
+            express_id: model.slot_elements[local],
+        };
+        match (mode, paint.get(&element)) {
+            (DisplayMode::Normal | DisplayMode::Hover | DisplayMode::Ghost, Some([r, g, b])) => {
+                PAINTED | (u32::from(*r) << 16) | (u32::from(*g) << 8) | u32::from(*b)
+            }
+            (DisplayMode::Normal | DisplayMode::Hover, None) if self.paint_ghost_rest => {
+                DisplayMode::Ghost as u32
+            }
+            _ => mode as u32,
+        }
+    }
+
+    /// Name of the storey an element belongs to.
+    pub fn storey_of(&self, element: ElementRef) -> Option<&str> {
+        let model = self.model(element.model)?;
+        let slot = model.slot(element.express_id)? as usize;
+        model.slot_storey[slot].as_deref()
+    }
+
     /// Display mode for every slot, ready for the GPU.
     pub fn build_modes(&self) -> Vec<u32> {
         let mut modes = vec![DisplayMode::Hidden as u32; self.next_slot.max(1) as usize];
         for model in &self.models {
             for local in 0..model.slot_elements.len() {
-                modes[model.slot_base as usize + local] = self.mode_of(model, local) as u32;
+                modes[model.slot_base as usize + local] = self.mode_word(model, local);
             }
         }
         modes

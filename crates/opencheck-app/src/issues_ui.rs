@@ -1,4 +1,4 @@
-//! The Issues list in the Checking tab: findings picked out for the report.
+//! The Issues list in the Check tab: findings picked out for the report.
 //! An issue can bundle several findings; issues can be merged.
 
 use eframe::egui::{self, RichText};

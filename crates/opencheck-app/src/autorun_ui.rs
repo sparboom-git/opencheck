@@ -386,7 +386,7 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Option<Action> {
     );
     if rulesets.is_empty() {
         ui.label(
-            RichText::new("The project has no rulesets: add them in the Checking tab first.")
+            RichText::new("The project has no rulesets: add them in the Check tab first.")
                 .small()
                 .color(theme::danger()),
         );

@@ -1,4 +1,4 @@
-//! Right panel of the Checking tab.
+//! Right panel of the Check tab.
 //!
 //! Results are organised the way coordinators read them: an overview matrix
 //! of discipline against discipline, then one section per discipline pair

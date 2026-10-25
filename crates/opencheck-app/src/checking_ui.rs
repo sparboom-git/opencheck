@@ -1,4 +1,4 @@
-//! Panels of the Checking tab: rulesets on the left, results on the right.
+//! Panels of the Check tab: rulesets on the left, results on the right.
 
 use eframe::egui::{self, Color32, RichText};
 use egui_phosphor::regular as icon;

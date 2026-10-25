@@ -30,6 +30,10 @@ pub enum DisplayMode {
     FocusB = 6,
 }
 
+/// Flag in an element's mode word: drawn in the sRGB colour in its low 24
+/// bits (red in bits 16-23). Must match `MODE_PAINTED` in `scene.wgsl`.
+pub const PAINTED: u32 = 0x8000_0000;
+
 /// Vertices per GPU buffer. At 20 bytes per vertex this keeps every buffer
 /// far below wgpu's default 256 MB limit, also for the index buffer.
 pub const MAX_CHUNK_VERTICES: usize = 4_000_000;

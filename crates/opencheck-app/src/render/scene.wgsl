@@ -23,6 +23,8 @@ const MODE_SELECTED: u32 = 3u;
 const MODE_HOVER: u32 = 4u;
 const MODE_FOCUS_A: u32 = 5u;
 const MODE_FOCUS_B: u32 = 6u;
+// Flag: drawn in the sRGB colour in the low 24 bits (from a visual check).
+const MODE_PAINTED: u32 = 0x80000000u;
 
 // Selection green, as in Solibri.
 const SELECTED_COLOR: vec3<f32> = vec3<f32>(0.0, 0.80, 0.0);
@@ -46,6 +48,14 @@ struct VertexOut {
 
 fn styled_color(input: VertexIn) -> vec4<f32> {
     let mode = element_modes[input.slot];
+    if (mode & MODE_PAINTED) != 0u {
+        let rgb = vec3<f32>(
+            f32((mode >> 16u) & 0xffu),
+            f32((mode >> 8u) & 0xffu),
+            f32(mode & 0xffu),
+        ) / 255.0;
+        return vec4<f32>(rgb, 1.0);
+    }
     switch mode {
         case MODE_GHOST: {
             return vec4<f32>(GHOST_COLOR, camera.params.y);

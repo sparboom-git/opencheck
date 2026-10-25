@@ -1,4 +1,4 @@
-//! State of the Checking tab: the project's rulesets, which models they run
+//! State of the Check tab: the project's rulesets, which models they run
 //! on, the last results and the reviewer's decisions on findings.
 
 use std::sync::Arc;
@@ -84,7 +84,7 @@ pub fn uses_levels(rule: &Rule) -> bool {
     rule.kind == RuleKind::Information && ids_path(&rule.standard).is_none()
 }
 
-/// The two lists on the right of the Checking tab.
+/// The two lists on the right of the Check tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ResultsTab {
     #[default]
@@ -190,6 +190,8 @@ pub struct Checking {
     pub area: Option<opencheck_core::area::WorkArea>,
     /// Scheduled runs without the app, as last saved from File > Autorun.
     pub autorun: Option<opencheck_core::autorun::AutorunConfig>,
+    /// Rules of the Visual Check tab.
+    pub visual: Vec<opencheck_core::visual::VisualRule>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -209,6 +211,9 @@ struct SavedChecking {
     /// Autorun configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     autorun: Option<opencheck_core::autorun::AutorunConfig>,
+    /// Visual checking rules.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    visual: Vec<opencheck_core::visual::VisualRule>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -652,6 +657,7 @@ impl Checking {
             level: self.level.clone(),
             area: self.area,
             autorun: self.autorun.clone(),
+            visual: self.visual.clone(),
             model_levels: {
                 let mut list: Vec<SavedLevel> = self
                     .model_levels
@@ -745,6 +751,7 @@ impl Checking {
         self.level = saved.level;
         self.area = saved.area;
         self.autorun = saved.autorun;
+        self.visual = saved.visual;
         self.model_levels = saved
             .model_levels
             .into_iter()

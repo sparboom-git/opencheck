@@ -12,7 +12,7 @@ building part (wall, door, cable carrier, duct, ...) lists the information
 it needs at each level.
 
 The **project** is checked at one level, chosen on the card of the
-"Information: LOD DK" ruleset in the Checking tab (default LOD 300 DK). A
+"Information: LOD DK" ruleset in the Check tab (default LOD 300 DK). A
 **model** can use another level: open the ⋮ menu on its card in the model
 list and choose *Information level*. Levels are saved in the project.
 
@@ -150,7 +150,7 @@ into issues like any other; an issue then names the missing items.
 OpenCheck reads and writes buildingSMART **IDS 1.0** (Information Delivery
 Specification) files.
 
-**Import.** In the Checking tab, *Add → Import IDS…* stores the file in the
+**Import.** In the Check tab, *Add → Import IDS…* stores the file in the
 project as `requirements/<name>.ids` and adds a ruleset "IDS: <title>" with
 one information rule. The rule refers to the file:
 

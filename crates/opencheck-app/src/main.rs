@@ -32,6 +32,7 @@ mod snap;
 mod standard_editor;
 mod theme;
 mod viewport;
+mod visual_ui;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
