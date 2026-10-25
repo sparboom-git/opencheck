@@ -7,6 +7,10 @@ pub struct SpatialNode {
     pub long_name: Option<String>,
     /// Storey elevation in model length units, when the file states one.
     pub elevation: Option<f64>,
+    /// Height of the node's origin in the IFC world frame (its placement
+    /// followed up to the project), in model length units. Unlike
+    /// `elevation`, it includes the height the site or building is placed at.
+    pub placement_z: Option<f64>,
     pub children: Vec<SpatialNode>,
     /// Express IDs of the elements contained directly in this node.
     pub elements: Vec<u32>,

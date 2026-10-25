@@ -88,6 +88,9 @@ pub fn load_ifc_bytes(file_name: &str, bytes: &[u8]) -> Result<IfcModel, LoadErr
     let spatial_root = reader.build_spatial_tree();
     let elements = reader.build_elements(&meshes);
     let project_name = reader.project_name();
+    let connections = reader.connections();
+    let port_points = reader.port_points();
+    let system_info = std::mem::take(&mut reader.system_info);
     let semantics_time = t1.elapsed();
 
     let short_name = Path::new(file_name)
@@ -116,8 +119,100 @@ pub fn load_ifc_bytes(file_name: &str, bytes: &[u8]) -> Result<IfcModel, LoadErr
             semantics_time,
         },
     );
+    model.connections = connections;
+    // Ports in the mesh frame, where the geometry is.
+    let to_mesh = model.local_to_world.inverse();
+    let port_points: FxHashMap<u32, Vec<DVec3>> = port_points
+        .into_iter()
+        .map(|(e, points)| {
+            let points = points
+                .into_iter()
+                .map(|p| to_mesh.transform_point3(p * length_unit_scale))
+                .collect();
+            (e, points)
+        })
+        .collect();
+    model.ports = fit_ports(&model, port_points);
+    model.system_info = system_info;
     model.content_hash = crate::project::sha256_hex(bytes);
     Ok(model)
+}
+
+/// Lines the ports up with the geometry. The placements followed here and
+/// the frame ifc-lite puts the geometry in can differ by a turn about the
+/// vertical (seen with some Revit exports), so the turn and shift that put
+/// the middle of each two-port element on the middle of its geometry is
+/// fitted on the straight segments and applied. Ports that do not fit
+/// well are dropped.
+fn fit_ports(model: &IfcModel, ports: FxHashMap<u32, Vec<DVec3>>) -> FxHashMap<u32, Vec<[f32; 3]>> {
+    let pairs: Vec<(DVec3, DVec3)> = ports
+        .iter()
+        .filter(|(_, p)| p.len() == 2)
+        .filter_map(|(e, p)| {
+            let element = model.element(*e)?;
+            // Straight pieces only: a bend's ports are not around its middle.
+            (element.occurrence_class().ends_with("Segment") && !element.bounds.is_empty())
+                .then(|| ((p[0] + p[1]) / 2.0, element.bounds.center().as_dvec3()))
+        })
+        .collect();
+    if pairs.len() < 3 {
+        return FxHashMap::default();
+    }
+    // A turn about the vertical, then the shift that best follows it.
+    let fit_for = |angle: f64| {
+        let turn = DMat4::from_rotation_z(angle);
+        let mut shifts: Vec<DVec3> = pairs
+            .iter()
+            .map(|(a, b)| *b - turn.transform_point3(*a))
+            .collect();
+        let median = |axis: usize, list: &mut Vec<DVec3>| {
+            list.sort_by(|p, q| p[axis].total_cmp(&q[axis]));
+            list[list.len() / 2][axis]
+        };
+        let shift = DVec3::new(
+            median(0, &mut shifts),
+            median(1, &mut shifts),
+            median(2, &mut shifts),
+        );
+        let fit = DMat4::from_translation(shift) * turn;
+        let mut misses: Vec<f64> = pairs
+            .iter()
+            .map(|(a, b)| fit.transform_point3(*a).distance(*b))
+            .collect();
+        misses.sort_by(f64::total_cmp);
+        (misses[misses.len() / 2], fit)
+    };
+    let (dot, cross) = pairs.iter().fold((0.0, 0.0), |(d, c), (a, b)| {
+        let (a, b) = (a.truncate(), b.truncate());
+        (d + a.dot(b), c + a.perp_dot(b))
+    });
+    let quarter = std::f64::consts::FRAC_PI_2;
+    let (miss, fit) = [0.0, quarter, 2.0 * quarter, 3.0 * quarter, cross.atan2(dot)]
+        .into_iter()
+        .map(fit_for)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .expect("five candidates");
+    if miss > 0.05 {
+        return FxHashMap::default();
+    }
+    ports
+        .into_iter()
+        .filter_map(|(e, points)| {
+            let points: Vec<DVec3> = points
+                .into_iter()
+                .map(|p| fit.transform_point3(p))
+                .collect();
+            // Ports must lie on their element.
+            let bounds = model.element(e)?.bounds;
+            let margin = DVec3::splat(0.05);
+            let lo = bounds.min.as_dvec3() - margin;
+            let hi = bounds.max.as_dvec3() + margin;
+            points
+                .iter()
+                .all(|p| p.cmpge(lo).all() && p.cmple(hi).all())
+                .then(|| (e, points.iter().map(|p| p.as_vec3().to_array()).collect()))
+        })
+        .collect()
 }
 
 /// The inverse of the shift ifc-lite applied to the vertices.
@@ -233,6 +328,7 @@ const OBJECT_TYPE: usize = 4;
 const ELEMENT_TAG: usize = 7;
 const SPATIAL_LONG_NAME: usize = 7;
 const STOREY_ELEVATION: usize = 9;
+const OBJECT_PLACEMENT: usize = 5;
 const REL_FIRST: usize = 4;
 const REL_SECOND: usize = 5;
 const TYPE_HAS_PROPERTY_SETS: usize = 5;
@@ -259,6 +355,17 @@ struct SemanticReader<'a> {
     material_of: FxHashMap<u32, u32>,
     /// object -> groups it is assigned to.
     groups_of: FxHashMap<u32, Vec<u32>>,
+    /// port -> element it belongs to (`IfcRelConnectsPortToElement`).
+    port_element: FxHashMap<u32, u32>,
+    /// element -> nested objects (`IfcRelNests`); some of them ports.
+    nested: Vec<(u32, Vec<u32>)>,
+    /// Connected ports and the element realising the connection, if any
+    /// (`IfcRelConnectsPorts`).
+    port_links: Vec<(u32, u32, Option<u32>)>,
+    /// System name -> its description, object type and predefined type.
+    system_info: FxHashMap<String, String>,
+    /// Resolved `IfcLocalPlacement` transforms.
+    placements: FxHashMap<u32, DMat4>,
     property_sets: FxHashMap<u32, PropertySet>,
     class_cache: FxHashMap<u32, String>,
 }
@@ -278,6 +385,11 @@ impl<'a> SemanticReader<'a> {
             classified_by: FxHashMap::default(),
             material_of: FxHashMap::default(),
             groups_of: FxHashMap::default(),
+            port_element: FxHashMap::default(),
+            nested: Vec::new(),
+            port_links: Vec::new(),
+            system_info: FxHashMap::default(),
+            placements: FxHashMap::default(),
             property_sets: FxHashMap::default(),
             class_cache: FxHashMap::default(),
         }
@@ -300,6 +412,9 @@ impl<'a> SemanticReader<'a> {
                 "IFCRELASSOCIATESCLASSIFICATION" => RelKind::Classification,
                 "IFCRELASSOCIATESMATERIAL" => RelKind::Material,
                 "IFCRELASSIGNSTOGROUP" => RelKind::Group,
+                "IFCRELCONNECTSPORTTOELEMENT" => RelKind::PortToElement,
+                "IFCRELCONNECTSPORTS" => RelKind::ConnectsPorts,
+                "IFCRELNESTS" => RelKind::Nests,
                 _ => continue,
             };
             rels.push((id, kind));
@@ -383,6 +498,28 @@ impl<'a> SemanticReader<'a> {
                         }
                     }
                 }
+                // RelatingPort, RelatedElement
+                RelKind::PortToElement => {
+                    if let (Some(port), Some(element)) =
+                        (rel.get_ref(REL_FIRST), rel.get_ref(REL_SECOND))
+                    {
+                        self.port_element.insert(port, element);
+                    }
+                }
+                // RelatingPort, RelatedPort, RealizingElement
+                RelKind::ConnectsPorts => {
+                    if let (Some(a), Some(b)) = (rel.get_ref(REL_FIRST), rel.get_ref(REL_SECOND)) {
+                        self.port_links.push((a, b, rel.get_ref(REL_SECOND + 1)));
+                    }
+                }
+                // RelatingObject, RelatedObjects
+                RelKind::Nests => {
+                    if let (Some(parent), Some(children)) =
+                        (rel.get_ref(REL_FIRST), rel.get_refs(REL_SECOND))
+                    {
+                        self.nested.push((parent, children));
+                    }
+                }
             }
         }
     }
@@ -446,6 +583,12 @@ impl<'a> SemanticReader<'a> {
             .as_ref()
             .filter(|_| class == "IfcBuildingStorey")
             .and_then(|e| e.get_float(STOREY_ELEVATION));
+        let placement_z = entity
+            .as_ref()
+            .filter(|_| is_spatial_element)
+            .and_then(|e| e.get_ref(OBJECT_PLACEMENT))
+            .and_then(|p| self.placement(p, 0))
+            .map(|m| m.w_axis.z);
 
         let mut node = SpatialNode {
             express_id: id,
@@ -453,6 +596,7 @@ impl<'a> SemanticReader<'a> {
             name,
             long_name,
             elevation,
+            placement_z,
             children: Vec::new(),
             elements: Vec::new(),
         };
@@ -739,13 +883,157 @@ impl<'a> SemanticReader<'a> {
             if !ifc_lite_core::is_subtype_of_for_schema(&self.schema, &class, "IfcSystem") {
                 continue;
             }
-            if let Some(name) = self.decode(group).and_then(|g| string_attr(&g, ROOT_NAME))
+            let Some(entity) = self.decode(group) else {
+                continue;
+            };
+            if let Some(name) = string_attr(&entity, ROOT_NAME)
                 && !names.contains(&name)
             {
+                if !self.system_info.contains_key(&name) {
+                    // What kind of system: "Afløb, Spildevand", DRAINAGE, ...
+                    let mut info: Vec<String> = [ROOT_DESCRIPTION, OBJECT_TYPE]
+                        .iter()
+                        .filter_map(|i| string_attr(&entity, *i))
+                        .collect();
+                    info.extend(self.predefined_type(&entity, &class));
+                    self.system_info.insert(name.clone(), info.join(", "));
+                }
                 names.push(name);
             }
         }
         names
+    }
+
+    /// The world transform of an `IfcLocalPlacement`, in model length units,
+    /// following the placements it is relative to.
+    fn placement(&mut self, id: u32, depth: usize) -> Option<DMat4> {
+        if depth > 32 {
+            return None;
+        }
+        if let Some(m) = self.placements.get(&id) {
+            return Some(*m);
+        }
+        let entity = self.decode(id)?;
+        if !entity
+            .ifc_type
+            .name()
+            .eq_ignore_ascii_case("IfcLocalPlacement")
+        {
+            return Some(DMat4::IDENTITY);
+        }
+        let parent = match entity.get_ref(0) {
+            Some(p) => self.placement(p, depth + 1)?,
+            None => DMat4::IDENTITY,
+        };
+        let relative = entity
+            .get_ref(1)
+            .and_then(|a| self.axis_placement(a))
+            .unwrap_or(DMat4::IDENTITY);
+        let world = parent * relative;
+        self.placements.insert(id, world);
+        Some(world)
+    }
+
+    /// `IfcAxis2Placement3D` (or 2D) as a transform: location, axis, ref direction.
+    fn axis_placement(&mut self, id: u32) -> Option<DMat4> {
+        let entity = self.decode(id)?;
+        let mut vector = |index: usize| -> Option<DVec3> {
+            let r = entity.get_ref(index)?;
+            let e = self.decode(r)?;
+            let list = e.get_list(0)?;
+            let v: Vec<f64> = list.iter().filter_map(|a| a.as_float()).collect();
+            Some(DVec3::new(
+                v.first().copied()?,
+                v.get(1).copied().unwrap_or(0.0),
+                v.get(2).copied().unwrap_or(0.0),
+            ))
+        };
+        let location = vector(0).unwrap_or(DVec3::ZERO);
+        if !entity
+            .ifc_type
+            .name()
+            .eq_ignore_ascii_case("IfcAxis2Placement3D")
+        {
+            return Some(DMat4::from_translation(location));
+        }
+        let z = vector(1)
+            .and_then(|v| v.try_normalize())
+            .unwrap_or(DVec3::Z);
+        let x = vector(2)
+            .map(|r| r - z * r.dot(z))
+            .and_then(|v| v.try_normalize())
+            .unwrap_or_else(|| z.any_orthonormal_vector());
+        let y = z.cross(x);
+        Some(DMat4::from_cols(
+            x.extend(0.0),
+            y.extend(0.0),
+            z.extend(0.0),
+            location.extend(1.0),
+        ))
+    }
+
+    /// Port -> element: `IfcRelConnectsPortToElement`, and in IFC4 the
+    /// connected ports nested in their element.
+    fn ports(&self) -> FxHashMap<u32, u32> {
+        let mut port_element = self.port_element.clone();
+        let linked: FxHashSet<u32> = self
+            .port_links
+            .iter()
+            .flat_map(|(a, b, _)| [*a, *b])
+            .collect();
+        for (parent, children) in &self.nested {
+            for child in children {
+                if linked.contains(child) {
+                    port_element.entry(*child).or_insert(*parent);
+                }
+            }
+        }
+        port_element
+    }
+
+    /// Where each element's ports are, in the IFC world frame and model
+    /// length units: the ends of a pipe, the connections of a fitting.
+    fn port_points(&mut self) -> FxHashMap<u32, Vec<DVec3>> {
+        let mut out: FxHashMap<u32, Vec<DVec3>> = FxHashMap::default();
+        let mut ports: Vec<(u32, u32)> = self.ports().into_iter().collect();
+        ports.sort_unstable();
+        for (port, element) in ports {
+            let Some(placement) = self.decode(port).and_then(|p| p.get_ref(OBJECT_PLACEMENT))
+            else {
+                continue;
+            };
+            if let Some(m) = self.placement(placement, 0) {
+                out.entry(element).or_default().push(m.w_axis.truncate());
+            }
+        }
+        out
+    }
+
+    /// Pairs of elements whose ports are connected; an element realising a
+    /// connection is connected to both sides.
+    fn connections(&self) -> Vec<[u32; 2]> {
+        let port_element = self.ports();
+        let mut pairs = FxHashSet::default();
+        let mut add = |a: u32, b: u32| {
+            if a != b {
+                pairs.insert([a.min(b), a.max(b)]);
+            }
+        };
+        for (a, b, realizing) in &self.port_links {
+            let (Some(&ea), Some(&eb)) = (port_element.get(a), port_element.get(b)) else {
+                continue;
+            };
+            match realizing {
+                Some(r) => {
+                    add(ea, *r);
+                    add(*r, eb);
+                }
+                None => add(ea, eb),
+            }
+        }
+        let mut list: Vec<[u32; 2]> = pairs.into_iter().collect();
+        list.sort_unstable();
+        list
     }
 
     fn has_tag(&self, class: &str) -> bool {
@@ -833,6 +1121,9 @@ enum RelKind {
     Classification,
     Material,
     Group,
+    PortToElement,
+    ConnectsPorts,
+    Nests,
 }
 
 fn string_attr(entity: &DecodedEntity, index: usize) -> Option<String> {

@@ -251,6 +251,13 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Option<Action> {
         .map(|r| (r.path.clone(), r.ruleset.ruleset.name.clone(), r.enabled))
         .collect();
     let project = project_files(app);
+    let visual: Vec<String> = app
+        .checking
+        .visual
+        .iter()
+        .filter(|r| r.enabled)
+        .map(|r| r.name.clone())
+        .collect();
     let state = &mut app.autorun;
     let found = &state.found.1;
     let config = state.config.as_mut().expect("set above");
@@ -402,6 +409,12 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Option<Action> {
         }
     }
 
+    if !visual.is_empty() {
+        ui.add_space(4.0);
+        ui.label(RichText::new(format!("Visual checks: {}", visual.join(", "))).small())
+            .on_hover_text("The visual checks switched on in the Visual Check tab run too; their problems count as findings.");
+    }
+
     section(
         ui,
         "Output folder",
@@ -440,7 +453,7 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Option<Action> {
     ui.add_space(12.0);
     let valid = !config.files.is_empty()
         && !config.output.trim().is_empty()
-        && !state.chosen.is_empty()
+        && (!state.chosen.is_empty() || !visual.is_empty())
         && valid_time(&config.schedule.time);
     let running = state.running.is_some();
     ui.horizontal_wrapped(|ui| {
@@ -529,6 +542,12 @@ fn save(app: &mut OpenCheckApp) -> Option<PathBuf> {
             path: r.path.clone(),
             toml: r.text.clone(),
         })
+        .collect();
+    config.visual = checking
+        .visual
+        .iter()
+        .filter(|r| r.enabled)
+        .cloned()
         .collect();
     config.ids = checking
         .requirements

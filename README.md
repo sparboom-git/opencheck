@@ -4,14 +4,17 @@ OpenCheck is an open source BIM model checker written in Rust. It loads several
 IFC files into one federated model, lets you browse and inspect them in an
 easy 3D viewer, checks them for clashes, clearances, free zones, duplicates
 and missing information, and turns what it finds into issues that can be
-reported, exported as BCF or shared with an issue server such as Dalux. Checks
-can also run on a schedule without the app, with a dashboard of how a project
+reported, exported as BCF or shared with an issue server such as Dalux.
+Visual checks colour the model to show what is out of line: walls and
+columns that do not stack, pipes and ducts that grow again away from their
+source, drains without fall, elements on the wrong storey. Checks can also
+run on a schedule without the app, with a dashboard of how a project
 develops.
 
 > Status: early but usable. Viewing, checking (including free zones and
-> script rules), information requirements, IDS, issues, reports, BCF files,
-> BCF Live with Dalux and autorun work, on the desktop and largely in the
-> browser. See [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next.
+> script rules), visual checks, information requirements, IDS, issues,
+> reports, BCF files, BCF Live with Dalux and autorun work, on the desktop
+> and largely in the browser. See [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next.
 
 ## Download
 
@@ -169,20 +172,34 @@ connection log helps when a server refuses something. See
 
 ### Visual Check
 
-The *Visual Check* tab colours the model by rules instead of listing
-findings. The first rule checks the **alignment of walls and columns** in
-the structural models: elements standing in line from storey to storey
-share a colour, those out of line with the one above or below are red, and
-those with nothing above or below are grey. Choose centre line or face
-alignment and a tolerance, for all walls and columns or only the selected
-ones; a click in the result list zooms to the element or group. See
-[docs/visual-checking.md](docs/visual-checking.md).
+The *Visual Check* tab colours the model, so a pattern or a break in it
+shows at a glance, and lists the problems; a click zooms to the element.
+Each check is added on its own:
+
+- **Alignment of walls and columns**: structural walls and columns standing
+  in line from storey to storey share a colour; those out of line with the
+  one above or below are red. Centre line or face alignment, with a
+  tolerance.
+- **Dimensions in pipe and duct systems**: each kind of system in its own
+  muted colour; a pipe or duct larger than the piece before it, seen from
+  the start of its system, is red.
+- **Fall of drain pipes**: drain pipes green with enough fall, yellow with
+  too little, red when flat or falling the wrong way; least fall overall
+  and by pipe size.
+- **Storeys**: each storey in its own colour; elements standing on another
+  storey than they belong to are red, elements without a storey purple.
+
+The system checks follow the ports of the elements (`IfcRelConnectsPorts`)
+and, for loose elements, where their ends meet; sizes and falls are measured
+from the geometry. Visual checks can run with autorun, their problems kept
+as findings. See [docs/visual-checking.md](docs/visual-checking.md).
 
 ### Autorun and dashboard
 
 *File → Autorun…* sets up checks that run without the app on a schedule:
-the project's IFC files are read from their (network) paths, every run is kept as a JSON
-file in a history, and a dashboard (one HTML file) shows the findings per
+the project's IFC files are read from their (network) paths, the chosen
+rulesets and the ticked visual checks run, every run is kept as a compact,
+compressed JSON file in a history, and a dashboard (one HTML file) shows the findings per
 pair of disciplines, what is new and what was solved since the run before,
 and the files' objects and sizes over time. The task runs `opencheck
 autorun` from a bat file the app writes, and can be added to Windows Task
@@ -206,8 +223,8 @@ is remembered.
 
 A project is saved as one `.opencheck` file: a ZIP archive holding the IFC
 files unchanged, the rulesets, IDS files, information requirements, checking
-decisions, the working area, the autorun configuration, issues and the view
-state. See
+decisions, the working area, the visual checks, the autorun configuration,
+issues and the view state. See
 [docs/file-format.md](docs/file-format.md). Sign-ins to BCF servers are kept
 per user, never in the project file.
 
@@ -231,9 +248,9 @@ opencheck autorun \\server\share\project\OpenCheck\autorun.json
 
 | Crate | Purpose |
 |---|---|
-| `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine (clashes, clearances, duplicates, free zones, Rhai script rules), information requirements and IDS, BCF data and files, project files, autorun runs and the dashboard |
+| `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine (clashes, clearances, duplicates, free zones, Rhai script rules), visual checks (alignment, pipe and duct systems with their port network, drain fall, storeys), information requirements and IDS, BCF data and files, project files, autorun runs and the dashboard |
 | `opencheck-cli` | The `opencheck` command line tool, including `autorun` |
-| `opencheck-app` | The application, for the desktop and the browser: federated 3D viewer (egui + wgpu), checking, issues, reports, BCF Live and the autorun setup |
+| `opencheck-app` | The application, for the desktop and the browser: federated 3D viewer (egui + wgpu), checking, visual checks, issues, reports, BCF Live and the autorun setup |
 
 IFC parsing and tessellation are provided by
 [ifc-lite](https://github.com/LTplus-AG/ifc-lite) (MPL-2.0). OpenCheck wraps it

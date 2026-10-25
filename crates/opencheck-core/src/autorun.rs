@@ -38,6 +38,9 @@ pub struct AutorunConfig {
     /// The rulesets to run, as TOML.
     #[serde(default)]
     pub rulesets: Vec<ConfigRuleset>,
+    /// Visual checks to run; their problems become findings too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visual: Vec<crate::visual::VisualRule>,
     /// IDS documents the rulesets refer to (`ids:<path>`), as XML.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ids: Vec<ConfigDocument>,
@@ -140,6 +143,7 @@ impl AutorunConfig {
             files: Vec::new(),
             output: String::new(),
             rulesets: Vec::new(),
+            visual: Vec::new(),
             ids: Vec::new(),
             information_changes: None,
             level: None,
@@ -546,6 +550,61 @@ pub fn run_findings(
         }
     }
     out
+}
+
+/// The problems of a visual check as findings, with each model's
+/// discipline code and file name from `model_info`. The id follows from the
+/// check type and the elements, so a problem keeps it between runs.
+pub fn visual_findings(
+    rule: &crate::visual::VisualRule,
+    outcome: &crate::visual::VisualOutcome,
+    federation: &crate::Federation,
+    model_info: &dyn Fn(ModelId) -> (String, String),
+) -> Vec<RunFinding> {
+    let check_type = rule.kind.check_type();
+    outcome
+        .problems
+        .iter()
+        .filter_map(|p| {
+            let objects: Vec<(RunObject, String)> = p
+                .elements
+                .iter()
+                .filter_map(|k| {
+                    let element = federation.get(k.model)?.element(k.express_id)?;
+                    let (discipline, file) = model_info(k.model);
+                    Some((
+                        RunObject {
+                            global_id: element.global_id.clone(),
+                            class: element.ifc_class.clone(),
+                            name: element.name.clone(),
+                            file,
+                        },
+                        discipline,
+                    ))
+                })
+                .collect();
+            let (first, d1) = objects.first()?.clone();
+            let (second, d2) = objects
+                .get(1)
+                .cloned()
+                .unwrap_or((first.clone(), d1.clone()));
+            Some(RunFinding {
+                id: crate::check::finding_id(
+                    "visual",
+                    check_type,
+                    &first.global_id,
+                    &second.global_id,
+                ),
+                ruleset: "visual".to_owned(),
+                rule: check_type.to_owned(),
+                check_type: check_type.to_owned(),
+                disciplines: [d1, d2],
+                objects: objects.into_iter().map(|(o, _)| o).collect(),
+                severity: p.severity.label().to_lowercase(),
+                value: p.value,
+            })
+        })
+        .collect()
 }
 
 /// Elements with missing information per file name.

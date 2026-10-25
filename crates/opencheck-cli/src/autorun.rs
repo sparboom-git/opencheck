@@ -18,12 +18,13 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use opencheck_core::autorun::{
     AutorunConfig, RUN_FORMAT, RunRecord, dashboard_data, dashboard_html, file_facts,
-    missing_per_file, run_findings,
+    missing_per_file, run_findings, visual_findings,
 };
 use opencheck_core::check::{
     CheckJob, CheckModel, Ids, Ruleset, StandardOverrides, builtin_standard, run_check,
 };
 use opencheck_core::project::sha256_hex;
+use opencheck_core::visual::{self, VisualModel};
 use opencheck_core::{Federation, IfcModel, ModelId, load_ifc_bytes};
 use serde::{Deserialize, Serialize};
 
@@ -276,7 +277,25 @@ fn run(config: &AutorunConfig, output: &Path, force: bool, log: &mut Log) -> Res
             by_id.get(&id).cloned().unwrap_or_default(),
         )
     };
-    let findings = run_findings(&report, &model_info);
+    let mut findings = run_findings(&report, &model_info);
+    let models: Vec<VisualModel> = federation
+        .ids()
+        .into_iter()
+        .filter_map(|id| {
+            Some(VisualModel {
+                id,
+                model: federation.get(id)?,
+                transform: federation.model_transform(id)?.as_dmat4(),
+                include: None,
+            })
+        })
+        .collect();
+    for rule in config.visual.iter().filter(|r| r.enabled) {
+        let outcome = visual::run(rule, &models);
+        let found = visual_findings(rule, &outcome, &federation, &model_info);
+        log.line(&format!("{}: {} problems", rule.name, found.len()));
+        findings.extend(found);
+    }
     let missing = missing_per_file(&findings);
     let has_information = findings.iter().any(|f| f.check_type == "information")
         || config
@@ -393,8 +412,8 @@ fn check(
     for r in &config.rulesets {
         rulesets.push(Ruleset::from_toml(&r.toml).with_context(|| format!("ruleset {}", r.path))?);
     }
-    if rulesets.is_empty() {
-        bail!("the configuration has no rulesets");
+    if rulesets.is_empty() && config.visual.is_empty() {
+        bail!("the configuration has no rulesets and no visual checks");
     }
     let mut ids = Vec::new();
     for d in &config.ids {

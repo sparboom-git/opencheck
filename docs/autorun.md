@@ -21,7 +21,8 @@ solved since the run before, per pair of disciplines.
 2. **Checks**: the project's rulesets to run. Their settings, the project's
    changes to the information requirements, its LOD level and its IDS files
    are copied into the configuration when it is saved; save again after
-   changing them.
+   changing them. The visual checks ticked in the Visual Check tab run too
+   (see [visual-checking.md](visual-checking.md)).
 3. **Output folder**: history, dashboard, log and lock file go here. On the
    network drive, everyone can open the dashboard.
 4. **When**: every day or every week, at a time.
@@ -53,7 +54,9 @@ that is always on.
    (`state.json`); only files that differ are read for their SHA-256. When no
    file and no check changed, the run stops there.
 4. **Checks**: all chosen rulesets on all files, with the disciplines from
-   the configuration.
+   the configuration, then the visual checks. Their problems become findings
+   with the check types `alignment`, `dimension_jump`, `drain_slope` and
+   `storey_mismatch`; the log says how many each found.
 5. **History**: one file per run, `history/run_YYYY-MM-DD_HHMM.json.gz`,
    never changed afterwards. It holds figures per file (size, IFC schema,
    hash, date, objects in all and per class, elements missing information)

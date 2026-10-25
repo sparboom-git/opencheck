@@ -121,6 +121,7 @@ fn model_with(extra: Vec<Element>) -> IfcModel {
         name: "Level 1".to_owned(),
         long_name: None,
         elevation: Some(0.0),
+        placement_z: None,
         children: Vec::new(),
         elements: vec![10, 11],
     };
@@ -130,6 +131,7 @@ fn model_with(extra: Vec<Element>) -> IfcModel {
         name: "P".to_owned(),
         long_name: None,
         elevation: None,
+        placement_z: None,
         children: vec![storey],
         elements: Vec::new(),
     };

@@ -1,39 +1,14 @@
-//! Visual checking: rules that colour elements in the 3D view instead of
-//! reporting findings, so a pattern (or a break in it) shows at a glance.
-//!
-//! The first kind is the alignment check of structural walls and columns:
-//! elements that stand in line with each other, typically stacked from
-//! storey to storey, form a group and share a colour. A wall or column that
-//! is offset from the one below gets another colour than its neighbours.
+//! Alignment of structural walls and columns: elements that stand in line
+//! with each other, typically stacked from storey to storey, form a group
+//! and share a colour. A wall or column offset from the one below is out of
+//! line.
 
 use glam::{DVec2, DVec3};
 use serde::{Deserialize, Serialize};
 
+use super::{Category, ElementKey, OUT_OF_LINE, Problem, VisualModel, VisualOutcome, palette};
 use crate::Discipline;
-
-/// One visual rule as kept in the project.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct VisualRule {
-    pub name: String,
-    #[serde(flatten)]
-    pub kind: VisualKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum VisualKind {
-    Alignment(AlignmentRule),
-}
-
-impl VisualRule {
-    /// Alignment of walls and columns in the structural models.
-    pub fn alignment() -> Self {
-        Self {
-            name: "Alignment of walls and columns".to_owned(),
-            kind: VisualKind::Alignment(AlignmentRule::default()),
-        }
-    }
-}
+use crate::check::Severity;
 
 /// Settings of the alignment check.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -216,6 +191,92 @@ pub fn align(elements: &[AlignElement], mode: AlignMode, tolerance: f64) -> Alig
     }
 }
 
+/// Runs the check on the walls and columns of the rule's models.
+pub(super) fn run(rule: &AlignmentRule, models: &[VisualModel]) -> VisualOutcome {
+    let mut keys = Vec::new();
+    let mut elements = Vec::new();
+    for m in models
+        .iter()
+        .filter(|m| rule.disciplines.contains(&m.model.discipline))
+    {
+        for e in &m.model.elements {
+            let Some(kind) = member_kind(&e.ifc_class) else {
+                continue;
+            };
+            if !rule.includes_class(&e.ifc_class) || !m.includes(e.express_id) {
+                continue;
+            }
+            keys.push(m.key(e.express_id));
+            elements.push(AlignElement {
+                kind,
+                points: m.points(e).collect(),
+            });
+        }
+    }
+
+    let alignment = align(&elements, rule.mode, rule.tolerance_mm / 1000.0);
+    let mut members: Vec<Vec<ElementKey>> = vec![Vec::new(); alignment.groups];
+    let mut outcome = VisualOutcome::default();
+    for (i, group) in alignment.group.iter().enumerate() {
+        match group {
+            Some(g) => members[*g].push(keys[i]),
+            None => outcome.skipped += 1,
+        }
+    }
+    let mut alone = Vec::new();
+    for (i, group) in alignment.group.iter().enumerate() {
+        let Some(g) = group else { continue };
+        if members[*g].len() > 1 {
+            continue;
+        }
+        if alignment.stacked[i] {
+            let what = match elements[i].kind {
+                Member::Wall => "wall",
+                Member::Column => "column",
+            };
+            outcome.problems.push(Problem {
+                elements: vec![keys[i]],
+                severity: Severity::Moderate,
+                text: format!("Out of line with the {what} above or below"),
+                value: None,
+                color: OUT_OF_LINE,
+            });
+        } else {
+            alone.push(keys[i]);
+        }
+    }
+    // Groups come largest first, so the single ones are at the end.
+    for (n, list) in members.into_iter().filter(|m| m.len() > 1).enumerate() {
+        outcome.categories.push(Category {
+            label: format!("Group {}", n + 1),
+            detail: format!("{} elements", list.len()),
+            color: palette(n),
+            elements: list,
+        });
+    }
+    if !alone.is_empty() {
+        outcome.categories.push(Category {
+            label: "Nothing above or below".to_owned(),
+            detail: format!("{} elements", alone.len()),
+            color: super::NEUTRAL,
+            elements: alone,
+        });
+    }
+    outcome.summary = format!(
+        "{} groups ({} elements)",
+        outcome
+            .categories
+            .iter()
+            .filter(|c| c.color != super::NEUTRAL)
+            .count(),
+        elements.len() - outcome.skipped
+    );
+    outcome.problem_title = "Out of line".to_owned();
+    outcome.problem_hint =
+        "In line with nothing, though a wall or column stands above or below.".to_owned();
+    outcome
+}
+
 /// Two parallel walls that overlap along their length, seen from the
 /// first: the overlap runs from `from` to `to` along its axis.
 struct WallPair {
@@ -366,7 +427,7 @@ impl Plan {
 }
 
 /// Andrew's monotone chain; counter-clockwise, without repeated points.
-fn convex_hull(mut points: Vec<DVec2>) -> Vec<DVec2> {
+pub(super) fn convex_hull(mut points: Vec<DVec2>) -> Vec<DVec2> {
     points.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
     points.dedup_by(|a, b| a.distance_squared(*b) < 1e-14);
     if points.len() < 3 {
@@ -506,16 +567,5 @@ mod tests {
             0.0,
         );
         assert_eq!(lone.stacked, vec![false, false]);
-    }
-
-    #[test]
-    fn rules_round_trip() {
-        let rule = VisualRule::alignment();
-        let json = serde_json::to_string(&rule).unwrap();
-        assert!(json.contains("\"type\":\"alignment\""));
-        assert_eq!(serde_json::from_str::<VisualRule>(&json).unwrap(), rule);
-        assert!(AlignmentRule::default().includes_class("IfcWallStandardCase"));
-        assert!(!AlignmentRule::default().includes_class("IfcWallType"));
-        assert!(!AlignmentRule::default().includes_class("IfcSlab"));
     }
 }

@@ -131,6 +131,15 @@ pub struct IfcModel {
     pub stats: LoadStats,
     /// SHA-256 of the IFC file, lowercase hex. Identifies a model revision.
     pub content_hash: String,
+    /// Elements connected through their ports (`IfcRelConnectsPorts`), by
+    /// express id, each pair once.
+    pub connections: Vec<[u32; 2]>,
+    /// Port positions per element, by express id, in the mesh frame: the
+    /// ends of a pipe or duct, the connections of a fitting.
+    pub ports: FxHashMap<u32, Vec<[f32; 3]>>,
+    /// System name -> what kind of system it is, from its description,
+    /// object type and predefined type (e.g. `Afløb, Spildevand`).
+    pub system_info: FxHashMap<String, String>,
     element_index: FxHashMap<u32, usize>,
 }
 
@@ -177,6 +186,9 @@ impl IfcModel {
             bounds,
             stats,
             content_hash: String::new(),
+            connections: Vec::new(),
+            ports: FxHashMap::default(),
+            system_info: FxHashMap::default(),
             element_index,
         }
     }
