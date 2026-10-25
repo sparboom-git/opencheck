@@ -1,7 +1,7 @@
 # Autorun and dashboard
 
 Autorun runs a project's checks without opening OpenCheck, on a schedule. It
-reads the IFC files from a folder, keeps every run in a history and makes a
+reads the project's IFC files, keeps every run in a history and makes a
 dashboard that shows how the project develops: what is new and what was
 solved since the run before, per pair of disciplines.
 
@@ -9,11 +9,15 @@ solved since the run before, per pair of disciplines.
 
 *File → Autorun…* in the app (desktop only):
 
-1. **IFC folder**: where the updated IFC files are put. Use a UNC path
-   (`\\server\share\project\IFC`); drive letters may differ between machines.
-   Each file in the folder gets a discipline, guessed from its name; change
-   it where needed. Files that appear later are checked too, unless that is
-   switched off.
+1. **IFC files**: the files to check, one row each with its discipline and
+   the path it is read from. Only these files are checked; other IFC files
+   in the same folder are left alone. The list starts with the project's
+   models, each read from where it was added from. *Browse…* points a row
+   at another file, *Add IFC file…* adds more and *Use the project's
+   models* starts the list over. Use UNC paths
+   (`\\server\share\project\IFC\…`); drive letters may differ between
+   machines. A path with no file behind it is shown in red; a run skips the
+   file and says so in the log.
 2. **Checks**: the project's rulesets to run. Their settings, the project's
    changes to the information requirements, its LOD level and its IDS files
    are copied into the configuration when it is saved; save again after

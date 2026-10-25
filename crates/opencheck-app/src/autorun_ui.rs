@@ -39,32 +39,29 @@ pub struct AutorunUi {
     program: String,
     status: String,
     running: Option<Child>,
-    /// The IFC folder as last read: its path and the IFC files in it. Read
-    /// again when the path changes, not every frame (it may be a network drive).
-    folder: (String, Vec<String>),
+    /// Whether each file's path exists, as last looked up. Looked up again
+    /// when the paths change, not every frame (they may be on a network drive).
+    found: (Vec<String>, Vec<bool>),
 }
 
 impl AutorunUi {
     pub fn open(&mut self) {
         self.open = true;
         self.config = None;
-        self.folder = (String::new(), Vec::new());
+        self.found = (Vec::new(), Vec::new());
     }
 }
 
-/// The IFC files in a folder, sorted.
-fn ifc_files(dir: &str) -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .flatten()
-                .map(|e| e.file_name().to_string_lossy().into_owned())
-                .filter(|n| n.to_ascii_lowercase().ends_with(".ifc"))
-                .collect()
-        })
-        .unwrap_or_default();
-    names.sort();
-    names
+/// A file to check, read from where the model was added from.
+fn source_file(path: &Path, discipline: Discipline) -> SourceFile {
+    SourceFile {
+        name: path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        discipline,
+        path: path.display().to_string(),
+    }
 }
 
 /// The command line program next to the running app.
@@ -93,22 +90,7 @@ fn initial(app: &OpenCheckApp) -> (AutorunConfig, BTreeSet<String>) {
             |s| s.to_string_lossy().into_owned(),
         );
     let mut config = AutorunConfig::new(&name);
-    // The folder of the first model as a start, and the models' disciplines.
-    for record in app.session.records.values() {
-        if let opencheck_core::project::ModelSource::File(path) = &record.source {
-            if config.source.is_empty()
-                && let Some(dir) = path.parent()
-            {
-                config.source = dir.display().to_string();
-            }
-            if let Some(name) = path.file_name() {
-                config.files.push(SourceFile {
-                    name: name.to_string_lossy().into_owned(),
-                    discipline: record.entry.discipline,
-                });
-            }
-        }
-    }
+    config.files = project_files(app);
     let chosen = app
         .checking
         .rulesets
@@ -117,6 +99,24 @@ fn initial(app: &OpenCheckApp) -> (AutorunConfig, BTreeSet<String>) {
         .map(|r| r.path.clone())
         .collect();
     (config, chosen)
+}
+
+/// The project's models, each read from where it was added from, in the
+/// order of the model list.
+fn project_files(app: &OpenCheckApp) -> Vec<SourceFile> {
+    app.federation
+        .ids()
+        .into_iter()
+        .filter_map(|id| {
+            let record = app.session.records.get(&id)?;
+            let path = match (&record.entry.source_path, &record.source) {
+                (Some(path), _) => PathBuf::from(path),
+                (None, opencheck_core::project::ModelSource::File(path)) => path.clone(),
+                _ => return None,
+            };
+            Some(source_file(&path, record.entry.discipline))
+        })
+        .collect()
 }
 
 pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
@@ -131,15 +131,20 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
             app.autorun.program = default_program();
         }
     }
-    let source = app
+    let paths: Vec<String> = app
         .autorun
         .config
         .as_ref()
-        .map(|c| c.source.clone())
+        .map(|c| {
+            c.files
+                .iter()
+                .map(|f| f.location(&c.source).display().to_string())
+                .collect()
+        })
         .unwrap_or_default();
-    if app.autorun.folder.0 != source {
-        let files = ifc_files(&source);
-        app.autorun.folder = (source, files);
+    if app.autorun.found.0 != paths {
+        let found = paths.iter().map(|p| Path::new(p).is_file()).collect();
+        app.autorun.found = (paths, found);
     }
     // A run started from here: report when it ends.
     if let Some(child) = &mut app.autorun.running {
@@ -245,15 +250,16 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Option<Action> {
         .iter()
         .map(|r| (r.path.clone(), r.ruleset.ruleset.name.clone(), r.enabled))
         .collect();
+    let project = project_files(app);
     let state = &mut app.autorun;
-    let in_folder = &state.folder.1;
+    let found = &state.found.1;
     let config = state.config.as_mut().expect("set above");
 
     ui.label(
         RichText::new(
-            "Runs the checks without opening OpenCheck, on a schedule: reads the IFC files from \
-             a folder, keeps every run in a history and makes a dashboard that shows what is new \
-             and what was solved since the run before.",
+            "Runs the checks without opening OpenCheck, on a schedule: reads the IFC files below, \
+             keeps every run in a history and makes a dashboard that shows what is new and what \
+             was solved since the run before.",
         )
         .color(theme::text_muted()),
     );
@@ -263,49 +269,57 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Option<Action> {
 
     section(
         ui,
-        "IFC folder",
-        "Where the updated IFC files are put. Use a UNC path (\\\\server\\share\\…): drive letters may differ between machines.",
+        "IFC files",
+        "Only these files are checked, each read from its own path; other IFC files in the same \
+         folders are left alone. By default each model is read from where it was added from. \
+         Use UNC paths (\\\\server\\share\\…): drive letters may differ between machines.",
     );
-    folder_field(ui, &mut config.source, "autorun_source");
-    // Files found in the folder get a discipline; listed files that are
-    // missing stay, marked.
-    for name in in_folder {
-        if config.discipline_of(name).is_none() {
-            config.files.push(SourceFile {
-                name: name.clone(),
-                discipline: Discipline::guess(name, std::iter::empty()),
-            });
-        }
-    }
-    if config.files.is_empty() {
-        ui.label(
-            RichText::new("No IFC files found in the folder.")
-                .small()
-                .color(theme::text_muted()),
-        );
-    }
     let mut remove = None;
+    let mut browse = None;
     egui::Grid::new("autorun_files")
-        .num_columns(3)
-        .spacing([10.0, 4.0])
+        .num_columns(4)
+        .spacing([8.0, 4.0])
         .show(ui, |ui| {
             for (i, file) in config.files.iter_mut().enumerate() {
-                let present = in_folder.iter().any(|n| n.eq_ignore_ascii_case(&file.name));
-                let name = RichText::new(&file.name);
-                ui.label(if present {
-                    name
-                } else {
-                    name.color(theme::text_muted())
-                })
-                .on_hover_text(if present { "" } else { "Not in the folder now" });
                 egui::ComboBox::from_id_salt(("autorun_discipline", i))
+                    .width(120.0)
                     .selected_text(file.discipline.label())
                     .show_ui(ui, |ui| {
                         for d in Discipline::ALL {
                             ui.selectable_value(&mut file.discipline, d, d.label());
                         }
                     });
-                if !present && ui.small_button(icon::X).on_hover_text("Remove").clicked() {
+                let exists = found.get(i).copied().unwrap_or(true);
+                let edit = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut file.path)
+                            .id_salt(("autorun_path", i))
+                            .desired_width(440.0)
+                            .text_color_opt((!exists).then(theme::danger)),
+                    )
+                    .on_hover_text(if exists {
+                        "Where the file is read from"
+                    } else {
+                        "No file at this path now"
+                    });
+                if edit.changed() {
+                    // The file name names the file in the history.
+                    if let Some(name) = Path::new(&file.path).file_name() {
+                        file.name = name.to_string_lossy().into_owned();
+                    }
+                }
+                if ui
+                    .button(format!("{}  Browse…", icon::FOLDER_OPEN))
+                    .on_hover_text("Choose the file")
+                    .clicked()
+                {
+                    browse = Some(i);
+                }
+                if ui
+                    .small_button(icon::X)
+                    .on_hover_text("Leave out")
+                    .clicked()
+                {
                     remove = Some(i);
                 }
                 ui.end_row();
@@ -314,10 +328,56 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Option<Action> {
     if let Some(i) = remove {
         config.files.remove(i);
     }
-    ui.checkbox(
-        &mut config.new_files,
-        "Also check new IFC files that appear in the folder (discipline guessed from the name)",
-    );
+    if let Some(i) = browse {
+        let start = Path::new(&config.files[i].path)
+            .parent()
+            .map(Path::to_path_buf);
+        let mut dialog = rfd::FileDialog::new().add_filter("IFC model", &["ifc", "IFC"]);
+        if let Some(dir) = start {
+            dialog = dialog.set_directory(dir);
+        }
+        if let Some(path) = dialog.pick_file() {
+            let discipline = config.files[i].discipline;
+            config.files[i] = source_file(&path, discipline);
+        }
+    }
+    if config.files.is_empty() {
+        ui.label(
+            RichText::new("No files: add the IFC files to check.")
+                .small()
+                .color(theme::danger()),
+        );
+    }
+    ui.horizontal(|ui| {
+        if ui
+            .button(format!("{}  Add IFC file…", icon::PLUS))
+            .clicked()
+            && let Some(paths) = rfd::FileDialog::new()
+                .add_filter("IFC model", &["ifc", "IFC"])
+                .pick_files()
+        {
+            for path in paths {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                config.files.push(source_file(
+                    &path,
+                    Discipline::guess(&name, std::iter::empty()),
+                ));
+            }
+        }
+        if ui
+            .button(format!(
+                "{}  Use the project's models",
+                icon::ARROWS_CLOCKWISE
+            ))
+            .on_hover_text("The models loaded now, each from where it was added from")
+            .clicked()
+        {
+            config.files = project.clone();
+        }
+    });
 
     section(
         ui,
@@ -378,7 +438,7 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Option<Action> {
     ui.add(egui::TextEdit::singleline(&mut state.program).desired_width(560.0));
 
     ui.add_space(12.0);
-    let valid = !config.source.trim().is_empty()
+    let valid = !config.files.is_empty()
         && !config.output.trim().is_empty()
         && !state.chosen.is_empty()
         && valid_time(&config.schedule.time);
@@ -393,7 +453,7 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Option<Action> {
         if ui
             .add_enabled(valid, save)
             .on_hover_text("Writes autorun.json and autorun.bat into the output folder")
-            .on_disabled_hover_text("Fill in the IFC folder, the output folder, a time (HH:MM) and choose at least one check")
+            .on_disabled_hover_text("Add the IFC files, fill in the output folder, a time (HH:MM) and choose at least one check")
             .clicked()
         {
             action = Some(Action::Save);

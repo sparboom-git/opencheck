@@ -25,15 +25,16 @@ pub struct AutorunConfig {
     pub format: u32,
     /// Project name, shown in the dashboard.
     pub name: String,
-    /// Folder with the IFC files; a UNC path (`\\server\share\...`) works on
-    /// every machine, drive letters may not.
+    /// Folder for files given by name only, and for `new_files`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source: String,
-    /// The files and their disciplines.
+    /// The files to check and their disciplines. Only these are read: other
+    /// IFC files lying in the same folders are left alone.
     #[serde(default)]
     pub files: Vec<SourceFile>,
-    /// Also check IFC files in the folder that are not listed, with a
-    /// discipline guessed from the file name.
-    #[serde(default = "yes")]
+    /// Also check IFC files in `source` that are not listed, with a
+    /// discipline guessed from the file name. Off unless asked for.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub new_files: bool,
     /// Folder for the history, the dashboard, the log and the lock file.
     pub output: String,
@@ -61,19 +62,31 @@ fn format() -> u32 {
     FORMAT
 }
 
-fn yes() -> bool {
-    true
-}
-
 fn settle() -> u64 {
     10
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceFile {
-    /// File name in the source folder, e.g. `KON_model.ifc`.
+    /// File name, e.g. `KON_model.ifc`; it names the file in the history.
     pub name: String,
     pub discipline: Discipline,
+    /// Where the file is read from. A UNC path (`\\server\share\...`) works
+    /// on every machine, drive letters may not. Empty: `name` in the
+    /// configuration's `source` folder.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub path: String,
+}
+
+impl SourceFile {
+    /// The file to read.
+    pub fn location(&self, source: &str) -> std::path::PathBuf {
+        if self.path.is_empty() {
+            std::path::Path::new(source).join(&self.name)
+        } else {
+            std::path::PathBuf::from(&self.path)
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -128,7 +141,7 @@ impl AutorunConfig {
             name: name.to_owned(),
             source: String::new(),
             files: Vec::new(),
-            new_files: true,
+            new_files: false,
             output: String::new(),
             rulesets: Vec::new(),
             ids: Vec::new(),
@@ -520,10 +533,25 @@ mod tests {
         config.files.push(SourceFile {
             name: "KON.ifc".to_owned(),
             discipline: Discipline::Structural,
+            path: r"\\server\other\KON.ifc".to_owned(),
+        });
+        config.files.push(SourceFile {
+            name: "VEN.ifc".to_owned(),
+            discipline: Discipline::Mechanical,
+            path: String::new(),
         });
         let back = AutorunConfig::from_json(&config.to_json()).unwrap();
         assert_eq!(back, config);
         assert_eq!(back.discipline_of("kon.IFC"), Some(Discipline::Structural));
+        // A file's own path wins; without one it is looked for in the folder.
+        assert_eq!(
+            back.files[0].location(&back.source),
+            std::path::PathBuf::from(r"\\server\other\KON.ifc")
+        );
+        assert_eq!(
+            back.files[1].location(&back.source),
+            std::path::Path::new(r"\\server\share\ifc").join("VEN.ifc")
+        );
 
         let data = dashboard_data("A <b> project", "now", &[run("1", Vec::new())]);
         let html = dashboard_html(&data);

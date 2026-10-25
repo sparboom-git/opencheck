@@ -170,7 +170,7 @@ connection log helps when a server refuses something. See
 ### Autorun and dashboard
 
 *File → Autorun…* sets up checks that run without the app on a schedule:
-the IFC files are read from a (network) folder, every run is kept as a JSON
+the project's IFC files are read from their (network) paths, every run is kept as a JSON
 file in a history, and a dashboard (one HTML file) shows the findings per
 pair of disciplines, what is new and what was solved since the run before,
 and the files' objects and sizes over time. The task runs `opencheck

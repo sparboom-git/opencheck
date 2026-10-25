@@ -151,7 +151,7 @@ pub fn autorun(config_path: &Path, force: bool) -> Result<()> {
 fn run(config: &AutorunConfig, output: &Path, force: bool, log: &mut Log) -> Result<()> {
     let files = source_files(config, log)?;
     if files.is_empty() {
-        bail!("no IFC files to check in {}", config.source);
+        bail!("none of the IFC files in the configuration could be found");
     }
     let files = settle(files, Duration::from_secs(config.settle_seconds), log);
 
@@ -321,33 +321,36 @@ fn run(config: &AutorunConfig, output: &Path, force: bool, log: &mut Log) -> Res
     write_dashboard(config, output, log)
 }
 
-/// The IFC files to check: those listed, and new ones when asked for.
-/// (name, path, size, modified)
+/// The IFC files to check: the listed ones, each from its own path. Other
+/// files in the same folders are left alone, unless the configuration asks
+/// for new files in its `source` folder. (name, path, size, modified)
 fn source_files(config: &AutorunConfig, log: &mut Log) -> Result<Vec<Found>> {
-    let dir = Path::new(&config.source);
-    let entries =
-        fs::read_dir(dir).with_context(|| format!("reading the folder {}", dir.display()))?;
     let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !name.to_ascii_lowercase().ends_with(".ifc") || !path.is_file() {
-            continue;
+    for f in &config.files {
+        let path = f.location(&config.source);
+        if path.is_file() {
+            out.push((f.name.clone(), path, 0, String::new()));
+        } else {
+            log.line(&format!("Missing: {} ({}).", f.name, path.display()));
         }
-        let listed = config.discipline_of(&name).is_some();
-        if !listed && !config.new_files {
-            continue;
-        }
-        if !listed {
+    }
+    if config.new_files && !config.source.is_empty() {
+        let dir = Path::new(&config.source);
+        let entries =
+            fs::read_dir(dir).with_context(|| format!("reading the folder {}", dir.display()))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.to_ascii_lowercase().ends_with(".ifc")
+                || !path.is_file()
+                || out.iter().any(|(n, ..)| n.eq_ignore_ascii_case(&name))
+            {
+                continue;
+            }
             log.line(&format!(
                 "New file {name}: checked with a guessed discipline."
             ));
-        }
-        out.push((name, path, 0, String::new()));
-    }
-    for f in &config.files {
-        if !out.iter().any(|(n, ..)| n.eq_ignore_ascii_case(&f.name)) {
-            log.line(&format!("Missing: {} is not in the folder.", f.name));
+            out.push((name, path, 0, String::new()));
         }
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
