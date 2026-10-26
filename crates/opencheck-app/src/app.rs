@@ -27,6 +27,15 @@ use crate::scene::{ElementRef, Focus, SectionPlane, ViewState};
 use crate::session::{self, ModelRecord, Session};
 use crate::{checking_ui, panels, results_ui, theme, viewport};
 
+/// The floating properties window: open, closed by the user (then it no
+/// longer opens by itself), and the element it last saw selected.
+#[derive(Default)]
+pub struct PropertiesWindow {
+    pub open: bool,
+    pub closed: bool,
+    pub seen: Option<ElementRef>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Model,
@@ -63,8 +72,12 @@ pub enum Walk {
 pub enum IssueTarget {
     /// One issue holding all of them.
     Bundle,
-    /// One issue per finding.
+    /// One issue per finding. A single finding takes what is on screen:
+    /// the reviewer is looking at it.
     Separate,
+    /// One issue per finding, each framed on its finding also when there
+    /// is only one: for approved suggestions, which nobody is looking at.
+    EachFramed,
     /// Added to an issue that already exists.
     Existing(String),
 }
@@ -94,6 +107,8 @@ pub struct OpenCheckApp {
     pub manager: ManagerState,
     #[cfg(not(target_arch = "wasm32"))]
     pub autorun: crate::autorun_ui::AutorunUi,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub claude: crate::claude_link::Link,
     pub visual: crate::visual_ui::VisualUi,
     pub issues: Issues,
     /// Connection to a BCF server (Dalux) for sharing issues.
@@ -125,6 +140,8 @@ pub struct OpenCheckApp {
     pub recheck_after_update: bool,
     pub tree_filter: String,
     pub property_filter: String,
+    /// The floating properties window of the Check and Visual Check tabs.
+    pub properties: PropertiesWindow,
     render_state: Option<RenderState>,
     /// Bounds of all loaded geometry in the federation frame.
     pub scene_bounds: Aabb,
@@ -160,6 +177,8 @@ impl OpenCheckApp {
             manager: ManagerState::default(),
             #[cfg(not(target_arch = "wasm32"))]
             autorun: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            claude: Default::default(),
             visual: Default::default(),
             issues: Issues::default(),
             bcf: crate::bcf_live::BcfLive::default(),
@@ -179,6 +198,7 @@ impl OpenCheckApp {
             recheck_after_update: false,
             tree_filter: String::new(),
             property_filter: String::new(),
+            properties: Default::default(),
             render_state,
             scene_bounds: Aabb::EMPTY,
             confirm: None,
@@ -449,6 +469,7 @@ impl OpenCheckApp {
                 JobResult::CheckDone { report } => {
                     self.checking.finish_run(*report);
                     self.evaluate_issues();
+                    self.presort(false);
                     match self.checking.selected.clone() {
                         Some(id) if self.tab == Tab::Checking => self.show_finding(&id, false),
                         _ => self.clear_finding_focus(),
@@ -1222,13 +1243,13 @@ impl OpenCheckApp {
                 self.issues.list.push(issue);
                 guid
             }
-            IssueTarget::Separate => {
+            IssueTarget::Separate | IssueTarget::EachFramed => {
                 let mut last = String::new();
                 // One issue per finding: each gets its own framing, unless there is
-                // only one, which is what is on screen.
-                let single = refs.len() == 1;
+                // only one and it is what is on screen.
+                let on_screen = target == IssueTarget::Separate && refs.len() == 1;
                 for e in &refs {
-                    let issue = make(std::slice::from_ref(e), single);
+                    let issue = make(std::slice::from_ref(e), on_screen);
                     last = issue.guid.clone();
                     self.issues.list.push(issue);
                 }
@@ -1547,6 +1568,11 @@ impl OpenCheckApp {
             #[cfg(not(target_arch = "wasm32"))]
             if item(ui, icon::CLOCK_COUNTER_CLOCKWISE, "Autorun…", None) {
                 self.autorun.open();
+                ui.close();
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            if item(ui, icon::SPARKLE, "Claude connection…", None) {
+                self.claude.open = true;
                 ui.close();
             }
             ui.separator();
@@ -1900,6 +1926,9 @@ impl eframe::App for OpenCheckApp {
             crate::issue_dialog::window(self, &ctx);
             #[cfg(not(target_arch = "wasm32"))]
             crate::autorun_ui::window(self, &ctx);
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::claude_link::window(self, &ctx);
+            panels::properties_window(self, &ctx);
         }
         self.confirm_dialog(&ctx);
         self.welcome_dialog(&ctx, frame);

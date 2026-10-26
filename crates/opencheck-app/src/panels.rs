@@ -656,122 +656,166 @@ pub fn properties_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 .inner_margin(egui::Margin::same(12))
                 .stroke(egui::Stroke::new(1.0, theme::border())),
         )
-        .show(ui, |ui| {
-            // Long values are cut (full text on hover), not allowed to widen the panel.
-            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-            if app.view.selection.len() > 1 {
-                multi_selection(app, ui);
-                return;
-            }
-            let Some(&r) = app.view.selection.first() else {
-                empty_properties(ui);
-                return;
-            };
-            let Some(model) = app.federation.get(r.model) else {
-                return;
-            };
-            let Some(element) = model.element(r.express_id) else {
-                return;
-            };
-            let color = model_color(app, r.model);
+        .show(ui, |ui| properties_body(app, ui, true));
+}
 
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(element.label()).heading().strong());
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(&element.ifc_class).color(theme::text_muted()));
-                        ui.label(
-                            RichText::new(format!("• {}", model.short_name))
-                                .small()
-                                .color(color),
-                        );
-                    });
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                    if ui
-                        .add(egui::Button::new(icon::X).frame(false))
-                        .on_hover_text("Clear selection (Esc)")
-                        .clicked()
-                    {
-                        app.view.selection.clear();
-                        app.view.modes_dirty = true;
-                    }
-                });
-            });
-            ui.add_space(6.0);
-            ui.add(
-                egui::TextEdit::singleline(&mut app.property_filter)
-                    .hint_text(format!("{}  Filter properties", icon::FUNNEL))
-                    .desired_width(f32::INFINITY),
+/// The properties of the selected element, as in the Model tab's panel.
+/// `help`: with nothing selected, show how to navigate (the panel), or
+/// just say what to do (the floating window).
+pub fn properties_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, help: bool) {
+    // Long values are cut (full text on hover), not allowed to widen the panel.
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+    if app.view.selection.len() > 1 {
+        multi_selection(app, ui);
+        return;
+    }
+    let Some(&r) = app.view.selection.first() else {
+        if help {
+            empty_properties(ui);
+        } else {
+            ui.add_space(12.0);
+            ui.label(
+                RichText::new("Select an element to see its properties.")
+                    .color(theme::text_muted()),
             );
-            ui.add_space(6.0);
+            // Keep the window's size while it is empty.
+            ui.allocate_space(ui.available_size());
+        }
+        return;
+    };
+    let Some(model) = app.federation.get(r.model) else {
+        return;
+    };
+    let Some(element) = model.element(r.express_id) else {
+        return;
+    };
+    let color = model_color(app, r.model);
 
-            let filter = app.property_filter.trim().to_lowercase();
-            let matches = |k: &str, v: &str| {
-                filter.is_empty()
-                    || k.to_lowercase().contains(&filter)
-                    || v.to_lowercase().contains(&filter)
-            };
-            let storey = element_storey(model, element);
-
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let mut rows: Vec<(&str, String)> = vec![
-                        ("Name", element.name.clone()),
-                        ("Class", element.ifc_class.clone()),
-                        ("GlobalId", element.global_id.clone()),
-                    ];
-                    for (k, v) in [
-                        ("PredefinedType", &element.predefined_type),
-                        ("ObjectType", &element.object_type),
-                        ("Description", &element.description),
-                        ("Tag", &element.tag),
-                    ] {
-                        if let Some(v) = v {
-                            rows.push((k, v.clone()));
-                        }
-                    }
-                    if let Some((_, type_name)) = &element.type_object {
-                        rows.push(("Type", type_name.clone()));
-                    }
-                    if let Some(storey) = storey {
-                        rows.push(("Storey", storey));
-                    }
-                    rows.push(("Model", model.short_name.clone()));
-                    rows.push(("Discipline", model.discipline.label().to_owned()));
-                    property_group(
-                        ui,
-                        "Element",
-                        ("identity", r.express_id),
-                        true,
-                        &rows,
-                        &matches,
-                    );
-
-                    for pset in model.property_sets_of(element) {
-                        let rows: Vec<(&str, String)> = pset
-                            .properties
-                            .iter()
-                            .map(|p| (p.name.as_str(), format_value(model, p)))
-                            .collect();
-                        let title = match pset.kind {
-                            PropertySetKind::Quantities => {
-                                format!("{}  {}", icon::RULER, pset.name)
-                            }
-                            PropertySetKind::Properties => pset.name.clone(),
-                        };
-                        property_group(
-                            ui,
-                            &title,
-                            ("pset", pset.express_id),
-                            true,
-                            &rows,
-                            &matches,
-                        );
-                    }
-                });
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.label(RichText::new(element.label()).heading().strong());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(&element.ifc_class).color(theme::text_muted()));
+                ui.label(
+                    RichText::new(format!("• {}", model.short_name))
+                        .small()
+                        .color(color),
+                );
+            });
         });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+            if ui
+                .add(egui::Button::new(icon::X).frame(false))
+                .on_hover_text("Clear selection (Esc)")
+                .clicked()
+            {
+                app.view.selection.clear();
+                app.view.modes_dirty = true;
+            }
+        });
+    });
+    ui.add_space(6.0);
+    ui.add(
+        egui::TextEdit::singleline(&mut app.property_filter)
+            .hint_text(format!("{}  Filter properties", icon::FUNNEL))
+            .desired_width(f32::INFINITY),
+    );
+    ui.add_space(6.0);
+
+    let filter = app.property_filter.trim().to_lowercase();
+    let matches = |k: &str, v: &str| {
+        filter.is_empty()
+            || k.to_lowercase().contains(&filter)
+            || v.to_lowercase().contains(&filter)
+    };
+    let storey = element_storey(model, element);
+
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let mut rows: Vec<(&str, String)> = vec![
+                ("Name", element.name.clone()),
+                ("Class", element.ifc_class.clone()),
+                ("GlobalId", element.global_id.clone()),
+            ];
+            for (k, v) in [
+                ("PredefinedType", &element.predefined_type),
+                ("ObjectType", &element.object_type),
+                ("Description", &element.description),
+                ("Tag", &element.tag),
+            ] {
+                if let Some(v) = v {
+                    rows.push((k, v.clone()));
+                }
+            }
+            if let Some((_, type_name)) = &element.type_object {
+                rows.push(("Type", type_name.clone()));
+            }
+            if let Some(storey) = storey {
+                rows.push(("Storey", storey));
+            }
+            rows.push(("Model", model.short_name.clone()));
+            rows.push(("Discipline", model.discipline.label().to_owned()));
+            property_group(
+                ui,
+                "Element",
+                ("identity", r.express_id),
+                true,
+                &rows,
+                &matches,
+            );
+
+            for pset in model.property_sets_of(element) {
+                let rows: Vec<(&str, String)> = pset
+                    .properties
+                    .iter()
+                    .map(|p| (p.name.as_str(), format_value(model, p)))
+                    .collect();
+                let title = match pset.kind {
+                    PropertySetKind::Quantities => {
+                        format!("{}  {}", icon::RULER, pset.name)
+                    }
+                    PropertySetKind::Properties => pset.name.clone(),
+                };
+                property_group(ui, &title, ("pset", pset.express_id), true, &rows, &matches);
+            }
+        });
+}
+
+/// The selected element's properties in a floating window, on the tabs
+/// without the properties panel (Check, Visual Check). It opens by itself
+/// when an element is picked, unless the user closed it; the tool bar
+/// button opens and closes it.
+pub fn properties_window(app: &mut OpenCheckApp, ctx: &egui::Context) {
+    if app.tab == crate::app::Tab::Model {
+        return;
+    }
+    let picked = app.view.selection.first().copied();
+    if picked != app.properties.seen {
+        if picked.is_some() && !app.properties.closed {
+            app.properties.open = true;
+        }
+        app.properties.seen = picked;
+    }
+    if !app.properties.open {
+        return;
+    }
+    let mut open = true;
+    let dialog = crate::dialog::Dialog {
+        id: "properties",
+        icon: icon::LIST_BULLETS,
+        title: "Properties",
+        size: egui::vec2(380.0, 520.0),
+        min: egui::vec2(260.0, 180.0),
+        scroll: crate::dialog::Scroll::Own,
+    };
+    crate::dialog::show(ctx, &dialog, &mut open, |ui| {
+        properties_body(app, ui, false)
+    });
+    if !open {
+        app.properties.open = false;
+        app.properties.closed = true;
+    }
 }
 
 /// Quantities are stored in model units; show lengths in metres-friendly form.

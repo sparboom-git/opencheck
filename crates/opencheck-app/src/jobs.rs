@@ -31,7 +31,7 @@ pub enum JobResult {
     },
     ProjectOpened {
         path: PathBuf,
-        result: Result<ProjectContents, String>,
+        result: Result<Box<ProjectContents>, String>,
     },
     /// All models of an opened project have been sent.
     ProjectModelsDone,
@@ -195,7 +195,7 @@ impl Jobs {
             reporter.send(
                 JobResult::ProjectOpened {
                     path: path.clone(),
-                    result: Ok(contents),
+                    result: Ok(Box::new(contents)),
                 },
                 false,
             );
@@ -247,7 +247,7 @@ impl Jobs {
             reporter.send(
                 JobResult::ProjectOpened {
                     path,
-                    result: Ok(contents),
+                    result: Ok(Box::new(contents)),
                 },
                 false,
             );

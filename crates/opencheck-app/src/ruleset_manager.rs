@@ -327,6 +327,7 @@ fn new_rule(n: usize) -> Rule {
         zone: None,
         script: String::new(),
         params: Default::default(),
+        presort: Default::default(),
     }
 }
 
@@ -849,6 +850,11 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
                         };
                         ui.label(RichText::new(hint).small().color(theme::text_muted()));
                     });
+                    if rule.kind == RuleKind::Clash {
+                        ui.end_row();
+                        ui.label(RichText::new("Pre-sorting").color(theme::text_muted()));
+                        ui.vertical(|ui| presort_settings(ui, &mut rule.presort, &mut changed));
+                    }
                 }
             }
             ui.end_row();
@@ -1880,4 +1886,48 @@ mod ai_tests {
     fn the_template_compiles() {
         compile_script(SCRIPT_TEMPLATE).unwrap();
     }
+}
+
+/// The fixed rules that suggest known noise as C1 after each check.
+fn presort_settings(
+    ui: &mut egui::Ui,
+    presort: &mut opencheck_core::triage::Presort,
+    changed: &mut bool,
+) {
+    *changed |= ui
+        .checkbox(
+            &mut presort.enabled,
+            "Suggest known noise as C1 after each check",
+        )
+        .on_hover_text(
+            "Off: the results are raw. The Pre-sort button in the results runs it on demand.",
+        )
+        .changed();
+    ui.add_enabled_ui(presort.enabled, |ui| {
+        ui.horizontal(|ui| {
+            *changed |= ui
+                .add(
+                    egui::DragValue::new(&mut presort.depth_mm)
+                        .range(0.0..=200.0)
+                        .speed(0.5)
+                        .suffix(" mm"),
+                )
+                .changed();
+            ui.label(
+                RichText::new("Shallower overlaps are noise (0: off)")
+                    .small()
+                    .color(theme::text_muted()),
+            );
+        });
+        *changed |= ui
+            .checkbox(&mut presort.insulation, "Insulation around its own pipe or duct")
+            .changed();
+        *changed |= ui
+            .checkbox(&mut presort.same_element, "The same element in two models")
+            .changed();
+        *changed |= ui
+            .checkbox(&mut presort.openings, "Penetrations at a planned opening")
+            .on_hover_text("IfcOpeningElement, or elements named provision for void, udsparing or hulafsætning")
+            .changed();
+    });
 }

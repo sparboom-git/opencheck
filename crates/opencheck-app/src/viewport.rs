@@ -673,6 +673,16 @@ fn context_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     let item = |ui: &mut egui::Ui, enabled: bool, label: String| {
         ui.add_enabled(enabled, egui::Button::new(label)).clicked()
     };
+    // The Model tab has its properties panel; the others a window that can
+    // be closed and is brought back from here.
+    if app.tab != crate::app::Tab::Model {
+        if item(ui, true, format!("{}  Properties", icon::LIST_BULLETS)) {
+            app.properties.open = true;
+            app.properties.closed = false;
+            ui.close();
+        }
+        ui.separator();
+    }
     if item(
         ui,
         has_selection,
@@ -1079,7 +1089,7 @@ fn label_box(painter: &egui::Painter, pos: Pos2, align: Align2, text: &str, colo
 /// The tool bar's size: on a narrow view its buttons wrap onto more rows
 /// instead of being cut off.
 fn tool_bar_size(view: Rect) -> (f32, f32) {
-    const FULL_WIDTH: f32 = 510.0;
+    const FULL_WIDTH: f32 = 556.0;
     let width = FULL_WIDTH.min(view.width() - 16.0).max(60.0);
     let rows = (FULL_WIDTH / width).ceil();
     (width, 46.0 + (rows - 1.0) * 42.0)
@@ -1235,6 +1245,21 @@ fn tool_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
                 } else {
                     Walk::Off
                 };
+            }
+            if app.tab != crate::app::Tab::Model {
+                ui.separator();
+                if icon_button(
+                    ui,
+                    icon::LIST_BULLETS,
+                    app.properties.open,
+                    "Properties of the selected element",
+                )
+                .clicked()
+                {
+                    let open = !app.properties.open;
+                    app.properties.open = open;
+                    app.properties.closed = !open;
+                }
             }
             let filtered =
                 !app.view.hidden.is_empty() || isolated || app.view.storey_filter.is_some();

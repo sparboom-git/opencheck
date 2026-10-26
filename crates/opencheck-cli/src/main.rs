@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 mod autorun;
+mod mcp;
 
 use clap::{Parser, Subcommand};
 use opencheck_core::check::{
@@ -70,6 +71,9 @@ enum Command {
     },
     /// List the built-in rulesets.
     Rulesets,
+    /// MCP server for Claude Desktop: lets Claude review the findings of the
+    /// project open in the OpenCheck app (File → Claude connection).
+    Mcp,
     /// Run the checks of an autorun configuration (autorun.json, made in the
     /// app): history, dashboard and log go to its output folder.
     Autorun {
@@ -117,6 +121,7 @@ fn main() -> Result<()> {
             levels,
         } => export_ids(&output, standard.as_deref(), &levels),
         Command::Autorun { config, force } => autorun::autorun(&config, force),
+        Command::Mcp => mcp::serve(),
     }
 }
 
@@ -181,6 +186,7 @@ fn ids_ruleset(path: &PathBuf) -> Result<(Ruleset, (String, Arc<Ids>))> {
             zone: None,
             script: String::new(),
             params: Default::default(),
+            presort: Default::default(),
         }],
     };
     Ok((ruleset, (key, Arc::new(ids))))

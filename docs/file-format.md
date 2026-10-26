@@ -135,6 +135,32 @@ GlobalIds of the two elements, so the same problem gets the same id in every
 run and decisions survive re-running a check and updating models. Decisions
 are `accepted` (a real problem to handle) or `rejected` (not a problem).
 
+`ratings` (optional) holds suggested C402 categories, from the pre-sorting or
+from Claude, by finding id; `triage` (optional) holds the project's triage
+rules and the reviewer's corrections of suggestions. See
+[claude-triage.md](claude-triage.md).
+
+```json
+{
+  "ratings": [
+    { "finding": "3f2a9c1e-…", "category": "C1", "noise": true, "confidence": 0.95,
+      "reason": "Isolering på varmerør VF 3 mod eget rør.", "source": "claude",
+      "approved": "C1", "group": "a1b2c3d4e5f6", "at": "2026-10-26T10:00:00Z" }
+  ],
+  "triage": {
+    "rules": "Insulation against pipes in shafts is always C1.",
+    "examples": [
+      { "finding": "IfcDuctSegment \"Rund Kanal\" (VI 2) vs IfcBeam \"HEB300\", 120 mm, E2",
+        "suggested": "C1", "category": "C2", "reason": "…" }
+    ]
+  }
+}
+```
+
+`category` is `C1`, `C2` or `C3`; `source` is `presort` or `claude`;
+`approved` is the category the reviewer approved it as, absent while it is
+only suggested.
+
 ## issues.json
 
 The selected issues: findings the reviewer has picked out to be handled and

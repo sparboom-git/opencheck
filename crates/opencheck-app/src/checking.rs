@@ -1,6 +1,7 @@
 //! State of the Check tab: the project's rulesets, which models they run
 //! on, the last results and the reviewer's decisions on findings.
 
+use opencheck_core::triage::{Category, Rating, TriageFile};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -128,11 +129,60 @@ impl StatusFilter {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResultFilter {
     pub status: StatusFilter,
+    pub suggestion: SuggestionFilter,
     pub severity: Option<Severity>,
     /// `ruleset id / rule id`, or None for every rule.
     pub rule: Option<String>,
     /// Ruleset id shown on its own, or None for all rulesets.
     pub ruleset: Option<String>,
+}
+
+/// Which findings the results list shows by their suggested category.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SuggestionFilter {
+    #[default]
+    All,
+    /// No suggestion waiting for approval.
+    None,
+    Noise,
+    C1,
+    C2,
+    C3,
+}
+
+impl SuggestionFilter {
+    pub const ALL: [SuggestionFilter; 6] = [
+        SuggestionFilter::All,
+        SuggestionFilter::None,
+        SuggestionFilter::Noise,
+        SuggestionFilter::C1,
+        SuggestionFilter::C2,
+        SuggestionFilter::C3,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SuggestionFilter::All => "Suggested: all",
+            SuggestionFilter::None => "No suggestion",
+            SuggestionFilter::Noise => "Suggested noise",
+            SuggestionFilter::C1 => "Suggested C1",
+            SuggestionFilter::C2 => "Suggested C2",
+            SuggestionFilter::C3 => "Suggested C3",
+        }
+    }
+
+    /// Whether a finding with this suggestion (if any) is shown.
+    pub fn shows(self, rating: Option<&Rating>) -> bool {
+        let proposed = rating.filter(|r| r.is_proposed());
+        match self {
+            SuggestionFilter::All => true,
+            SuggestionFilter::None => proposed.is_none(),
+            SuggestionFilter::Noise => proposed.is_some_and(|r| r.noise),
+            SuggestionFilter::C1 => proposed.is_some_and(|r| r.category == Category::C1),
+            SuggestionFilter::C2 => proposed.is_some_and(|r| r.category == Category::C2),
+            SuggestionFilter::C3 => proposed.is_some_and(|r| r.category == Category::C3),
+        }
+    }
 }
 
 /// Disciplines of a pair in a fixed order, so "EL vs KON" and "KON vs EL" are one pair.
@@ -192,6 +242,13 @@ pub struct Checking {
     pub autorun: Option<opencheck_core::autorun::AutorunConfig>,
     /// Rules of the Visual Check tab.
     pub visual: Vec<opencheck_core::visual::VisualRule>,
+    /// Suggested (and approved) C402 categories per finding id, from the
+    /// pre-sorting or from Claude.
+    pub ratings: FxHashMap<String, Rating>,
+    /// The project's triage rules and the reviewer's corrections.
+    pub triage: TriageFile,
+    /// What the last pre-sorting did, shown next to its button.
+    pub presort_note: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -214,6 +271,18 @@ struct SavedChecking {
     /// Visual checking rules.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     visual: Vec<opencheck_core::visual::VisualRule>,
+    /// Suggested categories, by finding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    ratings: Vec<SavedRating>,
+    #[serde(default, skip_serializing_if = "TriageFile::is_empty")]
+    triage: TriageFile,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SavedRating {
+    finding: String,
+    #[serde(flatten)]
+    rating: Rating,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -340,6 +409,7 @@ impl Checking {
                     zone: None,
                     script: String::new(),
                     params: Default::default(),
+                    presort: Default::default(),
                 }],
             };
             self.add_ruleset(&ruleset.to_toml(), Some(&format!("ids-{stem}")))?;
@@ -507,6 +577,10 @@ impl Checking {
         self.report = Some(Arc::new(report));
         let index = &self.index;
         self.marked.retain(|id| index.contains_key(id));
+        // Suggestions are about the results at hand: a finding that is gone
+        // takes its suggestion with it. Decisions stay, so they apply again
+        // if the finding comes back.
+        self.ratings.retain(|id, _| index.contains_key(id));
         self.progress = None;
         self.stale = false;
         if self
@@ -585,6 +659,42 @@ impl Checking {
         };
     }
 
+    /// Approves the suggestion for a finding, as suggested or as
+    /// `category`: a C1 needs no action and is rejected, a C2 or C3 is a
+    /// problem to handle and is accepted (the caller makes the issue).
+    /// Returns the suggestion as it was and the category chosen, or None
+    /// when the finding has no suggestion waiting.
+    pub fn approve_rating(
+        &mut self,
+        id: &str,
+        category: Option<Category>,
+    ) -> Option<(Rating, Category)> {
+        let rating = self.ratings.get(id).filter(|r| r.is_proposed()).cloned()?;
+        let chosen = category.unwrap_or(rating.category);
+        let decision = match chosen {
+            Category::C1 => Decision::Rejected,
+            Category::C2 | Category::C3 => Decision::Accepted,
+        };
+        self.decide(id, Some(decision));
+        if let Some(r) = self.ratings.get_mut(id) {
+            r.approved = Some(chosen);
+        }
+        Some((rating, chosen))
+    }
+
+    /// Removes the suggestions waiting for `ids`; approved ones stay.
+    /// Returns how many were removed.
+    pub fn dismiss_ratings(&mut self, ids: &[String]) -> usize {
+        let mut removed = 0;
+        for id in ids {
+            if self.ratings.get(id).is_some_and(Rating::is_proposed) {
+                self.ratings.remove(id);
+                removed += 1;
+            }
+        }
+        removed
+    }
+
     /// Forgets a removed model in ruleset scopes.
     pub fn forget_model(&mut self, model: ModelId) {
         self.model_levels.remove(&model);
@@ -658,6 +768,19 @@ impl Checking {
             area: self.area,
             autorun: self.autorun.clone(),
             visual: self.visual.clone(),
+            ratings: {
+                let mut list: Vec<SavedRating> = self
+                    .ratings
+                    .iter()
+                    .map(|(finding, rating)| SavedRating {
+                        finding: finding.clone(),
+                        rating: rating.clone(),
+                    })
+                    .collect();
+                list.sort_by(|a, b| a.finding.cmp(&b.finding));
+                list
+            },
+            triage: self.triage.clone(),
             model_levels: {
                 let mut list: Vec<SavedLevel> = self
                     .model_levels
@@ -752,6 +875,12 @@ impl Checking {
         self.area = saved.area;
         self.autorun = saved.autorun;
         self.visual = saved.visual;
+        self.ratings = saved
+            .ratings
+            .into_iter()
+            .map(|r| (r.finding, r.rating))
+            .collect();
+        self.triage = saved.triage;
         self.model_levels = saved
             .model_levels
             .into_iter()
@@ -775,6 +904,7 @@ fn sanitize(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opencheck_core::triage::TriageExample;
 
     #[test]
     fn settings_round_trip_through_json() {
@@ -785,6 +915,19 @@ mod tests {
         checking.rulesets[1].models = Some(vec![b]);
         checking.rulesets[0].enabled = false;
         checking.decide("x", Some(Decision::Accepted));
+        checking
+            .ratings
+            .insert("p".to_owned(), rating(Category::C2, None));
+        checking
+            .ratings
+            .insert("q".to_owned(), rating(Category::C1, Some(Category::C2)));
+        checking.triage.rules = "Isolering mod eget rør er altid C1.".to_owned();
+        checking.triage.examples.push(TriageExample {
+            finding: "IfcCovering vs IfcPipeSegment, 12 mm, E2".to_owned(),
+            suggested: Category::C2,
+            category: Category::C1,
+            reason: "x".to_owned(),
+        });
         let json = checking.to_json(&[a, b]);
 
         let mut loaded = Checking::default();
@@ -797,6 +940,149 @@ mod tests {
         assert_eq!(loaded.rulesets[1].models, Some(vec![b2]));
         assert_eq!(loaded.decisions.get("x"), Some(&Decision::Accepted));
         assert_eq!(loaded.jobs(&[a2, b2]).len(), 1);
+        assert_eq!(loaded.ratings, checking.ratings);
+        assert_eq!(loaded.triage, checking.triage);
+    }
+
+    fn rating(category: Category, approved: Option<Category>) -> Rating {
+        Rating {
+            category,
+            noise: false,
+            confidence: 0.7,
+            reason: "because".to_owned(),
+            source: opencheck_core::triage::Source::Claude,
+            approved,
+            group: String::new(),
+            image: false,
+            at: String::new(),
+        }
+    }
+
+    #[test]
+    fn suggestion_filter_looks_at_suggestions_waiting_for_approval() {
+        let proposed = rating(Category::C2, None);
+        let approved = rating(Category::C2, Some(Category::C2));
+        let noise = Rating {
+            noise: true,
+            ..rating(Category::C1, None)
+        };
+        assert!(SuggestionFilter::All.shows(None));
+        assert!(SuggestionFilter::None.shows(None));
+        assert!(SuggestionFilter::None.shows(Some(&approved)));
+        assert!(!SuggestionFilter::None.shows(Some(&proposed)));
+        assert!(SuggestionFilter::C2.shows(Some(&proposed)));
+        assert!(!SuggestionFilter::C2.shows(Some(&approved)));
+        assert!(!SuggestionFilter::C1.shows(Some(&proposed)));
+        assert!(SuggestionFilter::Noise.shows(Some(&noise)));
+        assert!(SuggestionFilter::C1.shows(Some(&noise)));
+        assert!(!SuggestionFilter::Noise.shows(Some(&proposed)));
+    }
+
+    #[test]
+    fn approving_a_suggestion_decides_the_finding() {
+        let mut checking = Checking::default();
+        checking
+            .ratings
+            .insert("c1".to_owned(), rating(Category::C1, None));
+        checking
+            .ratings
+            .insert("c2".to_owned(), rating(Category::C2, None));
+        checking
+            .ratings
+            .insert("c3".to_owned(), rating(Category::C3, None));
+
+        // As suggested: a C1 is not a problem, a C2 or C3 is.
+        let (was, chosen) = checking.approve_rating("c1", None).unwrap();
+        assert_eq!((was.category, chosen), (Category::C1, Category::C1));
+        assert_eq!(checking.decisions.get("c1"), Some(&Decision::Rejected));
+        assert_eq!(checking.ratings["c1"].approved, Some(Category::C1));
+        checking.approve_rating("c3", None).unwrap();
+        assert_eq!(checking.decisions.get("c3"), Some(&Decision::Accepted));
+
+        // As another category: the suggestion stays as it was, approved as the other.
+        let (was, chosen) = checking.approve_rating("c2", Some(Category::C1)).unwrap();
+        assert_eq!((was.category, chosen), (Category::C2, Category::C1));
+        assert_eq!(checking.decisions.get("c2"), Some(&Decision::Rejected));
+        assert_eq!(checking.ratings["c2"].category, Category::C2);
+        assert_eq!(checking.ratings["c2"].approved, Some(Category::C1));
+
+        // Approved and unknown findings have nothing waiting.
+        assert!(checking.approve_rating("c1", Some(Category::C3)).is_none());
+        assert!(checking.approve_rating("nope", None).is_none());
+        assert_eq!(checking.decisions.get("c1"), Some(&Decision::Rejected));
+    }
+
+    #[test]
+    fn dismissing_removes_waiting_suggestions_only() {
+        let mut checking = Checking::default();
+        checking
+            .ratings
+            .insert("p".to_owned(), rating(Category::C2, None));
+        checking
+            .ratings
+            .insert("a".to_owned(), rating(Category::C2, Some(Category::C2)));
+        let ids: Vec<String> = ["p", "a", "nope"].map(String::from).to_vec();
+        assert_eq!(checking.dismiss_ratings(&ids), 1);
+        assert!(!checking.ratings.contains_key("p"));
+        assert!(checking.ratings.contains_key("a"));
+        assert_eq!(checking.dismiss_ratings(&ids), 0);
+    }
+
+    #[test]
+    fn a_run_drops_the_suggestions_of_findings_that_are_gone() {
+        use opencheck_core::Aabb;
+        use opencheck_core::check::{FindingElement, FindingKind};
+
+        let mut checking = Checking::default();
+        checking.add_builtin(0);
+        let ruleset = checking.rulesets[0].ruleset.clone();
+        let element = |global_id: &str| FindingElement {
+            model: ModelId(1),
+            express_id: 1,
+            global_id: global_id.to_owned(),
+            name: String::new(),
+            ifc_class: "IfcWall".to_owned(),
+        };
+        let finding = Finding {
+            id: "kept".to_owned(),
+            kind: FindingKind::Clash,
+            a: element("a"),
+            b: element("b"),
+            point: glam::Vec3::ZERO,
+            region: Aabb::EMPTY,
+            magnitude: 0.0,
+            category: String::new(),
+            details: Vec::new(),
+            zones: Vec::new(),
+        };
+        let report = CheckReport {
+            rulesets: vec![RulesetResult {
+                info: ruleset.ruleset.clone(),
+                rules: vec![RuleResult {
+                    rule: ruleset.rules[0].clone(),
+                    findings: vec![finding],
+                    pairs_tested: 1,
+                    duration: Default::default(),
+                    information: None,
+                    notes: Vec::new(),
+                }],
+                models: vec![ModelId(1)],
+            }],
+            duration: Default::default(),
+        };
+
+        checking
+            .ratings
+            .insert("kept".to_owned(), rating(Category::C2, None));
+        checking
+            .ratings
+            .insert("gone".to_owned(), rating(Category::C1, Some(Category::C1)));
+        checking.decide("gone", Some(Decision::Rejected));
+        checking.finish_run(report);
+        assert!(checking.ratings.contains_key("kept"));
+        assert!(!checking.ratings.contains_key("gone"));
+        // Decisions are kept, so they apply again if the finding comes back.
+        assert_eq!(checking.decisions.get("gone"), Some(&Decision::Rejected));
     }
 
     #[test]

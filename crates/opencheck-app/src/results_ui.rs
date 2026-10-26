@@ -14,10 +14,13 @@ use opencheck_core::check::{
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::app::{IssueTarget, OpenCheckApp};
-use crate::checking::{Decision, PairKey, ResultsTab, StatusFilter, pair_key, rule_key};
+use crate::checking::{
+    Decision, PairKey, ResultsTab, StatusFilter, SuggestionFilter, pair_key, rule_key,
+};
 use crate::checking_ui::{FOCUS_A, FOCUS_B, accepted, dot, panel_frame, severity_color};
 use crate::theme::discipline_color;
 use crate::{issues_ui, theme};
+use opencheck_core::triage::{Category, Rating};
 
 pub fn element_label(e: &FindingElement) -> &str {
     if e.name.is_empty() {
@@ -161,7 +164,7 @@ fn visible_rows<'a>(app: &'a OpenCheckApp, report: &'a CheckReport) -> Vec<Row<'
                     StatusFilter::Accepted => decision == Some(&Decision::Accepted),
                     StatusFilter::Rejected => decision == Some(&Decision::Rejected),
                     StatusFilter::Issues => with_issue.contains(f.id.as_str()),
-                };
+                } && filter.suggestion.shows(app.checking.ratings.get(&f.id));
                 let disciplines = (
                     app.federation.get(f.a.model).map(|m| m.discipline),
                     app.federation.get(f.b.model).map(|m| m.discipline),
@@ -264,6 +267,10 @@ struct Actions {
     /// Open the "where to look" editor on (item, part).
     adapt: Option<(String, String)>,
     decide: Option<(Vec<String>, Option<Decision>)>,
+    /// Approve the suggestions, as suggested or as a category.
+    approve: Option<(Vec<String>, Option<Category>)>,
+    dismiss: Option<Vec<String>>,
+    presort: bool,
     add_issues: Option<(Vec<String>, IssueTarget)>,
     step: Option<isize>,
     group_by: Option<(PairKey, Discipline)>,
@@ -398,6 +405,7 @@ fn results(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         ordered.extend(order(info_pairs));
     }
     let mut actions = Actions::default();
+    suggestions_bar(app, ui, &report, &mut actions);
     selection_bar(app, ui, &mut actions);
     ui.separator();
 
@@ -802,6 +810,14 @@ fn filters(app: &mut OpenCheckApp, ui: &mut egui::Ui, report: &CheckReport) {
             .show_ui(ui, |ui| {
                 for s in StatusFilter::ALL {
                     ui.selectable_value(&mut filter.status, s, s.label());
+                }
+            });
+        egui::ComboBox::from_id_salt("filter_suggestion")
+            .selected_text(filter.suggestion.label())
+            .width(130.0)
+            .show_ui(ui, |ui| {
+                for s in SuggestionFilter::ALL {
+                    ui.selectable_value(&mut filter.suggestion, s, s.label());
                 }
             });
         egui::ComboBox::from_id_salt("filter_severity")
@@ -1323,6 +1339,9 @@ fn finding_row(app: &OpenCheckApp, ui: &mut egui::Ui, row: &Row, actions: &mut A
             }
         };
         ui.label(RichText::new(glyph).color(color));
+        if let Some(r) = app.checking.ratings.get(&f.id) {
+            rating_chip(ui, r);
+        }
         let text = if f.is_single() {
             element_label(&f.a).to_owned()
         } else {
@@ -1487,6 +1506,26 @@ fn selection_bar(app: &OpenCheckApp, ui: &mut egui::Ui, actions: &mut Actions) {
                 if ui.button(format!("{}  Reject", icon::X)).clicked() {
                     actions.decide = Some((marked.clone(), Some(Decision::Rejected)));
                 }
+                let suggested = marked
+                    .iter()
+                    .filter(|id| {
+                        app.checking
+                            .ratings
+                            .get(*id)
+                            .is_some_and(Rating::is_proposed)
+                    })
+                    .count();
+                if suggested > 0
+                    && ui
+                        .button(format!(
+                            "{}  Approve suggestions ({suggested})",
+                            icon::SPARKLE
+                        ))
+                        .on_hover_text(APPROVE_HELP)
+                        .clicked()
+                {
+                    actions.approve = Some((marked.clone(), None));
+                }
                 if ui
                     .button(format!("{}  Show", icon::EYE))
                     .on_hover_text("Show the selected findings in 3D")
@@ -1587,6 +1626,9 @@ fn finding_detail(app: &OpenCheckApp, ui: &mut egui::Ui, id: &str, actions: &mut
             );
         });
     }
+    if let Some(r) = app.checking.ratings.get(id) {
+        suggestion_box(ui, id, r, actions);
+    }
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         let one = vec![id.to_owned()];
@@ -1682,6 +1724,17 @@ fn apply(app: &mut OpenCheckApp, actions: Actions, order: &[String]) {
             app.focus_finding(&next);
         }
     }
+    if actions.presort {
+        let n = app.presort(true);
+        app.checking.presort_note = Some(format!("Pre-sorting suggested {n} findings as noise."));
+    }
+    if let Some((ids, category)) = actions.approve {
+        app.approve_ratings(&ids, category);
+        app.refresh_finding_focus();
+    }
+    if let Some(ids) = actions.dismiss {
+        app.dismiss_ratings(&ids);
+    }
     if let Some(offset) = actions.step
         && let Some(current) = app.checking.selected.clone()
         && let Some(at) = order.iter().position(|o| *o == current)
@@ -1690,4 +1743,199 @@ fn apply(app: &mut OpenCheckApp, actions: Actions, order: &[String]) {
         let id = order[next].clone();
         app.focus_finding(&id);
     }
+}
+
+const APPROVE_HELP: &str =
+    "C1 becomes not a problem (no action needed); C2 and C3 become issues with that priority";
+
+/// The suggested category of a finding as a small coloured tag.
+fn rating_chip(ui: &mut egui::Ui, r: &Rating) {
+    let code = r.approved.unwrap_or(r.category);
+    let color = severity_color(code.severity());
+    let text = if r.is_proposed() {
+        format!(
+            "{}{} {:.0}%",
+            code.code(),
+            if r.noise { "·noise" } else { "" },
+            r.confidence * 100.0
+        )
+    } else {
+        format!("{} {}", icon::CHECK, code.code())
+    };
+    let text = RichText::new(text).small().color(if r.is_proposed() {
+        color
+    } else {
+        theme::text_muted()
+    });
+    ui.label(text).on_hover_text(format!(
+        "{} suggested {}{} ({:.0} % sure){}\n{}",
+        r.source.label(),
+        r.category.code(),
+        if r.noise { ", noise" } else { "" },
+        r.confidence * 100.0,
+        r.approved
+            .map(|a| format!(", approved as {}", a.code()))
+            .unwrap_or_default(),
+        r.reason
+    ));
+}
+
+/// Suggestions waiting for approval: counts, bulk approval and pre-sorting.
+fn suggestions_bar(
+    app: &OpenCheckApp,
+    ui: &mut egui::Ui,
+    report: &CheckReport,
+    actions: &mut Actions,
+) {
+    let proposed: Vec<(&String, &Rating)> = app
+        .checking
+        .ratings
+        .iter()
+        .filter(|(id, r)| r.is_proposed() && app.checking.find(id).is_some())
+        .collect();
+    let has_clashes = report
+        .rulesets
+        .iter()
+        .flat_map(|r| &r.rules)
+        .any(|r| r.rule.kind == opencheck_core::check::RuleKind::Clash);
+    if proposed.is_empty() && !has_clashes {
+        return;
+    }
+    ui.horizontal_wrapped(|ui| {
+        if !proposed.is_empty() {
+            let count = |c: Category| proposed.iter().filter(|(_, r)| r.category == c).count();
+            let noise = proposed.iter().filter(|(_, r)| r.noise).count();
+            ui.label(RichText::new(icon::SPARKLE).color(theme::accent()));
+            ui.label(
+                RichText::new(format!(
+                    "Suggested: C3 {} · C2 {} · C1 {} ({noise} noise)",
+                    count(Category::C3),
+                    count(Category::C2),
+                    count(Category::C1)
+                ))
+                .small(),
+            );
+            ui.menu_button(format!("{}  Approve", icon::CHECK), |ui| {
+                ui.set_min_width(300.0);
+                let pick = |f: &dyn Fn(&Rating) -> bool| -> Vec<String> {
+                    proposed
+                        .iter()
+                        .filter(|(_, r)| f(r))
+                        .map(|(id, _)| (*id).clone())
+                        .collect()
+                };
+                let options: [(&str, Vec<String>); 4] = [
+                    (
+                        "Noise, 90 % sure or more",
+                        pick(&|r| r.noise && r.confidence >= 0.9),
+                    ),
+                    (
+                        "All C1, 90 % sure or more",
+                        pick(&|r| r.category == Category::C1 && r.confidence >= 0.9),
+                    ),
+                    (
+                        "All suggestions, 90 % sure or more",
+                        pick(&|r| r.confidence >= 0.9),
+                    ),
+                    ("All suggestions", pick(&|_| true)),
+                ];
+                for (label, ids) in options {
+                    let button = egui::Button::new(format!("{label} ({})", ids.len()));
+                    if ui.add_enabled(!ids.is_empty(), button).clicked() {
+                        actions.approve = Some((ids, None));
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                ui.label(
+                    RichText::new(APPROVE_HELP)
+                        .small()
+                        .color(theme::text_muted()),
+                );
+            });
+        }
+        if has_clashes
+            && ui
+                .button(format!("{}  Pre-sort", icon::FUNNEL))
+                .on_hover_text(
+                    "Suggest known noise as C1 by fixed rules: insulation around its own pipe, \
+                     the same element twice, shallow overlaps, planned openings. Uses each clash \
+                     rule's settings.",
+                )
+                .clicked()
+        {
+            actions.presort = true;
+        }
+        if let Some(note) = &app.checking.presort_note {
+            ui.label(RichText::new(note).small().color(theme::text_muted()));
+        }
+    });
+}
+
+/// The suggestion for the finding under review, with approve, change and
+/// dismiss.
+fn suggestion_box(ui: &mut egui::Ui, id: &str, r: &Rating, actions: &mut Actions) {
+    egui::Frame::new()
+        .fill(theme::accent_soft())
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(8, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(icon::SPARKLE).color(theme::accent()));
+                let head = match r.approved {
+                    Some(a) => format!("Approved as {}", crate::c402::label(a.severity())),
+                    None => format!(
+                        "{} suggests {}{}",
+                        r.source.label(),
+                        crate::c402::label(r.category.severity()),
+                        if r.noise { ", noise" } else { "" }
+                    ),
+                };
+                ui.label(RichText::new(head).strong());
+                ui.label(
+                    RichText::new(format!("{:.0} % sure", r.confidence * 100.0))
+                        .small()
+                        .color(theme::text_muted()),
+                );
+            });
+            ui.add(egui::Label::new(&r.reason).wrap());
+            if r.is_proposed() {
+                ui.horizontal(|ui| {
+                    let one = vec![id.to_owned()];
+                    let hint = match r.category {
+                        Category::C1 => "Not a problem: no action needed",
+                        _ => "Becomes an issue with this priority",
+                    };
+                    if ui
+                        .button(format!("{}  Approve", icon::CHECK))
+                        .on_hover_text(hint)
+                        .clicked()
+                    {
+                        actions.approve = Some((one.clone(), None));
+                    }
+                    ui.menu_button("Approve as", |ui| {
+                        for c in [Category::C3, Category::C2, Category::C1] {
+                            if c != r.category
+                                && ui.button(crate::c402::label(c.severity())).clicked()
+                            {
+                                actions.approve = Some((one.clone(), Some(c)));
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "Approve as another category; kept as an example for the next review",
+                    );
+                    if ui
+                        .button("Dismiss")
+                        .on_hover_text("Remove the suggestion")
+                        .clicked()
+                    {
+                        actions.dismiss = Some(one);
+                    }
+                });
+            }
+        });
 }

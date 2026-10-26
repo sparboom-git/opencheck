@@ -11,6 +11,8 @@ mod c402;
 mod camera;
 mod checking;
 mod checking_ui;
+#[cfg(not(target_arch = "wasm32"))]
+mod claude_link;
 mod dialog;
 mod export;
 mod issue_dialog;
@@ -31,6 +33,7 @@ mod session;
 mod snap;
 mod standard_editor;
 mod theme;
+mod triage;
 mod viewport;
 mod visual_ui;
 

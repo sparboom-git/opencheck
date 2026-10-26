@@ -23,6 +23,7 @@ mod model;
 pub mod project;
 mod properties;
 mod spatial;
+pub mod triage;
 pub mod visual;
 
 pub use discipline::Discipline;

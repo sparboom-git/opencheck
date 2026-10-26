@@ -316,6 +316,9 @@ pub struct Rule {
     /// fields in the app. Lengths are in millimetres by convention.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub params: std::collections::BTreeMap<String, f64>,
+    /// Clash: which findings OpenCheck marks as noise by fixed rules.
+    #[serde(default, skip_serializing_if = "crate::triage::Presort::is_default")]
+    pub presort: crate::triage::Presort,
 }
 
 fn is_zero(v: &f32) -> bool {

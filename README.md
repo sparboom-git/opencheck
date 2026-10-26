@@ -170,6 +170,22 @@ window shows the rights the server gives you in the project, and a
 connection log helps when a server refuses something. See
 [docs/bcf-live.md](docs/bcf-live.md).
 
+### Clash triage with Claude
+
+A check often gives thousands of findings of which only a few matter.
+*File → Claude connection…* lets **Claude Desktop** review the findings of
+the open project through an MCP server (`opencheck mcp`): it works through
+groups of alike findings and suggests a C402 category for each (C1 not
+critical, which includes all noise; C2 critical; C3 very critical), with how
+sure it is and a short reason. The suggestions show up in the Check tab as
+they come in; approved C1 findings are marked not a problem, C2 and C3 become
+issues with that priority. Corrections are kept as examples in the project's
+triage file, so the next review follows the project's practice. Pre-sorting,
+switched on per clash rule, marks known noise (insulation around its own
+pipe, the same element twice, shallow overlaps, planned openings) before
+anyone looks. Claude only suggests; it cannot approve or change anything. See
+[docs/claude-triage.md](docs/claude-triage.md).
+
 ### Visual Check
 
 The *Visual Check* tab colours the model, so a pattern or a break in it
@@ -223,8 +239,8 @@ is remembered.
 
 A project is saved as one `.opencheck` file: a ZIP archive holding the IFC
 files unchanged, the rulesets, IDS files, information requirements, checking
-decisions, the working area, the visual checks, the autorun configuration,
-issues and the view state. See
+decisions, suggested categories and the triage file, the working area, the
+visual checks, the autorun configuration, issues and the view state. See
 [docs/file-format.md](docs/file-format.md). Sign-ins to BCF servers are kept
 per user, never in the project file.
 
@@ -241,6 +257,7 @@ opencheck check ARK.ifc KON.ifc VEN.ifc --all
 opencheck check ARK.ifc KON.ifc --ruleset information-lod-dk.toml --level 325
 opencheck check ARK.ifc KON.ifc --ids delivery.ids
 opencheck export-ids lod-300.ids --level 300
+opencheck mcp
 opencheck autorun \\server\share\project\OpenCheck\autorun.json
 ```
 
@@ -248,14 +265,17 @@ opencheck autorun \\server\share\project\OpenCheck\autorun.json
 
 | Crate | Purpose |
 |---|---|
-| `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine (clashes, clearances, duplicates, free zones, Rhai script rules), visual checks (alignment, pipe and duct systems with their port network, drain fall, storeys), information requirements and IDS, BCF data and files, project files, autorun runs and the dashboard |
-| `opencheck-cli` | The `opencheck` command line tool, including `autorun` |
-| `opencheck-app` | The application, for the desktop and the browser: federated 3D viewer (egui + wgpu), checking, visual checks, issues, reports, BCF Live and the autorun setup |
+| `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine (clashes, clearances, duplicates, free zones, Rhai script rules), visual checks (alignment, pipe and duct systems with their port network, drain fall, storeys), triage of findings (C402 categories, groups, pre-sorting), information requirements and IDS, BCF data and files, project files, autorun runs and the dashboard |
+| `opencheck-cli` | The `opencheck` command line tool, including `autorun` and the `mcp` server for Claude Desktop |
+| `opencheck-app` | The application, for the desktop and the browser: federated 3D viewer (egui + wgpu), checking, visual checks, issues, reports, BCF Live, the autorun setup and the Claude connection |
 
 IFC parsing and tessellation are provided by
 [ifc-lite](https://github.com/LTplus-AG/ifc-lite) (MPL-2.0). OpenCheck wraps it
 in its own types in `opencheck-core`, so the rest of the code does not depend on
-the ifc-lite API.
+the ifc-lite API. The wiki's
+[Architecture](https://github.com/sparboom-git/opencheck/wiki/Architecture)
+page describes how the crates work together, what is stored where, and what
+leaves your computer (nothing, unless you switch a connection on).
 
 ## Building
 
