@@ -271,6 +271,8 @@ struct Actions {
     approve: Option<(Vec<String>, Option<Category>)>,
     dismiss: Option<Vec<String>>,
     presort: bool,
+    /// Select one element of the finding (its properties then show).
+    select: Option<crate::scene::ElementRef>,
     add_issues: Option<(Vec<String>, IssueTarget)>,
     step: Option<isize>,
     group_by: Option<(PairKey, Discipline)>,
@@ -437,7 +439,7 @@ fn results(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         ui.separator();
         finding_detail(app, ui, &id, &mut actions);
     }
-    apply(app, actions, &ordered);
+    apply(app, actions, &ordered, true);
 }
 
 /// Rulesets as tabs: all of them, or one at a time, with their counts.
@@ -1618,7 +1620,16 @@ fn finding_detail(app: &OpenCheckApp, ui: &mut egui::Ui, id: &str, actions: &mut
                 .get(element.model)
                 .map(|m| m.short_name.clone())
                 .unwrap_or_default();
-            ui.label(RichText::new(element_label(element)).strong());
+            if ui
+                .add(egui::Button::new(RichText::new(element_label(element)).strong()).frame(false))
+                .on_hover_text("Select it, to see its properties")
+                .clicked()
+            {
+                actions.select = Some(crate::scene::ElementRef {
+                    model: element.model,
+                    express_id: element.express_id,
+                });
+            }
             ui.label(
                 RichText::new(format!("{} · {model}", element.ifc_class))
                     .small()
@@ -1665,7 +1676,9 @@ fn finding_detail(app: &OpenCheckApp, ui: &mut egui::Ui, id: &str, actions: &mut
     });
 }
 
-fn apply(app: &mut OpenCheckApp, actions: Actions, order: &[String]) {
+/// `advance`: after a decision, move on to the next undecided finding (the
+/// results list), or stay (the finding window of a marker).
+fn apply(app: &mut OpenCheckApp, actions: Actions, order: &[String], advance: bool) {
     if actions.close {
         app.checking.selected = None;
         app.refresh_finding_focus();
@@ -1712,7 +1725,8 @@ fn apply(app: &mut OpenCheckApp, actions: Actions, order: &[String]) {
         }
         app.session.dirty = true;
         // Reviewing one at a time: move on to the next undecided finding.
-        if decision.is_some()
+        if advance
+            && decision.is_some()
             && ids.len() == 1
             && let Some(current) = current
             && let Some(at) = order.iter().position(|o| *o == current)
@@ -1723,6 +1737,10 @@ fn apply(app: &mut OpenCheckApp, actions: Actions, order: &[String]) {
         {
             app.focus_finding(&next);
         }
+    }
+    if let Some(element) = actions.select {
+        app.view.selection = vec![element];
+        app.view.modes_dirty = true;
     }
     if actions.presort {
         let n = app.presort(true);
@@ -1938,4 +1956,283 @@ fn suggestion_box(ui: &mut egui::Ui, id: &str, r: &Rating, actions: &mut Actions
                 });
             }
         });
+}
+
+// ---- Markers in the 3D view ---------------------------------------------------
+
+/// A finding as a marker in the 3D view.
+pub struct MarkerSource {
+    pub id: String,
+    pub point: glam::Vec3,
+    /// The elements the finding is about: their own geometry does not hide
+    /// the marker.
+    pub elements: [crate::scene::ElementRef; 2],
+    pub color: Color32,
+    pub state: MarkerState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkerState {
+    /// Nobody has taken a stand on it yet.
+    New,
+    /// Accepted or rejected.
+    Decided,
+    /// In an issue.
+    Issue,
+}
+
+/// The findings the Check tab's filters let through, as markers: for now
+/// clashes. The colour is the category (approved, or suggested), else the
+/// rule's severity.
+pub fn marker_sources(app: &OpenCheckApp) -> Vec<MarkerSource> {
+    let Some(report) = app.checking.report.clone() else {
+        return Vec::new();
+    };
+    let with_issue = issue_findings(app);
+    visible_rows(app, &report)
+        .into_iter()
+        .filter(|r| r.finding.kind == FindingKind::Clash)
+        .map(|r| {
+            let f = r.finding;
+            let severity = app
+                .checking
+                .ratings
+                .get(&f.id)
+                .map_or(r.rule.rule.severity, |rating| {
+                    rating.approved.unwrap_or(rating.category).severity()
+                });
+            let state = if with_issue.contains(f.id.as_str()) {
+                MarkerState::Issue
+            } else if app.checking.decisions.contains_key(&f.id) {
+                MarkerState::Decided
+            } else {
+                MarkerState::New
+            };
+            let element = |e: &FindingElement| crate::scene::ElementRef {
+                model: e.model,
+                express_id: e.express_id,
+            };
+            MarkerSource {
+                id: f.id.clone(),
+                point: f.point,
+                elements: [element(&f.a), element(&f.b)],
+                color: severity_color(severity),
+                state,
+            }
+        })
+        .collect()
+}
+
+/// What hovering over a marker shows.
+pub fn marker_card(app: &OpenCheckApp, ui: &mut egui::Ui, id: &str) {
+    let Some((_, rule, f)) = app.checking.find(id) else {
+        return;
+    };
+    ui.label(RichText::new(&rule.rule.name).strong());
+    let element = |e: &FindingElement| {
+        let model = app
+            .federation
+            .get(e.model)
+            .map(|m| m.short_name.clone())
+            .unwrap_or_default();
+        let system = app
+            .federation
+            .get(e.model)
+            .and_then(|m| m.element(e.express_id))
+            .and_then(|el| el.systems.first().cloned())
+            .map(|s| format!(" · {s}"))
+            .unwrap_or_default();
+        format!("{} [{}]{system}\n{model}", element_label(e), e.ifc_class)
+    };
+    for (e, color) in [(&f.a, FOCUS_A), (&f.b, FOCUS_B)] {
+        ui.horizontal(|ui| {
+            swatch(ui, color);
+            ui.label(RichText::new(element(e)).small());
+        });
+    }
+    let storey = app.view.storey_of(crate::scene::ElementRef {
+        model: f.a.model,
+        express_id: f.a.express_id,
+    });
+    ui.label(
+        RichText::new(format!(
+            "{}{}",
+            magnitude_text(f),
+            storey.map(|s| format!(" · {s}")).unwrap_or_default()
+        ))
+        .small()
+        .color(theme::text_muted()),
+    );
+    let status = if app.issues.for_finding(id).is_some() {
+        Some("In an issue")
+    } else {
+        match app.checking.decisions.get(id) {
+            Some(Decision::Accepted) => Some("Accepted"),
+            Some(Decision::Rejected) => Some("Rejected: not a problem"),
+            None => None,
+        }
+    };
+    if let Some(status) = status {
+        ui.label(RichText::new(status).small());
+    }
+    if let Some(r) = app.checking.ratings.get(id) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(icon::SPARKLE).color(theme::accent()));
+            rating_chip(ui, r);
+        });
+        ui.label(RichText::new(&r.reason).small());
+    }
+    ui.label(
+        RichText::new("Click for the finding")
+            .small()
+            .color(theme::text_muted()),
+    );
+}
+
+/// The finding chosen from a marker, with the same actions as in the
+/// results list, in a window of its own.
+pub fn finding_window(app: &mut OpenCheckApp, ctx: &egui::Context) {
+    if !app.finding_window_open {
+        return;
+    }
+    let mut open = true;
+    let dialog = crate::dialog::Dialog {
+        id: "finding",
+        icon: icon::CROSSHAIR,
+        title: "Finding",
+        size: egui::vec2(400.0, 420.0),
+        min: egui::vec2(280.0, 180.0),
+        scroll: crate::dialog::Scroll::Both,
+    };
+    crate::dialog::show(ctx, &dialog, &mut open, |ui| {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+        let Some(id) = app.checking.selected.clone() else {
+            ui.label(
+                RichText::new("Click a marker in the 3D view, or a finding in the Check tab.")
+                    .color(theme::text_muted()),
+            );
+            return;
+        };
+        let order: Vec<String> = app
+            .checking
+            .report
+            .clone()
+            .map(|report| {
+                visible_rows(app, &report)
+                    .iter()
+                    .map(|r| r.finding.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut actions = Actions::default();
+        finding_detail(app, ui, &id, &mut actions);
+        apply(app, actions, &order, false);
+    });
+    if !open {
+        app.finding_window_open = false;
+    }
+}
+
+/// Which clashes the markers show: the Check tab's filters (one set for
+/// both), and how far away.
+pub fn marker_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
+    ui.set_min_width(240.0);
+    let mut on = app.markers.on;
+    if ui.checkbox(&mut on, "Show clash markers (K)").changed() {
+        app.markers.toggle();
+    }
+    ui.horizontal(|ui| {
+        ui.label("Within");
+        ui.add(
+            egui::DragValue::new(&mut app.markers.distance)
+                .range(2.0..=200.0)
+                .speed(0.5)
+                .max_decimals(0)
+                .suffix(" m"),
+        );
+        ui.label(
+            RichText::new("of the eye when walking")
+                .small()
+                .color(theme::text_muted()),
+        );
+    });
+    ui.separator();
+    ui.label(
+        RichText::new("Which clashes (also the Check tab's list)")
+            .small()
+            .color(theme::text_muted()),
+    );
+    let report = app.checking.report.clone();
+    let filter = &mut app.checking.filter;
+    ui.menu_button(filter.status.label(), |ui| {
+        for s in StatusFilter::ALL {
+            if ui
+                .selectable_value(&mut filter.status, s, s.label())
+                .clicked()
+            {
+                ui.close();
+            }
+        }
+    });
+    ui.menu_button(filter.suggestion.label(), |ui| {
+        for s in SuggestionFilter::ALL {
+            if ui
+                .selectable_value(&mut filter.suggestion, s, s.label())
+                .clicked()
+            {
+                ui.close();
+            }
+        }
+    });
+    ui.menu_button(
+        filter.severity.map_or("Severity: all", |s| s.label()),
+        |ui| {
+            let mut chosen = filter.severity;
+            ui.selectable_value(&mut chosen, None, "Severity: all");
+            for s in [Severity::Critical, Severity::Moderate, Severity::Low] {
+                ui.selectable_value(&mut chosen, Some(s), s.label());
+            }
+            if chosen != filter.severity {
+                filter.severity = chosen;
+                ui.close();
+            }
+        },
+    );
+    if let Some(report) = report {
+        let rule_name = filter
+            .rule
+            .as_ref()
+            .and_then(|key| {
+                report.rulesets.iter().find_map(|rs| {
+                    rs.rules
+                        .iter()
+                        .find(|r| rule_key(&rs.info.id, &r.rule.id) == *key)
+                        .map(|r| r.rule.name.clone())
+                })
+            })
+            .unwrap_or_else(|| "Rule: all".to_owned());
+        ui.menu_button(rule_name, |ui| {
+            let mut chosen = filter.rule.clone();
+            ui.selectable_value(&mut chosen, None, "Rule: all");
+            for rs in &report.rulesets {
+                for r in &rs.rules {
+                    let key = rule_key(&rs.info.id, &r.rule.id);
+                    ui.selectable_value(&mut chosen, Some(key), &r.rule.name)
+                        .on_hover_text(&rs.info.name);
+                }
+            }
+            if chosen != filter.rule {
+                filter.rule = chosen;
+                ui.close();
+            }
+        });
+    }
+    if *filter != crate::checking::ResultFilter::default()
+        && ui
+            .button(format!("{}  Show all clashes", icon::X))
+            .clicked()
+    {
+        *filter = crate::checking::ResultFilter::default();
+        ui.close();
+    }
 }

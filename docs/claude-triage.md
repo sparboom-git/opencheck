@@ -87,7 +87,7 @@ OpenCheck can mark known noise as C1 by fixed rules before anyone looks:
 - the same element (same GlobalId) in two models;
 - overlaps shallower than a limit (10 mm by default);
 - penetrations at a planned opening (`IfcOpeningElement`, or elements named
-  *provision for void*, *udsparing* or *hulafsætning*).
+  *provision for void*, *opening*, *udsparing* or *hulafsætning*).
 
 The first run of a check is raw. Pre-sorting is switched on per clash rule
 in the Ruleset Manager (*Pre-sorting*), with each fixed rule and the depth

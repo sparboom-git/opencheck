@@ -1927,7 +1927,7 @@ fn presort_settings(
             .changed();
         *changed |= ui
             .checkbox(&mut presort.openings, "Penetrations at a planned opening")
-            .on_hover_text("IfcOpeningElement, or elements named provision for void, udsparing or hulafsætning")
+            .on_hover_text("IfcOpeningElement, or elements named provision for void, opening, udsparing or hulafsætning")
             .changed();
     });
 }

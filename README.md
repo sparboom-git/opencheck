@@ -88,6 +88,8 @@ Navigation that needs no training:
 | F12 | Frame time and display scale in the status bar |
 | Walk button (person) | Click a floor to stand there, then walk at eye height: W A S D, drag to look around, scroll to step, Esc stops |
 | Right-click in the model tree | Isolate, hide, show, select or zoom to a storey, a class (e.g. all beams) or an element |
+| K, or the markers button (crosshair) | Clash markers: a circle at each clash in sight nearby (within 15 m of the eye when walking, of the point looked at otherwise), as filtered in the Check tab. The colour is the category (C3 red, C2 orange, C1 grey), a ring with a tick or a flag means decided or in an issue. Hover for the clash, click to open it in a window with the same actions as in the Check tab; a click elsewhere lets go of it. Right-click the button to choose which clashes (the Check tab's filters: status, suggested category, severity, rule) and the distance |
+| Right-click in the 3D view | Also the clash markers and their distance, the finding window, on the Check and Visual Check tabs the properties window, and a section parallel to the clicked face (e.g. vertical along a wall); drag the scissors to move it |
 
 ### Checking
 

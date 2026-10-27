@@ -68,8 +68,10 @@ impl Vertex {
 pub struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
     pub eye: [f32; 4],
-    pub section_min: [f32; 4],
-    pub section_max: [f32; 4],
+    /// A point on the section plane and its normal (towards the side cut
+    /// away), when `params.x` switches the section on.
+    pub section_point: [f32; 4],
+    pub section_normal: [f32; 4],
     /// x: section box enabled, y: ghost alpha.
     pub params: [f32; 4],
 }

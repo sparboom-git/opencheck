@@ -88,11 +88,44 @@ pub struct IssueCamera {
     pub pitch: f32,
 }
 
-/// Horizontal section of the viewpoint, world coordinates (metres).
+/// Section of the viewpoint, world coordinates (metres): a point on the
+/// plane (`anchor`, at `height`) and, unless horizontal, its normal
+/// towards the side cut away. Issues saved before sections could be
+/// tilted have no normal: horizontal, `anchor` only giving the plan
+/// position.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct IssueSection {
     pub height: f64,
     pub anchor: [f64; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal: Option<[f32; 3]>,
+}
+
+impl IssueSection {
+    pub fn from_plane(plane: &crate::scene::SectionPlane, origin: glam::DVec3) -> Self {
+        let point = origin + plane.point.as_dvec3();
+        Self {
+            height: point.z,
+            anchor: point.to_array(),
+            normal: (!plane.is_horizontal()).then(|| plane.normal.to_array()),
+        }
+    }
+
+    pub fn plane(&self, origin: glam::DVec3) -> crate::scene::SectionPlane {
+        let anchor = (glam::DVec3::from_array(self.anchor) - origin).as_vec3();
+        match self.normal {
+            Some(n) => crate::scene::SectionPlane {
+                point: anchor,
+                normal: glam::Vec3::from_array(n).normalize_or(glam::Vec3::Z),
+            },
+            None => crate::scene::SectionPlane::horizontal((self.height - origin.z) as f32, anchor),
+        }
+    }
+
+    /// The direction BCF clipping planes point: to the part cut away.
+    pub fn direction(&self) -> [f64; 3] {
+        self.normal.map_or([0.0, 0.0, 1.0], |n| n.map(f64::from))
+    }
 }
 
 /// An element by GlobalId, with its model to tell repeated GlobalIds apart.

@@ -60,8 +60,14 @@ pub fn show(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         view_proj: app.camera.view_proj(aspect).to_cols_array_2d(),
         eye: app.camera.eye.extend(1.0).to_array(),
         // A horizontal cut is a box that is unbounded except at the top.
-        section_min: [-1e9, -1e9, -1e9, 0.0],
-        section_max: [1e9, 1e9, app.view.section.map_or(1e9, |s| s.height), 0.0],
+        section_point: app
+            .view
+            .section
+            .map_or([0.0; 4], |s| s.point.extend(0.0).to_array()),
+        section_normal: app
+            .view
+            .section
+            .map_or([0.0, 0.0, 1.0, 0.0], |s| s.normal.extend(0.0).to_array()),
         params: [
             if app.view.section.is_some() { 1.0 } else { 0.0 },
             0.12,
@@ -100,6 +106,7 @@ pub fn show(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     draw_measurements(app, ui, rect, aspect);
     draw_focus_zones(app, ui, rect, aspect);
     draw_focus_marker(app, ui, rect, aspect);
+    crate::markers::draw(app, ui, rect, aspect, &response);
     section_handle(app, ui, rect, aspect);
     storey_bar(app, ui, rect);
     tool_bar(app, ui, rect);
@@ -444,6 +451,17 @@ fn handle_selection(
     aspect: f32,
 ) {
     let additive = ui.input(|i| i.modifiers.command || i.modifiers.shift);
+    if response.clicked()
+        && !additive
+        && let Some(pos) = response.interact_pointer_pos()
+        && let Some(id) = app.markers.hit(pos)
+    {
+        crate::markers::open(app, &id);
+        response.context_menu(|ui| {
+            context_menu(app, ui);
+        });
+        return;
+    }
     if response.double_clicked() {
         if let Some(pos) = response.interact_pointer_pos()
             && let Some(hit) = pick_at(app, rect, aspect, pos)
@@ -454,6 +472,10 @@ fn handle_selection(
     } else if response.clicked()
         && let Some(pos) = response.interact_pointer_pos()
     {
+        // With the markers on, a click beside them lets go of the finding.
+        if app.markers.on && !additive {
+            app.release_finding();
+        }
         let hit = pick_at(app, rect, aspect, pos);
         app.select(hit.map(|h| h.element), additive);
     }
@@ -480,6 +502,11 @@ fn handle_selection(
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
 
+    if response.secondary_clicked()
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        app.nav.context_hit = pick_at(app, rect, aspect, pos);
+    }
     response.context_menu(|ui| {
         context_menu(app, ui);
     });
@@ -673,6 +700,40 @@ fn context_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     let item = |ui: &mut egui::Ui, enabled: bool, label: String| {
         ui.add_enabled(enabled, egui::Button::new(label)).clicked()
     };
+    let on = app.markers.on;
+    if item(
+        ui,
+        app.checking.report.is_some(),
+        format!(
+            "{}  {} clash markers (K)",
+            icon::CROSSHAIR,
+            if on { "Hide" } else { "Show" }
+        ),
+    ) {
+        app.markers.toggle();
+        ui.close();
+    }
+    if on {
+        ui.horizontal(|ui| {
+            ui.add_space(22.0);
+            ui.label("within");
+            ui.add(
+                egui::DragValue::new(&mut app.markers.distance)
+                    .range(2.0..=200.0)
+                    .speed(0.5)
+                    .max_decimals(0)
+                    .suffix(" m"),
+            );
+        });
+    }
+    if app.checking.selected.is_some()
+        && !app.finding_window_open
+        && item(ui, true, format!("{}  Finding", icon::CROSSHAIR))
+    {
+        app.finding_window_open = true;
+        ui.close();
+    }
+    ui.separator();
     // The Model tab has its properties panel; the others a window that can
     // be closed and is brought back from here.
     if app.tab != crate::app::Tab::Model {
@@ -697,6 +758,21 @@ fn context_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         format!("{}  Section above selection", icon::SCISSORS),
     ) {
         app.section_at_selection();
+        ui.close();
+    }
+    // A cut parallel to the face that was right-clicked, e.g. a vertical
+    // one along a wall: what is in front of the face is cut away.
+    if let Some(hit) = app.nav.context_hit
+        && item(
+            ui,
+            true,
+            format!("{}  Section parallel to this face", icon::SCISSORS),
+        )
+    {
+        app.view.section = Some(crate::scene::SectionPlane {
+            point: hit.point + hit.normal * 0.002,
+            normal: hit.normal,
+        });
         ui.close();
     }
     if item(
@@ -742,6 +818,9 @@ fn handle_keyboard(app: &mut OpenCheckApp, ui: &egui::Ui, response: &egui::Respo
         } else {
             app.select(None, false);
         }
+    }
+    if pressed(egui::Key::K) && app.checking.report.is_some() {
+        app.markers.toggle();
     }
     if pressed(egui::Key::Delete) && app.measure.active {
         app.measure.clear();
@@ -800,6 +879,55 @@ fn handle_keyboard(app: &mut OpenCheckApp, ui: &egui::Ui, response: &egui::Respo
 // ---- Section ---------------------------------------------------------------
 
 /// The cut plane outline and the scissors handle that drags it up and down.
+/// Where on screen a point is, kept inside `inner`: a point outside it, or
+/// behind the camera, is moved to the edge of `inner` in its direction.
+/// Returns the position and, when moved, the unit direction it lies in.
+fn pin_to(
+    app: &OpenCheckApp,
+    rect: Rect,
+    aspect: f32,
+    p: Vec3,
+    inner: Rect,
+) -> (Pos2, Option<Vec2>) {
+    let clip = app.camera.view_proj(aspect) * p.extend(1.0);
+    // Behind the camera the projection is mirrored; flip it back.
+    let w = clip.w.abs().max(1e-4);
+    let sign = if clip.w < 0.0 { -1.0 } else { 1.0 };
+    let ndc = Vec2::new(clip.x / w, clip.y / w) * sign;
+    let screen = Pos2::new(
+        rect.left() + (ndc.x + 1.0) * 0.5 * rect.width(),
+        rect.top() + (1.0 - ndc.y) * 0.5 * rect.height(),
+    );
+    if clip.w > 0.0 && inner.contains(screen) {
+        return (screen, None);
+    }
+    let c = inner.center();
+    let mut d = screen - c;
+    if clip.w <= 0.0 {
+        // Straight behind: show it below.
+        if d.length_sq() < 1.0 {
+            d = Vec2::Y;
+        }
+    }
+    let d = d.normalized();
+    let half = inner.size() / 2.0;
+    let t = [
+        if d.x.abs() > 1e-6 {
+            half.x / d.x.abs()
+        } else {
+            f32::INFINITY
+        },
+        if d.y.abs() > 1e-6 {
+            half.y / d.y.abs()
+        } else {
+            f32::INFINITY
+        },
+    ]
+    .into_iter()
+    .fold(f32::INFINITY, f32::min);
+    (c + d * t, Some(d))
+}
+
 fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect: f32) {
     let Some(section) = app.view.section else {
         return;
@@ -809,12 +937,29 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
     // Outline of the plane over the extent of the model.
     let b = app.scene_bounds;
     let margin = b.size().max_element() * 0.05;
-    let corners = [
-        Vec3::new(b.min.x - margin, b.min.y - margin, section.height),
-        Vec3::new(b.max.x + margin, b.min.y - margin, section.height),
-        Vec3::new(b.max.x + margin, b.max.y + margin, section.height),
-        Vec3::new(b.min.x - margin, b.max.y + margin, section.height),
-    ];
+    let corners = if section.is_horizontal() {
+        let z = section.point.z;
+        [
+            Vec3::new(b.min.x - margin, b.min.y - margin, z),
+            Vec3::new(b.max.x + margin, b.min.y - margin, z),
+            Vec3::new(b.max.x + margin, b.max.y + margin, z),
+            Vec3::new(b.min.x - margin, b.max.y + margin, z),
+        ]
+    } else {
+        // A square on the plane, around where the model's middle meets it.
+        let n = section.normal;
+        let centre = b.center() - n * (b.center() - section.point).dot(n);
+        let helper = if n.z.abs() < 0.9 { Vec3::Z } else { Vec3::X };
+        let u = n.cross(helper).normalize();
+        let v = n.cross(u);
+        let half = b.size().length() * 0.55;
+        [
+            centre + (u + v) * half,
+            centre + (u - v) * half,
+            centre - (u + v) * half,
+            centre - (u - v) * half,
+        ]
+    };
     let points = project_polygon(app, rect, aspect, &corners);
     if points.len() >= 3 {
         painter.add(Shape::convex_polygon(
@@ -828,10 +973,21 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
         ));
     }
 
-    let anchor = section.anchor.with_z(section.height);
-    let Some(center) = project(app, rect, aspect, anchor) else {
-        return;
+    let anchor = section.point;
+    // Where the handle can sit: clear of the storey bar, the tool bar and
+    // the label beside it. Panned away, it stays at the edge on the side
+    // the section is.
+    let inner = Rect::from_min_max(
+        rect.min + Vec2::new(30.0, 80.0),
+        rect.max - Vec2::new(180.0, tool_bar_size(rect).1 + 46.0),
+    );
+    // A narrow view has no room for all that: keep clear of the edges only.
+    let inner = if inner.width() < 40.0 || inner.height() < 40.0 {
+        rect.shrink(24.0)
+    } else {
+        inner
     };
+    let (center, pinned) = pin_to(app, rect, aspect, anchor, inner);
     let handle = Rect::from_center_size(center, Vec2::splat(38.0));
     let response = ui.interact(
         handle,
@@ -840,16 +996,24 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
     );
 
     if response.dragged() {
-        // How many pixels one metre up moves on screen at the handle.
-        if let Some(above) = project(app, rect, aspect, anchor + Vec3::Z) {
-            let per_metre = above - center;
-            let len2 = per_metre.length_sq();
-            if len2 > 1e-3 {
-                let dz = response.drag_delta().dot(per_metre) / len2;
-                if let Some(s) = &mut app.view.section {
-                    s.height += dz;
-                }
+        // How many pixels one metre along the normal moves on screen at the
+        // handle; with the handle pinned to the edge, at the section's
+        // distance.
+        let at = project(app, rect, aspect, anchor);
+        let above = project(app, rect, aspect, anchor + section.normal);
+        let dz = match (at, above) {
+            (Some(at), Some(above)) if (above - at).length_sq() > 1e-3 => {
+                let per_metre = above - at;
+                response.drag_delta().dot(per_metre) / per_metre.length_sq()
             }
+            _ => {
+                let distance = app.camera.eye.distance(anchor).max(1.0);
+                let per_pixel = 2.0 * distance * (app.camera.fov_y / 2.0).tan() / rect.height();
+                -response.drag_delta().y * per_pixel
+            }
+        };
+        if let Some(s) = &mut app.view.section {
+            s.point += s.normal * dz;
         }
     }
     if response.hovered() || response.dragged() {
@@ -881,25 +1045,56 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
             theme::accent()
         },
     );
-    // Arrows hint that the handle moves up and down.
-    for (dy, glyph) in [(-27.0, icon::CARET_UP), (27.0, icon::CARET_DOWN)] {
-        painter.text(
-            center + Vec2::new(0.0, dy),
-            Align2::CENTER_CENTER,
-            glyph,
-            FontId::proportional(14.0),
+    // Arrows hint which way the handle moves: up and down, or along the
+    // normal of a tilted plane as it shows on screen.
+    let along = match (
+        project(app, rect, aspect, anchor),
+        project(app, rect, aspect, anchor + section.normal),
+    ) {
+        (Some(a), Some(b)) if (b - a).length() > 1.0 => (b - a).normalized(),
+        _ => -Vec2::Y,
+    };
+    for sign in [1.0, -1.0] {
+        let d = along * sign;
+        let tip = center + d * 33.0;
+        let side = Vec2::new(-d.y, d.x) * 5.0;
+        painter.add(Shape::convex_polygon(
+            vec![tip, center + d * 25.0 + side, center + d * 25.0 - side],
             theme::accent(),
-        );
+            Stroke::NONE,
+        ));
     }
-    let elevation = app.federation.origin().z + section.height as f64;
+    // Pinned: a small arrow points to where the section is.
+    if let Some(towards) = pinned {
+        let tip = center + towards * 30.0;
+        let side = Vec2::new(-towards.y, towards.x) * 6.0;
+        painter.add(Shape::convex_polygon(
+            vec![
+                tip,
+                center + towards * 21.0 + side,
+                center + towards * 21.0 - side,
+            ],
+            theme::accent(),
+            Stroke::NONE,
+        ));
+    }
+    let label = if section.is_horizontal() {
+        let elevation = app.federation.origin().z + section.point.z as f64;
+        format!("Section  {elevation:+.3} m")
+    } else {
+        "Section".to_owned()
+    };
     label_box(
         &painter,
         center + Vec2::new(26.0, 0.0),
         Align2::LEFT_CENTER,
-        &format!("Section  {elevation:+.3} m"),
+        &label,
         theme::accent(),
     );
-    response.on_hover_text("Drag up or down to move the section. Double click to remove it.");
+    response.on_hover_text(
+        "Drag to move the section (up and down, or along a tilted plane's normal). \
+         Double click to remove it.",
+    );
 }
 
 /// A target ring on the point of the finding under review.
@@ -933,6 +1128,9 @@ fn draw_focus_zones(app: &OpenCheckApp, ui: &egui::Ui, rect: Rect, aspect: f32) 
 }
 
 fn draw_focus_marker(app: &OpenCheckApp, ui: &egui::Ui, rect: Rect, aspect: f32) {
+    if app.markers.on && !app.is_capturing() {
+        return;
+    }
     let Some(p) = app
         .focus_point()
         .and_then(|p| project(app, rect, aspect, p))
@@ -1089,7 +1287,7 @@ fn label_box(painter: &egui::Painter, pos: Pos2, align: Align2, text: &str, colo
 /// The tool bar's size: on a narrow view its buttons wrap onto more rows
 /// instead of being cut off.
 fn tool_bar_size(view: Rect) -> (f32, f32) {
-    const FULL_WIDTH: f32 = 556.0;
+    const FULL_WIDTH: f32 = 600.0;
     let width = FULL_WIDTH.min(view.width() - 16.0).max(60.0);
     let rows = (FULL_WIDTH / width).ceil();
     (width, 46.0 + (rows - 1.0) * 42.0)
@@ -1245,6 +1443,19 @@ fn tool_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
                 } else {
                     Walk::Off
                 };
+            }
+            if app.checking.report.is_some() {
+                let button = icon_button(
+                    ui,
+                    icon::CROSSHAIR,
+                    app.markers.on,
+                    "Clash markers (K): the clashes in sight nearby. Right-click to choose \
+                     which: the same filters as the Check tab, and the distance",
+                );
+                if button.clicked() {
+                    app.markers.toggle();
+                }
+                button.context_menu(|ui| crate::results_ui::marker_menu(app, ui));
             }
             if app.tab != crate::app::Tab::Model {
                 ui.separator();

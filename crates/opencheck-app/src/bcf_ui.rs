@@ -229,10 +229,9 @@ pub fn issue_viewpoint(issue: &Issue, fov_y: f32) -> Option<ViewpointRequest> {
                     y: s.anchor[1],
                     z: s.height,
                 },
-                direction: Point {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
+                direction: {
+                    let [x, y, z] = s.direction();
+                    Point { x, y, z }
                 },
             })
             .into_iter()

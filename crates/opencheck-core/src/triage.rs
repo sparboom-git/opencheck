@@ -383,6 +383,8 @@ const OPENING_WORDS: &[&str] = &[
     "udsparing",
     "hulafsætning",
     "hulafsaetning",
+    // Revit families such as "Round Face Opening".
+    "opening",
 ];
 
 fn is_insulation(element: &Element) -> bool {

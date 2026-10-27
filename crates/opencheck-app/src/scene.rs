@@ -384,8 +384,64 @@ impl ViewState {
         best
     }
 
+    /// Whether something drawn lies on the ray before `max_distance`,
+    /// leaving out the elements in `skip` (e.g. the two sides of a clash,
+    /// whose point lies inside them). Stops at the first hit.
+    pub fn blocked(
+        &self,
+        federation: &Federation,
+        ray: &Ray,
+        max_distance: f32,
+        skip: &[ElementRef],
+    ) -> bool {
+        for view in self.models.iter().filter(|m| m.visible) {
+            let Some(model) = federation.get(view.id) else {
+                continue;
+            };
+            let inverse = view.transform.inverse();
+            let local_ray = Ray {
+                origin: inverse.transform_point3(ray.origin),
+                dir: inverse.transform_vector3(ray.dir).normalize(),
+            };
+            for (local, element) in model.elements.iter().enumerate() {
+                let key = ElementRef {
+                    model: view.id,
+                    express_id: element.express_id,
+                };
+                if skip.contains(&key)
+                    || matches!(
+                        self.mode_of(view, local),
+                        DisplayMode::Hidden | DisplayMode::Ghost
+                    )
+                {
+                    continue;
+                }
+                match ray_aabb(&local_ray, &element.bounds) {
+                    Some(t) if t < max_distance => {}
+                    _ => continue,
+                }
+                for &mesh_index in &element.meshes {
+                    let mesh = &model.meshes[mesh_index];
+                    for tri in mesh.indices.as_chunks::<3>().0 {
+                        let [a, b, c] = [tri[0], tri[1], tri[2]]
+                            .map(|i| Vec3::from_array(mesh.positions[i as usize]));
+                        if let Some(t) = ray_triangle(&local_ray, a, b, c) {
+                            let point = view.transform.transform_point3(local_ray.at(t));
+                            if point.distance(ray.origin) < max_distance
+                                && self.inside_section(point)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     fn inside_section(&self, p: Vec3) -> bool {
-        self.section.is_none_or(|s| p.z <= s.height)
+        self.section.is_none_or(|s| s.keeps(p))
     }
 }
 
@@ -402,13 +458,35 @@ impl Focus {
     }
 }
 
-/// A horizontal section: everything above `height` is cut away.
+/// A section plane: everything on the side `normal` points to is cut
+/// away. Usually horizontal (normal up: the model above is cut away), or
+/// parallel to a face picked in the model.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SectionPlane {
-    /// Height of the cut in the federation frame.
-    pub height: f32,
-    /// Where the scissors handle sits in plan (its z is ignored).
-    pub anchor: Vec3,
+    /// A point on the plane, in the federation frame; the scissors handle
+    /// sits there.
+    pub point: Vec3,
+    /// Unit normal, towards the side that is cut away.
+    pub normal: Vec3,
+}
+
+impl SectionPlane {
+    /// A horizontal cut at `height`, the handle above `anchor` in plan.
+    pub fn horizontal(height: f32, anchor: Vec3) -> Self {
+        Self {
+            point: anchor.with_z(height),
+            normal: Vec3::Z,
+        }
+    }
+
+    pub fn is_horizontal(&self) -> bool {
+        self.normal.z > 0.999
+    }
+
+    /// Whether a point is kept (on the side away from the normal).
+    pub fn keeps(&self, p: Vec3) -> bool {
+        (p - self.point).dot(self.normal) <= 0.0
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -64,6 +64,9 @@ struct SavedCamera {
 struct SavedSection {
     height: f64,
     anchor: [f64; 3],
+    /// Unless horizontal: the normal, towards the side cut away.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    normal: Option<[f32; 3]>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,8 +124,9 @@ pub fn capture_view(
         show_spaces: view.show_spaces,
         storey_filter: view.storey_filter.clone(),
         section: view.section.map(|s| SavedSection {
-            height: origin.z + s.height as f64,
-            anchor: to_world(origin, s.anchor),
+            height: origin.z + s.point.z as f64,
+            anchor: to_world(origin, s.point),
+            normal: (!s.is_horizontal()).then(|| s.normal.to_array()),
         }),
         hidden: view.hidden.iter().filter_map(save).collect(),
         isolated: view
@@ -170,9 +174,15 @@ pub fn apply_view(
     view.xray = saved.xray;
     view.show_spaces = saved.show_spaces;
     view.storey_filter = saved.storey_filter;
-    view.section = saved.section.map(|s| SectionPlane {
-        height: (s.height - origin.z) as f32,
-        anchor: from_world(origin, s.anchor),
+    view.section = saved.section.map(|s| {
+        let anchor = from_world(origin, s.anchor);
+        match s.normal {
+            Some(n) => SectionPlane {
+                point: anchor,
+                normal: glam::Vec3::from_array(n).normalize_or(glam::Vec3::Z),
+            },
+            None => SectionPlane::horizontal((s.height - origin.z) as f32, anchor),
+        }
     });
     view.hidden = saved.hidden.iter().filter_map(load).collect();
     view.isolated = saved

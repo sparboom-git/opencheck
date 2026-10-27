@@ -20,6 +20,7 @@ mod issues;
 mod issues_ui;
 mod jobs;
 mod library;
+mod markers;
 mod measure;
 mod panels;
 mod pickers;

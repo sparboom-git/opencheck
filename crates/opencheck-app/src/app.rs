@@ -55,6 +55,8 @@ pub struct Navigation {
     /// Aspect ratio of the last drawn viewport, used by keyboard commands.
     pub aspect: f32,
     pub walk: Walk,
+    /// What was under the pointer at the last right-click, for the menu.
+    pub context_hit: Option<crate::scene::PickHit>,
 }
 
 /// First-person walking: stand on a floor and move around at eye height.
@@ -142,6 +144,10 @@ pub struct OpenCheckApp {
     pub property_filter: String,
     /// The floating properties window of the Check and Visual Check tabs.
     pub properties: PropertiesWindow,
+    /// Clash markers in the 3D view.
+    pub markers: crate::markers::MarkerLayer,
+    /// The window with the finding of a clicked marker.
+    pub finding_window_open: bool,
     render_state: Option<RenderState>,
     /// Bounds of all loaded geometry in the federation frame.
     pub scene_bounds: Aabb,
@@ -199,6 +205,8 @@ impl OpenCheckApp {
             tree_filter: String::new(),
             property_filter: String::new(),
             properties: Default::default(),
+            markers: Default::default(),
+            finding_window_open: false,
             render_state,
             scene_bounds: Aabb::EMPTY,
             confirm: None,
@@ -855,10 +863,7 @@ impl OpenCheckApp {
         if self.view.focus.is_some()
             && let Some(point) = self.focus_marker
         {
-            self.view.section = Some(SectionPlane {
-                height: point.z + 0.25,
-                anchor: point,
-            });
+            self.view.section = Some(SectionPlane::horizontal(point.z + 0.25, point));
             return;
         }
         let selected = self.view.bounds_of(&self.view.selection);
@@ -871,7 +876,7 @@ impl OpenCheckApp {
         } else {
             (selected.max.z + 0.005, selected.center())
         };
-        self.view.section = Some(SectionPlane { height, anchor });
+        self.view.section = Some(SectionPlane::horizontal(height, anchor));
     }
 
     pub fn toggle_section(&mut self) {
@@ -1011,6 +1016,17 @@ impl OpenCheckApp {
         if move_camera {
             self.camera.fit(&frame, self.nav.aspect);
         }
+    }
+
+    /// Lets go of the finding under review, on any tab: no highlight, no
+    /// marker, nothing selected in the results.
+    pub fn release_finding(&mut self) {
+        if self.view.focus.take().is_some() {
+            self.view.modes_dirty = true;
+        }
+        self.focus_marker = None;
+        self.checking.selected = None;
+        self.issues.selected = None;
     }
 
     pub fn clear_finding_focus(&mut self) {
@@ -1322,10 +1338,7 @@ impl OpenCheckApp {
             self.camera.pitch = c.pitch;
         }
         // The rest of the viewpoint: section, context and hidden elements.
-        self.view.section = issue.section.map(|s| SectionPlane {
-            height: (s.height - origin.z) as f32,
-            anchor: (glam::DVec3::from_array(s.anchor) - origin).as_vec3(),
-        });
+        self.view.section = issue.section.map(|s| s.plane(origin));
         self.view.show_context = issue.show_context;
         self.view.isolated = None;
         self.view.hidden = issue
@@ -1353,10 +1366,10 @@ impl OpenCheckApp {
                 yaw: self.camera.yaw,
                 pitch: self.camera.pitch,
             },
-            section: self.view.section.map(|s| IssueSection {
-                height: origin.z + s.height as f64,
-                anchor: (origin + s.anchor.as_dvec3()).to_array(),
-            }),
+            section: self
+                .view
+                .section
+                .map(|s| IssueSection::from_plane(&s, origin)),
             show_context: self.view.show_context,
             hidden: self
                 .view
@@ -1929,6 +1942,7 @@ impl eframe::App for OpenCheckApp {
             #[cfg(not(target_arch = "wasm32"))]
             crate::claude_link::window(self, &ctx);
             panels::properties_window(self, &ctx);
+            results_ui::finding_window(self, &ctx);
         }
         self.confirm_dialog(&ctx);
         self.welcome_dialog(&ctx, frame);

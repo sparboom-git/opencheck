@@ -7,8 +7,8 @@
 struct Camera {
     view_proj: mat4x4<f32>,
     eye: vec4<f32>,
-    section_min: vec4<f32>,
-    section_max: vec4<f32>,
+    section_point: vec4<f32>,
+    section_normal: vec4<f32>,
     // x: section box enabled (0/1), y: ghost alpha
     params: vec4<f32>,
 };
@@ -124,7 +124,7 @@ fn vs_transparent(input: VertexIn) -> VertexOut {
 
 fn lit(input: VertexOut) -> vec3<f32> {
     if camera.params.x > 0.5 {
-        if any(input.world < camera.section_min.xyz) || any(input.world > camera.section_max.xyz) {
+        if dot(input.world - camera.section_point.xyz, camera.section_normal.xyz) > 0.0 {
             discard;
         }
     }
