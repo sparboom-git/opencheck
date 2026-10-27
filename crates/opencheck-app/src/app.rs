@@ -1689,6 +1689,20 @@ impl OpenCheckApp {
                         ui.label(RichText::new(file).color(theme::text_muted()));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Which build is open, discreetly in the corner.
+                        let commit = env!("OPENCHECK_COMMIT");
+                        let version = if commit.is_empty() {
+                            format!("v{}", env!("CARGO_PKG_VERSION"))
+                        } else {
+                            format!("v{} · {commit}", env!("CARGO_PKG_VERSION"))
+                        };
+                        ui.label(
+                            RichText::new(&version)
+                                .small()
+                                .color(theme::text_muted().gamma_multiply(0.7)),
+                        )
+                        .on_hover_text(format!("OpenCheck {version}"));
+                        ui.add_space(8.0);
                         if self.frame_stats {
                             let size = ui.ctx().content_rect().size() * ui.ctx().pixels_per_point();
                             ui.label(

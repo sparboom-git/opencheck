@@ -669,7 +669,16 @@ fn schedule(app: &mut OpenCheckApp) {
             config.schedule.day.clone(),
         ]),
     }
-    app.autorun.status = match Command::new("schtasks").args(&args).output() {
+    let mut command = Command::new("schtasks");
+    command.args(&args);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // No console window flashing over the app.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    app.autorun.status = match command.output() {
         Ok(out) if out.status.success() => format!(
             "{}  Task \"{name}\" created on this machine. Change or remove it in Task Scheduler.",
             icon::CHECK

@@ -1,6 +1,10 @@
 //! OpenCheck application: a desktop program, and the same code compiled to
 //! WebAssembly for the browser.
 
+// No console window behind the app on Windows (debug builds keep it for
+// panics and logs).
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod area_edit;
 #[cfg(not(target_arch = "wasm32"))]
