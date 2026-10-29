@@ -25,6 +25,7 @@ mod properties;
 mod spatial;
 pub mod triage;
 pub mod visual;
+pub mod xlsx;
 
 pub use discipline::Discipline;
 pub use federation::{Federation, ModelId};

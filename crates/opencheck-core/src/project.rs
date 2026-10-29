@@ -145,6 +145,11 @@ pub struct ProjectModel {
     pub source: ModelSource,
 }
 
+/// A time as RFC 3339 in UTC, to the second.
+pub fn rfc3339(time: std::time::SystemTime) -> String {
+    humantime::format_rfc3339_seconds(time).to_string()
+}
+
 pub fn now_rfc3339() -> String {
     // web_time's clock also works in the browser; humantime wants std's type.
     let since_epoch = web_time::SystemTime::now()

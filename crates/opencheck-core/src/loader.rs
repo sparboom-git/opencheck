@@ -120,6 +120,7 @@ pub fn load_ifc_bytes(file_name: &str, bytes: &[u8]) -> Result<IfcModel, LoadErr
         },
     );
     model.connections = connections;
+    model.file_timestamp = file_name_arg(bytes, 1);
     // Ports in the mesh frame, where the geometry is.
     let to_mesh = model.local_to_world.inverse();
     let port_points: FxHashMap<u32, Vec<DVec3>> = port_points
@@ -279,16 +280,19 @@ fn is_void_class(ifc_type: &str) -> bool {
 
 /// Reads `FILE_NAME.originating_system` from the STEP header.
 fn originating_system(bytes: &[u8]) -> Option<String> {
+    file_name_arg(bytes, 5).or_else(|| file_name_arg(bytes, 4))
+}
+
+/// Argument `i` of the header's `FILE_NAME`: 1 is the time stamp, 5 the
+/// application that wrote the file.
+fn file_name_arg(bytes: &[u8], i: usize) -> Option<String> {
     let header_end = find(bytes, b"ENDSEC")?;
     let header = String::from_utf8_lossy(&bytes[..header_end]);
     let start = header.find("FILE_NAME(")? + "FILE_NAME(".len();
-    let args = split_step_args(&header[start..]);
-    let pick = |i: usize| {
-        args.get(i)
-            .map(|s| s.trim().trim_matches('\'').trim().to_owned())
-            .filter(|s| !s.is_empty() && s != "$")
-    };
-    pick(5).or_else(|| pick(4))
+    split_step_args(&header[start..])
+        .get(i)
+        .map(|s| s.trim().trim_matches('\'').trim().to_owned())
+        .filter(|s| !s.is_empty() && s != "$")
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -1334,6 +1338,7 @@ mod tests {
     fn reads_originating_system_from_header() {
         let header = b"ISO-10303-21;\nHEADER;\nFILE_NAME('a.ifc','2024-01-01',('x'),('y'),'Pre 1.0','Revit 2024','');\nENDSEC;";
         assert_eq!(originating_system(header).as_deref(), Some("Revit 2024"));
+        assert_eq!(file_name_arg(header, 1).as_deref(), Some("2024-01-01"));
     }
 
     #[test]

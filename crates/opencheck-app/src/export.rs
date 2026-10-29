@@ -365,6 +365,38 @@ impl OpenCheckApp {
         }
     }
 
+    /// Writes the issues to an Excel workbook, one row per issue. Needs no
+    /// pictures, so it is written at once.
+    pub fn export_excel_dialog(&mut self) {
+        let issues = self.export_scope();
+        if issues.is_empty() {
+            return;
+        }
+        let name = format!(
+            "{}-issues-{}.xlsx",
+            self.export_base_name(),
+            &project::now_rfc3339()[..10]
+        );
+        let Some(path) = crate::platform::save_file(
+            "Export issues to Excel",
+            ("Excel workbook", &["xlsx"]),
+            &name,
+        ) else {
+            return;
+        };
+        match self
+            .excel_file(&issues)
+            .and_then(|bytes| crate::platform::write(&path, &bytes).map_err(|e| e.to_string()))
+        {
+            Ok(()) => self.notify(format!(
+                "{} issues written to Excel: {}",
+                issues.len(),
+                path.file_name().unwrap_or_default().to_string_lossy()
+            )),
+            Err(e) => self.errors.push(format!("Could not export: {e}")),
+        }
+    }
+
     pub fn export_report_dialog(&mut self, ctx: &egui::Context) {
         let name = format!(
             "{}-K&K-rapport-{}.html",

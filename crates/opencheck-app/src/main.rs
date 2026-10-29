@@ -18,6 +18,7 @@ mod checking_ui;
 #[cfg(not(target_arch = "wasm32"))]
 mod claude_link;
 mod dialog;
+mod excel;
 mod export;
 mod issue_dialog;
 mod issues;
@@ -36,6 +37,7 @@ mod results_ui;
 mod ruleset_manager;
 mod scene;
 mod session;
+mod settings;
 mod snap;
 mod standard_editor;
 mod theme;

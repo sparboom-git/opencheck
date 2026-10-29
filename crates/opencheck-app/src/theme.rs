@@ -63,40 +63,16 @@ pub fn is_dark() -> bool {
     DARK_THEME.load(Ordering::Relaxed)
 }
 
-/// `%APPDATA%/OpenCheck/settings.json`: the user's choices for the app
-/// itself, such as the theme.
-fn settings_file() -> std::path::PathBuf {
-    crate::library::folder()
-        .parent()
-        .map(|p| p.join("settings.json"))
-        .unwrap_or_else(|| std::path::PathBuf::from("settings.json"))
-}
-
 /// The theme chosen last time; light when nothing is saved.
 pub fn saved_dark() -> bool {
-    std::fs::read_to_string(settings_file())
-        .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .and_then(|v| v.get("dark_theme").and_then(|d| d.as_bool()))
+    crate::settings::get("dark_theme")
+        .and_then(|d| d.as_bool())
         .unwrap_or(false)
 }
 
 /// Remembers the theme for the next start.
 pub fn save_dark(dark: bool) {
-    let path = settings_file();
-    let mut value = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .filter(|v| v.is_object())
-        .unwrap_or_else(|| serde_json::json!({}));
-    value["dark_theme"] = serde_json::Value::Bool(dark);
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let _ = std::fs::write(
-        &path,
-        serde_json::to_string_pretty(&value).unwrap_or_default(),
-    );
+    crate::settings::set("dark_theme", serde_json::Value::Bool(dark));
 }
 
 fn p() -> &'static Palette {

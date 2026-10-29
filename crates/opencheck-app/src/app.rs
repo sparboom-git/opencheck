@@ -121,6 +121,10 @@ pub struct OpenCheckApp {
     pub viewport_rect: egui::Rect,
     /// The report settings window is open.
     pub report_window: bool,
+    /// File → Settings is open.
+    pub settings_open: bool,
+    /// The user's Excel template; `None` for the standard one.
+    pub excel_template: Option<std::path::PathBuf>,
     /// Issues about to be created, waiting for their fields in the dialog.
     pub issue_draft: Option<crate::issue_dialog::IssueDraft>,
     /// "Edit view": the working area being drawn in a top view.
@@ -219,6 +223,8 @@ impl OpenCheckApp {
                     .and_then(|s| eframe::get_value::<bool>(s, WELCOME_OFF))
                     .unwrap_or(false),
             welcome_never_again: false,
+            settings_open: false,
+            excel_template: crate::settings::saved_excel_template(),
         };
         for file in files {
             app.open_path(file, &cc.egui_ctx);
@@ -1589,6 +1595,41 @@ impl OpenCheckApp {
                 self.open_file_dialog(&ctx);
                 ui.close();
             }
+            // The level (LOD) the property checks ask for, for the whole
+            // project; a model can differ (its menu in the model list).
+            let project_level = self.checking.project_level();
+            ui.menu_button(
+                format!(
+                    "{}  Project information level: {}",
+                    icon::STAIRS,
+                    crate::checking::level_label(&project_level)
+                ),
+                |ui| {
+                    ui.set_min_width(200.0);
+                    ui.label(
+                        RichText::new(
+                            "The level of development (LOD) the property checks use for every \
+                             model that does not have its own (its menu in the model list).",
+                        )
+                        .small()
+                        .color(theme::text_muted()),
+                    );
+                    ui.separator();
+                    for level in crate::checking::information_levels() {
+                        if ui
+                            .selectable_label(
+                                level == project_level,
+                                crate::checking::level_label(&level),
+                            )
+                            .clicked()
+                        {
+                            self.checking.set_project_level(level);
+                            self.session.dirty = true;
+                            ui.close();
+                        }
+                    }
+                },
+            );
             // Scheduled runs need the desktop: files on a drive, Task Scheduler.
             #[cfg(not(target_arch = "wasm32"))]
             if item(ui, icon::CLOCK_COUNTER_CLOCKWISE, "Autorun…", None) {
@@ -1601,6 +1642,10 @@ impl OpenCheckApp {
                 ui.close();
             }
             ui.separator();
+            if item(ui, icon::GEAR, "Settings…", None) {
+                self.settings_open = true;
+                ui.close();
+            }
             ui.menu_button(format!("{}  Theme", icon::PALETTE), |ui| {
                 ui.set_min_width(180.0);
                 let dark = theme::is_dark();
@@ -1962,6 +2007,7 @@ impl eframe::App for OpenCheckApp {
             crate::standard_editor::window(self, &ctx);
             crate::bcf_ui::window(self, &ctx);
             crate::issues_ui::report_window(self, &ctx);
+            crate::settings::window(self, &ctx);
             crate::issue_dialog::window(self, &ctx);
             #[cfg(not(target_arch = "wasm32"))]
             crate::autorun_ui::window(self, &ctx);

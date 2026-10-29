@@ -140,6 +140,9 @@ pub struct IfcModel {
     /// System name -> what kind of system it is, from its description,
     /// object type and predefined type (e.g. `Afløb, Spildevand`).
     pub system_info: FxHashMap<String, String>,
+    /// When the file was written, from the STEP header (`FILE_NAME`'s time
+    /// stamp, e.g. `2026-10-20T14:03:11`).
+    pub file_timestamp: Option<String>,
     element_index: FxHashMap<u32, usize>,
 }
 
@@ -189,6 +192,7 @@ impl IfcModel {
             connections: Vec::new(),
             ports: FxHashMap::default(),
             system_info: FxHashMap::default(),
+            file_timestamp: None,
             element_index,
         }
     }

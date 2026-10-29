@@ -108,7 +108,9 @@ The Check tab runs rulesets against the loaded models, much like Solibri.
     each other, whatever their class or tessellation.
   - *Information: LOD DK*: building parts must carry the information their
     level of development requires (LOD 200, 300 or 325 DK). The level is
-    set for the project on the ruleset card and per model in the model list.
+    set for the project under *File → Project information level* (or on the
+    ruleset card), and per model in its menu in the model list; models without
+    their own level follow the project.
     Where each item is read from (property, classification, material, …) can
     be adapted per project in *Where to look*, a window that can be made small
     or folded down to a button in the status bar while you look at the model.
@@ -159,7 +161,12 @@ rulesets (the app offers it as a download).
   **report**: one HTML file in Danish, printable to PDF, with introduction,
   models, software, an overview, and every issue with a small picture,
   criticality, responsible disciplines and the Revit IDs and GlobalIds of its
-  objects.
+  objects. It can also write an **Excel workbook** (`.xlsx`) on A4 portrait:
+  one row per issue with its fields and its objects' Revit IDs and GlobalIds,
+  and a sheet with the model files the check is based on and their dates.
+  The workbook is made from a template: OpenCheck's standard one, or your
+  own with your company's name and layout (*File → Settings*); see
+  [docs/excel-templates.md](docs/excel-templates.md).
 
 ### BCF Live (Dalux)
 

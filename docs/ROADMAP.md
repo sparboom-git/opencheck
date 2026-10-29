@@ -54,6 +54,9 @@ built.
   Element IDs, a dialog for the fields when issues are created.
 - BCF 2.1 file export with pictures and viewpoints.
 - Illustrated issue report (HTML in Danish, printable to PDF).
+- Issues exported to Excel (`.xlsx`) from a template the user can change
+  (company name, columns, page header and footer), with the model files and
+  their dates; A4 portrait.
 - BCF Live with Dalux: browser sign-in, value mapping (statuses,
   criticality, type, phase, people), rights shown per project, topics sent
   with viewpoint and picture, sync of status, assignee, title and priority,

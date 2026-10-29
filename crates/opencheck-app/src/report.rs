@@ -294,18 +294,7 @@ pub fn build(app: &OpenCheckApp, guids: &[String], images: &FxHashMap<String, Ve
         h.push_str("</table>");
     }
 
-    // Revit's element id: stored on the component, or read from the model.
-    let revit_id = |c: &crate::issues::IssueComponent| -> String {
-        if !c.tag.is_empty() {
-            return c.tag.clone();
-        }
-        app.federation
-            .iter()
-            .filter(|(_, m)| m.short_name == c.model)
-            .find_map(|(_, m)| m.element_by_global_id(&c.global_id))
-            .map(crate::issues::element_id)
-            .unwrap_or_default()
-    };
+    let revit_id = |c: &crate::issues::IssueComponent| app.revit_id(c);
 
     // The issues per section.
     for (number, section) in Section::ALL.into_iter().enumerate() {

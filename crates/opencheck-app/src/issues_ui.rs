@@ -246,7 +246,7 @@ pub fn issues(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     }
 }
 
-/// BCF file and report export of the ticked issues, or all.
+/// BCF file, Excel and report export of the ticked issues, or all.
 fn export_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let count = app.export_scope().len();
@@ -268,6 +268,17 @@ fn export_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 {
                     ui.close();
                     app.export_bcf_dialog(&ctx);
+                }
+                if ui
+                    .button(format!("{}  Excel (.xlsx)…", icon::FILE_XLS))
+                    .on_hover_text(
+                        "One row per issue with its fields, and the elements with their \
+                         Revit IDs and IFC GlobalIds",
+                    )
+                    .clicked()
+                {
+                    ui.close();
+                    app.export_excel_dialog();
                 }
                 if ui
                     .button(format!("{}  Report…", icon::FILE_TEXT))
