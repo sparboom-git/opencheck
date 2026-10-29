@@ -682,6 +682,20 @@ pub fn remember_person(people: &mut Vec<String>, person: &str) {
     }
 }
 
+/// Tells this run of the app apart from another one creating issues at the
+/// same moment: the process id on the desktop, a random number in the
+/// browser (which has no process ids; asking for one panics).
+fn salt() -> u64 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        u64::from(std::process::id())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        (js_sys::Math::random() * u64::MAX as f64) as u64
+    }
+}
+
 /// A random-enough UUID (version 4 layout) without an extra dependency.
 pub fn new_guid(seed: &str) -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -690,7 +704,7 @@ pub fn new_guid(seed: &str) -> String {
         .map(|d| d.as_nanos())
         .unwrap_or_default();
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let hash = Sha256::digest(format!("{nanos}\n{n}\n{seed}\n{}", std::process::id()).as_bytes());
+    let hash = Sha256::digest(format!("{nanos}\n{n}\n{seed}\n{}", salt()).as_bytes());
     let mut b = [0u8; 16];
     b.copy_from_slice(&hash[..16]);
     b[6] = (b[6] & 0x0f) | 0x40;
