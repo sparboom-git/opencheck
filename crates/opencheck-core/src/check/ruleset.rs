@@ -451,6 +451,21 @@ impl Ruleset {
 pub struct BuiltinRuleset {
     pub file_name: &'static str,
     pub toml: &'static str,
+    /// Not finished: offered apart, marked as work in progress.
+    pub work_in_progress: bool,
+}
+
+/// Whether the ruleset with this id is a built-in one still in progress.
+pub fn is_work_in_progress(ruleset_id: &str) -> bool {
+    static IDS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+        BUILTIN_RULESETS
+            .iter()
+            .filter(|b| b.work_in_progress)
+            .filter_map(|b| Ruleset::from_toml(b.toml).ok())
+            .map(|r| r.ruleset.id)
+            .collect()
+    });
+    IDS.iter().any(|id| id == ruleset_id)
 }
 
 /// The default rulesets, in the order they are offered.
@@ -458,36 +473,64 @@ pub const BUILTIN_RULESETS: &[BuiltinRuleset] = &[
     BuiltinRuleset {
         file_name: "clash-interdisciplinary.toml",
         toml: include_str!("../../rulesets/clash-interdisciplinary.toml"),
+        work_in_progress: false,
     },
     BuiltinRuleset {
         file_name: "clash-internal.toml",
         toml: include_str!("../../rulesets/clash-internal.toml"),
+        work_in_progress: false,
     },
     BuiltinRuleset {
         file_name: "clearance-mep-structure.toml",
         toml: include_str!("../../rulesets/clearance-mep-structure.toml"),
+        work_in_progress: true,
     },
     BuiltinRuleset {
         file_name: "electrical-cable-trays.toml",
         toml: include_str!("../../rulesets/electrical-cable-trays.toml"),
+        work_in_progress: true,
     },
     BuiltinRuleset {
         file_name: "ventilation-clearances.toml",
         toml: include_str!("../../rulesets/ventilation-clearances.toml"),
+        work_in_progress: true,
     },
     BuiltinRuleset {
         file_name: "information-lod-dk.toml",
         toml: include_str!("../../rulesets/information-lod-dk.toml"),
+        work_in_progress: false,
     },
     BuiltinRuleset {
         file_name: "model-quality-duplicates.toml",
         toml: include_str!("../../rulesets/model-quality-duplicates.toml"),
+        work_in_progress: false,
     },
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rulesets_in_progress_are_known_by_id() {
+        let wip: Vec<&str> = BUILTIN_RULESETS
+            .iter()
+            .filter(|b| b.work_in_progress)
+            .map(|b| b.file_name)
+            .collect();
+        assert_eq!(
+            wip,
+            [
+                "clearance-mep-structure.toml",
+                "electrical-cable-trays.toml",
+                "ventilation-clearances.toml"
+            ]
+        );
+        let first = Ruleset::from_toml(BUILTIN_RULESETS[0].toml).unwrap();
+        assert!(!is_work_in_progress(&first.ruleset.id));
+        let cable = Ruleset::from_toml(BUILTIN_RULESETS[3].toml).unwrap();
+        assert!(is_work_in_progress(&cable.ruleset.id));
+    }
 
     #[test]
     fn builtin_rulesets_parse() {

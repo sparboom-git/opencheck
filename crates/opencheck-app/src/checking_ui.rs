@@ -126,12 +126,35 @@ pub fn rulesets_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         });
 }
 
-fn builtin_list() -> Vec<(usize, Ruleset)> {
+/// The built-in rulesets, finished ones (`wip` false) or those still in
+/// progress (`wip` true).
+fn builtin_list(wip: bool) -> Vec<(usize, Ruleset)> {
     BUILTIN_RULESETS
         .iter()
         .enumerate()
+        .filter(|(_, b)| b.work_in_progress == wip)
         .filter_map(|(i, b)| Ruleset::from_toml(b.toml).ok().map(|r| (i, r)))
         .collect()
+}
+
+/// Said wherever rulesets still in progress are offered.
+pub const WIP_NOTE: &str =
+    "Not finished: the rules may miss things or report too much. Use the results with care.";
+
+/// The heading of the rulesets still in progress.
+pub fn wip_heading() -> String {
+    format!("{}  Work in progress", icon::WRENCH)
+}
+
+/// A small tag on a ruleset still in progress.
+pub fn wip_tag(ui: &mut egui::Ui) {
+    ui.label(
+        RichText::new("WIP")
+            .small()
+            .strong()
+            .color(severity_color(Severity::Moderate)),
+    )
+    .on_hover_text(WIP_NOTE);
 }
 
 fn add_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
@@ -142,7 +165,7 @@ fn add_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 .small()
                 .color(theme::text_muted()),
         );
-        for (index, ruleset) in builtin_list() {
+        let mut add = |ui: &mut egui::Ui, index: usize, ruleset: &Ruleset| {
             let added = app.checking.has_ruleset(&ruleset.ruleset.id);
             let button = egui::Button::new(&ruleset.ruleset.name);
             let response = ui
@@ -153,6 +176,21 @@ fn add_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 app.session.dirty = true;
                 ui.close();
             }
+        };
+        for (index, ruleset) in builtin_list(false) {
+            add(ui, index, &ruleset);
+        }
+        // Rulesets not finished yet, apart in a menu of their own.
+        let wip = builtin_list(true);
+        if !wip.is_empty() {
+            ui.menu_button(wip_heading(), |ui| {
+                ui.set_min_width(280.0);
+                ui.label(RichText::new(WIP_NOTE).small().color(theme::text_muted()));
+                ui.separator();
+                for (index, ruleset) in &wip {
+                    add(ui, *index, ruleset);
+                }
+            });
         }
         ui.separator();
         if ui
@@ -287,7 +325,7 @@ fn library(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             .color(theme::text_muted()),
     );
     ui.add_space(6.0);
-    for (index, ruleset) in builtin_list() {
+    let card = |app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, ruleset: &Ruleset| {
         egui::Frame::new()
             .fill(theme::surface())
             .corner_radius(8)
@@ -310,6 +348,22 @@ fn library(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 );
             });
         ui.add_space(4.0);
+    };
+    for (index, ruleset) in builtin_list(false) {
+        card(app, ui, index, &ruleset);
+    }
+    let wip = builtin_list(true);
+    if !wip.is_empty() {
+        egui::CollapsingHeader::new(RichText::new(wip_heading()).strong())
+            .id_salt("wip_rulesets")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.label(RichText::new(WIP_NOTE).small().color(theme::text_muted()));
+                ui.add_space(4.0);
+                for (index, ruleset) in &wip {
+                    card(app, ui, *index, ruleset);
+                }
+            });
     }
 }
 
@@ -372,6 +426,9 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 ui.horizontal(|ui| {
                     changed |= ui.checkbox(&mut entry.enabled, "").changed();
                     ui.label(RichText::new(&entry.ruleset.ruleset.name).strong());
+                    if opencheck_core::check::is_work_in_progress(&entry.ruleset.ruleset.id) {
+                        wip_tag(ui);
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
                             .add(

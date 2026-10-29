@@ -88,7 +88,7 @@ Navigation that needs no training:
 | F12 | Frame time and display scale in the status bar |
 | Walk button (person) | Click a floor to stand there, then walk at eye height: W A S D, drag to look around, scroll to step, Esc stops |
 | Right-click in the model tree | Isolate, hide, show, select or zoom to a storey, a class (e.g. all beams) or an element |
-| K, or the markers button (crosshair) | Clash markers: a circle at each clash in sight nearby (within 15 m of the eye when walking, of the point looked at otherwise), as filtered in the Check tab. The colour is the category (C3 red, C2 orange, C1 grey), a ring with a tick or a flag means decided or in an issue. Hover for the clash, click to open it in a window with the same actions as in the Check tab; a click elsewhere lets go of it. Right-click the button to choose which clashes (the Check tab's filters: status, suggested category, severity, rule) and the distance |
+| K, or the markers button (crosshair) | Clash markers: a circle at each clash in sight nearby (within 15 m of the eye when walking, of the point looked at otherwise), as filtered in the Check tab's list. The colour is the category (C3 red, C2 orange, C1 grey), a ring with a tick or a flag means decided or in an issue. Hover for the clash, click to open it in a window with the same actions as in the Check tab; a click elsewhere lets go of it. Right-click the button to choose which clashes (the Check tab's filters: status, severity, rule) and the distance |
 | Right-click in the 3D view | Also the clash markers and their distance, the finding window, on the Check and Visual Check tabs the properties window, and a section parallel to the clicked face (e.g. vertical along a wall); drag the scissors to move it |
 
 ### Checking
@@ -116,7 +116,9 @@ The Check tab runs rulesets against the loaded models, much like Solibri.
     or folded down to a button in the status bar while you look at the model.
     See [docs/information-requirements.md](docs/information-requirements.md).
   - *Clearance: MEP near structure*, *Electrical: cable tray clearances* and
-    *Ventilation: clearances*.
+    *Ventilation: clearances*. These three are **work in progress**: they are
+    offered apart, under *Work in progress* in the Add menu and *WIP* in the
+    Ruleset Manager, and marked WIP when added.
 - **Free zones**: room an element needs along its whole length, such as the
   service area beside a cable tray, the headroom above it or the space in
   front of a vertical ladder. The zone may be interrupted over a set length
@@ -162,7 +164,7 @@ rulesets (the app offers it as a download).
   models, software, an overview, and every issue with a small picture,
   criticality, responsible disciplines and the Revit IDs and GlobalIds of its
   objects. It can also write an **Excel workbook** (`.xlsx`) on A4 portrait:
-  one row per issue with its fields and its objects' Revit IDs and GlobalIds,
+  one row per issue with its fields, a picture and its objects' Revit IDs and GlobalIds,
   and a sheet with the model files the check is based on and their dates.
   The workbook is made from a template: OpenCheck's standard one, or your
   own with your company's name and layout (*File → Settings*); see
@@ -186,13 +188,15 @@ A check often gives thousands of findings of which only a few matter.
 the open project through an MCP server (`opencheck mcp`): it works through
 groups of alike findings and suggests a C402 category for each (C1 not
 critical, which includes all noise; C2 critical; C3 very critical), with how
-sure it is and a short reason. The suggestions show up in the Check tab as
-they come in; approved C1 findings are marked not a problem, C2 and C3 become
+sure it is and a short reason. The suggestions show up in the Check tab's
+*Pre-sort* tab as they come in, apart from the results so they do not get in
+the way of your own sorting; the results can be filtered by the category decided (C1, C2, C3);
+approved C1 findings are marked not a problem, C2 and C3 become
 issues with that priority. Corrections are kept as examples in the project's
 triage file, so the next review follows the project's practice. Pre-sorting,
 switched on per clash rule, marks known noise (insulation around its own
-pipe, the same element twice, shallow overlaps, planned openings) before
-anyone looks. Claude only suggests; it cannot approve or change anything. See
+pipe, the same element twice, shallow overlaps, planned openings, and kinds
+of clashes you marked as noise from one of them) before anyone looks. Claude only suggests; it cannot approve or change anything. See
 [docs/claude-triage.md](docs/claude-triage.md).
 
 ### Visual Check

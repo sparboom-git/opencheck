@@ -52,9 +52,11 @@ elements and systems.
    written to `%APPDATA%\OpenCheck\claude-link.json` while it is on.
 3. In Claude Desktop, ask for a review, e.g. *"Gennemgå kollisionerne i
    OpenCheck og kategorisér dem"*.
-4. Claude's suggestions show up in the Check tab as they come in: a tag on
-   each finding (`C2 80%`), the suggestion with its reason when you open a
-   finding, and the *Suggested* filter.
+4. Claude's suggestions show up in the Check tab's *Pre-sort* tab as they
+   come in: a tag on each finding (`C2 80%`), the suggestion with its reason
+   when you open a finding, and a filter (*With a suggestion*, *Suggested
+   noise*, *Suggested C1* …). The *Results* tab shows every finding without
+   them, so they do not get in the way of your own sorting.
 5. Approve:
    - one finding: *Approve*, or *Approve as* another category;
    - the ticked findings: *Approve suggestions*;
@@ -93,10 +95,17 @@ OpenCheck can mark known noise as C1 by fixed rules before anyone looks:
 
 Both clashes and elements lying inside another are pre-sorted.
 
+Your own kinds of noise: open a clash and choose *C1 pre-sort* below it,
+then *Same types* (e.g. `Basic Wall:VBE250 ↔ Floor:DBEM220`) or *Same
+classes* (`IfcWall ↔ IfcSlab`). The kind is kept in the clash rule's
+pre-sorting, and the next *Pre-sort* suggests every clash like it as C1, to
+approve or not on the *Pre-sort* tab. The Ruleset Manager lists the kinds
+under the rule's *Pre-sorting*, where they can be removed.
+
 The first run of a check is raw. Pre-sorting is switched on per clash rule
 in the Ruleset Manager (*Pre-sorting*), with each fixed rule and the depth
 limit; it is saved in the ruleset and then runs after every check. The
-*Pre-sort* button in the results runs it on the results you have, also for
+*Pre-sort* button on the *Pre-sort* tab runs it on the results you have, also for
 rules where it is off, with the rules' settings as they are now (no need to
 run the check again after changing them). Its suggestions are approved like Claude's, and Claude
 confirms or corrects them on a sample.

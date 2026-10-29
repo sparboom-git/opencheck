@@ -129,6 +129,73 @@ pub struct Presort {
     pub same_element: bool,
     /// A penetration where a planned opening (provision for void) is.
     pub openings: bool,
+    /// Kinds of clashes the reviewer marked as noise ("Add to C1
+    /// pre-sort"): every clash like them is suggested as C1.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub noise: Vec<NoisePattern>,
+}
+
+/// A kind of clash that is noise: the two elements, either way round, by
+/// their type or their IFC class.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NoisePattern {
+    pub by: PatternBy,
+    pub a: String,
+    pub b: String,
+}
+
+/// What a [`NoisePattern`] compares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternBy {
+    /// The element type, e.g. `Basic Wall:VBE250` (the class when it has
+    /// none).
+    Type,
+    /// The IFC class, e.g. `IfcWall`.
+    Class,
+}
+
+impl NoisePattern {
+    /// The pattern for clashes like the one between `a` and `b`.
+    pub fn of(a: &Element, b: &Element, by: PatternBy) -> Self {
+        Self {
+            by,
+            a: pattern_key(a, by),
+            b: pattern_key(b, by),
+        }
+    }
+
+    pub fn matches(&self, a: &Element, b: &Element) -> bool {
+        let (ka, kb) = (pattern_key(a, self.by), pattern_key(b, self.by));
+        (ka == self.a && kb == self.b) || (ka == self.b && kb == self.a)
+    }
+
+    /// The same pattern, whichever way round.
+    pub fn same_as(&self, other: &NoisePattern) -> bool {
+        self.by == other.by
+            && ((self.a == other.a && self.b == other.b)
+                || (self.a == other.b && self.b == other.a))
+    }
+
+    pub fn label(&self) -> String {
+        format!("{}  ↔  {}", self.a, self.b)
+    }
+}
+
+/// What a pattern compares an element by.
+fn pattern_key(e: &Element, by: PatternBy) -> String {
+    match by {
+        PatternBy::Type => {
+            let t = type_name(e);
+            if t.is_empty() {
+                e.occurrence_class().to_owned()
+            } else {
+                t
+            }
+        }
+        PatternBy::Class => e.occurrence_class().to_owned(),
+    }
 }
 
 impl Default for Presort {
@@ -139,6 +206,7 @@ impl Default for Presort {
             insulation: true,
             same_element: true,
             openings: true,
+            noise: Vec::new(),
         }
     }
 }
@@ -499,6 +567,13 @@ fn noise(
         ));
     }
     let (ea, eb) = (lookup.element(&f.a)?, lookup.element(&f.b)?);
+    // Kinds the reviewer marked as noise.
+    if let Some(p) = settings.noise.iter().find(|p| p.matches(ea, eb)) {
+        return Some((
+            0.9,
+            format!("Like the clashes you marked as noise: {}.", p.label()),
+        ));
+    }
     // One of them is the planned opening itself (a void family modelled as
     // an element): what runs through it is meant to.
     if settings.openings
@@ -638,5 +713,25 @@ mod tests {
     fn presort_defaults_stay_out_of_rule_files() {
         assert!(Presort::default().is_default());
         assert!(!Presort::default().enabled);
+    }
+
+    #[test]
+    fn noise_patterns_are_kept_in_rule_files() {
+        let mut presort = Presort::default();
+        presort.noise.push(NoisePattern {
+            by: PatternBy::Type,
+            a: "Basic Wall:VBE250".into(),
+            b: "Floor:DBEM220".into(),
+        });
+        let text = toml::to_string(&presort).unwrap();
+        assert!(text.contains("by = \"type\""), "{text}");
+        let back: Presort = toml::from_str(&text).unwrap();
+        assert_eq!(back, presort);
+        let swapped = NoisePattern {
+            by: PatternBy::Type,
+            a: "Floor:DBEM220".into(),
+            b: "Basic Wall:VBE250".into(),
+        };
+        assert!(swapped.same_as(&presort.noise[0]));
     }
 }

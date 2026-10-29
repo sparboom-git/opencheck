@@ -60,6 +60,44 @@ impl OpenCheckApp {
         count
     }
 
+    /// Adds a kind of clash as noise to the pre-sorting of the rule that
+    /// found `finding`; the next Pre-sort suggests all clashes like it as C1.
+    pub fn add_noise_pattern(&mut self, finding: &str, pattern: triage::NoisePattern) {
+        let Some((ruleset, rule, _)) = self.checking.find(finding) else {
+            return;
+        };
+        let (ruleset_id, rule_id, rule_name) = (
+            ruleset.info.id.clone(),
+            rule.rule.id.clone(),
+            rule.rule.name.clone(),
+        );
+        let Some(entry) = self
+            .checking
+            .rulesets
+            .iter_mut()
+            .find(|r| r.ruleset.ruleset.id == ruleset_id)
+        else {
+            return;
+        };
+        let Some(rule) = entry.ruleset.rules.iter_mut().find(|r| r.id == rule_id) else {
+            return;
+        };
+        if rule.presort.noise.iter().any(|p| p.same_as(&pattern)) {
+            self.notify(format!(
+                "Already in the C1 pre-sorting of \"{rule_name}\": {}",
+                pattern.label()
+            ));
+            return;
+        }
+        let label = pattern.label();
+        rule.presort.noise.push(pattern);
+        entry.text = entry.ruleset.to_toml();
+        self.session.dirty = true;
+        self.notify(format!(
+            "Added to the C1 pre-sorting of \"{rule_name}\": {label}. Run Pre-sort on the Pre-sort tab."
+        ));
+    }
+
     /// Approves the suggestions for `ids`, as suggested or as `category`.
     pub fn approve_ratings(&mut self, ids: &[String], category: Option<Category>) {
         let lookup_examples: Vec<TriageExample> = {

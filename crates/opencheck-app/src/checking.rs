@@ -85,12 +85,14 @@ pub fn uses_levels(rule: &Rule) -> bool {
     rule.kind == RuleKind::Information && ids_path(&rule.standard).is_none()
 }
 
-/// The two lists on the right of the Check tab.
+/// The lists on the right of the Check tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ResultsTab {
     #[default]
     Results,
     Issues,
+    /// The suggestions from pre-sorting and from Claude, to approve or not.
+    Presort,
 }
 
 /// Which findings the results list shows.
@@ -129,6 +131,8 @@ impl StatusFilter {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResultFilter {
     pub status: StatusFilter,
+    /// The C402 category decided for the finding.
+    pub category: CategoryFilter,
     pub suggestion: SuggestionFilter,
     pub severity: Option<Severity>,
     /// `ruleset id / rule id`, or None for every rule.
@@ -137,10 +141,58 @@ pub struct ResultFilter {
     pub ruleset: Option<String>,
 }
 
-/// Which findings the results list shows by their suggested category.
+/// Which findings the results show by the C402 category decided for them:
+/// an approved suggestion, or the priority of the issue they are in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CategoryFilter {
+    #[default]
+    All,
+    Is(Category),
+    /// No category decided yet.
+    None,
+}
+
+impl CategoryFilter {
+    pub const ALL: [CategoryFilter; 5] = [
+        CategoryFilter::All,
+        CategoryFilter::Is(Category::C3),
+        CategoryFilter::Is(Category::C2),
+        CategoryFilter::Is(Category::C1),
+        CategoryFilter::None,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CategoryFilter::All => "Category: all",
+            CategoryFilter::Is(c) => c.code(),
+            CategoryFilter::None => "No category",
+        }
+    }
+
+    pub fn shows(self, category: Option<Category>) -> bool {
+        match self {
+            CategoryFilter::All => true,
+            CategoryFilter::Is(c) => category == Some(c),
+            CategoryFilter::None => category.is_none(),
+        }
+    }
+}
+
+/// The C402 category of an issue priority.
+pub fn category_of(priority: Severity) -> Category {
+    match priority {
+        Severity::Critical => Category::C3,
+        Severity::Moderate => Category::C2,
+        Severity::Low => Category::C1,
+    }
+}
+
+/// Which findings the Pre-sort tab shows by their suggested category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SuggestionFilter {
+    /// A suggestion waiting for approval.
     #[default]
+    Any,
     All,
     /// No suggestion waiting for approval.
     None,
@@ -151,7 +203,8 @@ pub enum SuggestionFilter {
 }
 
 impl SuggestionFilter {
-    pub const ALL: [SuggestionFilter; 6] = [
+    pub const ALL: [SuggestionFilter; 7] = [
+        SuggestionFilter::Any,
         SuggestionFilter::All,
         SuggestionFilter::None,
         SuggestionFilter::Noise,
@@ -162,7 +215,8 @@ impl SuggestionFilter {
 
     pub fn label(self) -> &'static str {
         match self {
-            SuggestionFilter::All => "Suggested: all",
+            SuggestionFilter::Any => "With a suggestion",
+            SuggestionFilter::All => "Suggested or not",
             SuggestionFilter::None => "No suggestion",
             SuggestionFilter::Noise => "Suggested noise",
             SuggestionFilter::C1 => "Suggested C1",
@@ -175,6 +229,7 @@ impl SuggestionFilter {
     pub fn shows(self, rating: Option<&Rating>) -> bool {
         let proposed = rating.filter(|r| r.is_proposed());
         match self {
+            SuggestionFilter::Any => proposed.is_some(),
             SuggestionFilter::All => true,
             SuggestionFilter::None => proposed.is_none(),
             SuggestionFilter::Noise => proposed.is_some_and(|r| r.noise),
@@ -519,6 +574,16 @@ impl Checking {
         });
         self.information_changed();
         skipped
+    }
+
+    /// The suggestion filter in force: only the Pre-sort tab filters by
+    /// suggestions; the results show every finding.
+    pub fn suggestion_filter(&self) -> SuggestionFilter {
+        if self.tab == ResultsTab::Presort {
+            self.filter.suggestion
+        } else {
+            SuggestionFilter::All
+        }
     }
 
     /// The project's information level.
@@ -977,6 +1042,9 @@ mod tests {
             ..rating(Category::C1, None)
         };
         assert!(SuggestionFilter::All.shows(None));
+        assert!(!SuggestionFilter::Any.shows(None));
+        assert!(!SuggestionFilter::Any.shows(Some(&approved)));
+        assert!(SuggestionFilter::Any.shows(Some(&proposed)));
         assert!(SuggestionFilter::None.shows(None));
         assert!(SuggestionFilter::None.shows(Some(&approved)));
         assert!(!SuggestionFilter::None.shows(Some(&proposed)));

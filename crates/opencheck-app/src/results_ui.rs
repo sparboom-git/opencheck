@@ -15,7 +15,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::app::{IssueTarget, OpenCheckApp};
 use crate::checking::{
-    Decision, PairKey, ResultsTab, StatusFilter, SuggestionFilter, pair_key, rule_key,
+    CategoryFilter, Decision, PairKey, ResultsTab, StatusFilter, SuggestionFilter, category_of,
+    pair_key, rule_key,
 };
 use crate::checking_ui::{FOCUS_A, FOCUS_B, accepted, dot, panel_frame, severity_color};
 use crate::theme::discipline_color;
@@ -164,7 +165,21 @@ fn visible_rows<'a>(app: &'a OpenCheckApp, report: &'a CheckReport) -> Vec<Row<'
                     StatusFilter::Accepted => decision == Some(&Decision::Accepted),
                     StatusFilter::Rejected => decision == Some(&Decision::Rejected),
                     StatusFilter::Issues => with_issue.contains(f.id.as_str()),
-                } && filter.suggestion.shows(app.checking.ratings.get(&f.id));
+                } && app
+                    .checking
+                    .suggestion_filter()
+                    .shows(app.checking.ratings.get(&f.id))
+                    && filter.category.shows(
+                        app.checking
+                            .ratings
+                            .get(&f.id)
+                            .and_then(|r| r.approved)
+                            .or_else(|| {
+                                app.issues
+                                    .for_finding(&f.id)
+                                    .map(|i| category_of(i.priority))
+                            }),
+                    );
                 let disciplines = (
                     app.federation.get(f.a.model).map(|m| m.discipline),
                     app.federation.get(f.b.model).map(|m| m.discipline),
@@ -271,6 +286,8 @@ struct Actions {
     approve: Option<(Vec<String>, Option<Category>)>,
     dismiss: Option<Vec<String>>,
     presort: bool,
+    /// Mark clashes like this one as noise in its rule's pre-sorting.
+    add_noise: Option<(String, opencheck_core::triage::NoisePattern)>,
     /// Select one element of the finding (its properties then show).
     select: Option<crate::scene::ElementRef>,
     add_issues: Option<(Vec<String>, IssueTarget)>,
@@ -296,6 +313,12 @@ pub fn results_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     .report
                     .as_ref()
                     .map_or(0, |r| r.finding_count());
+                let waiting = app
+                    .checking
+                    .ratings
+                    .iter()
+                    .filter(|(id, r)| r.is_proposed() && app.checking.find(id).is_some())
+                    .count();
                 for (tab, label) in [
                     (
                         ResultsTab::Results,
@@ -304,6 +327,10 @@ pub fn results_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     (
                         ResultsTab::Issues,
                         format!("{}  Issues  {}", icon::FLAG, app.issues.list.len()),
+                    ),
+                    (
+                        ResultsTab::Presort,
+                        format!("{}  Pre-sort  {waiting}", icon::FUNNEL),
                     ),
                 ] {
                     let selected = app.checking.tab == tab;
@@ -320,7 +347,7 @@ pub fn results_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             });
             ui.separator();
             match app.checking.tab {
-                ResultsTab::Results => results(app, ui),
+                ResultsTab::Results | ResultsTab::Presort => results(app, ui),
                 ResultsTab::Issues => issues_ui::issues(app, ui),
             }
         });
@@ -407,7 +434,17 @@ fn results(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         ordered.extend(order(info_pairs));
     }
     let mut actions = Actions::default();
-    suggestions_bar(app, ui, &report, &mut actions);
+    if app.checking.tab == ResultsTab::Presort {
+        ui.label(
+            RichText::new(
+                "Suggested categories from pre-sorting and from Claude. Approve them to decide \
+                 the findings: C1 is marked not a problem, C2 and C3 become issues.",
+            )
+            .small()
+            .color(theme::text_muted()),
+        );
+        suggestions_bar(app, ui, &report, &mut actions);
+    }
     selection_bar(app, ui, &mut actions);
     ui.separator();
 
@@ -804,8 +841,20 @@ fn summary(app: &OpenCheckApp, ui: &mut egui::Ui, report: &CheckReport) {
 }
 
 fn filters(app: &mut OpenCheckApp, ui: &mut egui::Ui, report: &CheckReport) {
+    let presort = app.checking.tab == ResultsTab::Presort;
     let filter = &mut app.checking.filter;
     ui.horizontal_wrapped(|ui| {
+        // Suggestions are only filtered on the Pre-sort tab.
+        if presort {
+            egui::ComboBox::from_id_salt("filter_suggestion")
+                .selected_text(filter.suggestion.label())
+                .width(130.0)
+                .show_ui(ui, |ui| {
+                    for s in SuggestionFilter::ALL {
+                        ui.selectable_value(&mut filter.suggestion, s, s.label());
+                    }
+                });
+        }
         egui::ComboBox::from_id_salt("filter_status")
             .selected_text(filter.status.label())
             .width(110.0)
@@ -814,14 +863,19 @@ fn filters(app: &mut OpenCheckApp, ui: &mut egui::Ui, report: &CheckReport) {
                     ui.selectable_value(&mut filter.status, s, s.label());
                 }
             });
-        egui::ComboBox::from_id_salt("filter_suggestion")
-            .selected_text(filter.suggestion.label())
-            .width(130.0)
+        egui::ComboBox::from_id_salt("filter_category")
+            .selected_text(filter.category.label())
+            .width(110.0)
             .show_ui(ui, |ui| {
-                for s in SuggestionFilter::ALL {
-                    ui.selectable_value(&mut filter.suggestion, s, s.label());
+                for c in CategoryFilter::ALL {
+                    ui.selectable_value(&mut filter.category, c, c.label());
                 }
-            });
+            })
+            .response
+            .on_hover_text(
+                "The C402 category decided for the finding: an approved suggestion, or the \
+                 criticality of the issue it is in",
+            );
         egui::ComboBox::from_id_salt("filter_severity")
             .selected_text(filter.severity.map_or("Severity: all", |s| s.label()))
             .width(110.0)
@@ -891,9 +945,15 @@ fn matrix(
         .corner_radius(6)
         .inner_margin(egui::Margin::same(6))
         .show(ui, |ui| {
+            // The counts are never cut; the cells share the panel's width.
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+            let spacing = 4.0;
+            let columns = disciplines.len() as f32 + 1.0;
+            let cell =
+                ((ui.available_width() - spacing * (columns - 1.0)) / columns).clamp(46.0, 110.0);
             egui::Grid::new(("discipline_matrix", scope))
-                .spacing([4.0, 4.0])
-                .min_col_width(46.0)
+                .spacing([spacing, spacing])
+                .min_col_width(cell)
                 .show(ui, |ui| {
                     ui.label("");
                     for d in &disciplines {
@@ -916,7 +976,7 @@ fn matrix(
                                             .color(badge_colors().0),
                                     )
                                     .fill(badge_colors().1)
-                                    .min_size(egui::vec2(46.0, 24.0));
+                                    .min_size(egui::vec2(cell, 26.0));
                                     if ui
                                         .add(cell)
                                         .on_hover_text(format!(
@@ -1423,123 +1483,130 @@ fn finding_row(app: &OpenCheckApp, ui: &mut egui::Ui, row: &Row, actions: &mut A
 /// Bulk actions for the ticked findings.
 fn selection_bar(app: &OpenCheckApp, ui: &mut egui::Ui, actions: &mut Actions) {
     let marked = &app.checking.marked;
-    if marked.is_empty() {
-        ui.label(
-            RichText::new("Tick findings or whole groups to act on several at once")
-                .small()
-                .color(theme::text_muted()),
-        );
-        return;
-    }
-    egui::Frame::new()
-        .fill(theme::accent_soft())
+    // As tall with or without ticked findings, so the list below does not
+    // jump when the first one is ticked.
+    let row_height = (ui.text_style_height(&egui::TextStyle::Button)
+        + 2.0 * ui.spacing().button_padding.y)
+        .max(ui.spacing().interact_size.y);
+    let frame = egui::Frame::new()
         .corner_radius(8)
-        .inner_margin(egui::Margin::symmetric(8, 6))
-        .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(format!("{} selected", marked.len())).strong());
-                let new: Vec<String> = marked
-                    .iter()
-                    .filter(|id| app.issues.for_finding(id).is_none())
-                    .cloned()
-                    .collect();
-                let label = if new.len() > 1 {
-                    format!("{}  Add as one issue ({})", icon::FLAG, new.len())
-                } else {
-                    format!("{}  Add to issues", icon::FLAG)
-                };
-                let add =
-                    egui::Button::new(RichText::new(label).strong().color(theme::on_accent()))
-                        .fill(theme::accent());
-                if ui
-                    .add_enabled(!new.is_empty(), add)
-                    .on_hover_text(
-                        "Bundle the selected findings in one issue. \
-                         Issues are what goes into the report.",
-                    )
-                    .clicked()
-                {
-                    actions.add_issues = Some((new.clone(), IssueTarget::Bundle));
-                }
-                ui.add_enabled_ui(!new.is_empty(), |ui| {
-                    ui.menu_button(icon::CARET_DOWN, |ui| {
-                        ui.set_min_width(260.0);
-                        if new.len() > 1
-                            && ui
-                                .button(format!("{}  As {} separate issues", icon::COPY, new.len()))
-                                .clicked()
-                        {
-                            actions.add_issues = Some((new.clone(), IssueTarget::Separate));
-                            ui.close();
-                        }
-                        if !app.issues.list.is_empty() {
-                            ui.separator();
-                            ui.label(
-                                RichText::new("Add to an existing issue")
-                                    .small()
-                                    .color(theme::text_muted()),
-                            );
-                            for issue in app.issues.list.iter().rev() {
-                                let text = format!(
-                                    "{}  {}  ({})",
-                                    icon::FLAG,
-                                    issue.title,
-                                    issue.findings.len()
-                                );
-                                if ui.button(text).clicked() {
-                                    actions.add_issues = Some((
-                                        new.clone(),
-                                        IssueTarget::Existing(issue.guid.clone()),
-                                    ));
-                                    ui.close();
-                                }
-                            }
-                        }
-                    })
-                    .response
-                    .on_hover_text("More ways to add");
-                });
-                if ui
-                    .button(RichText::new(format!("{}  Accept", icon::CHECK)).color(accepted()))
-                    .clicked()
-                {
-                    actions.decide = Some((marked.clone(), Some(Decision::Accepted)));
-                }
-                if ui.button(format!("{}  Reject", icon::X)).clicked() {
-                    actions.decide = Some((marked.clone(), Some(Decision::Rejected)));
-                }
-                let suggested = marked
-                    .iter()
-                    .filter(|id| {
-                        app.checking
-                            .ratings
-                            .get(*id)
-                            .is_some_and(Rating::is_proposed)
-                    })
-                    .count();
-                if suggested > 0
-                    && ui
-                        .button(format!(
-                            "{}  Approve suggestions ({suggested})",
-                            icon::SPARKLE
-                        ))
-                        .on_hover_text(APPROVE_HELP)
-                        .clicked()
-                {
-                    actions.approve = Some((marked.clone(), None));
-                }
-                if ui
-                    .button(format!("{}  Show", icon::EYE))
-                    .on_hover_text("Show the selected findings in 3D")
-                    .clicked()
-                {
-                    actions.show_group = Some(marked.clone());
-                }
-                if ui.button("Clear").clicked() {
-                    actions.toggle_group = Some((marked.clone(), false));
-                }
+        .inner_margin(egui::Margin::symmetric(8, 6));
+    if marked.is_empty() {
+        frame.show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.set_min_height(row_height);
+                ui.label(
+                    RichText::new("Tick findings or whole groups to act on several at once")
+                        .small()
+                        .color(theme::text_muted()),
+                );
             });
         });
+        return;
+    }
+    frame.fill(theme::accent_soft()).show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.set_min_height(row_height);
+            ui.label(RichText::new(format!("{} selected", marked.len())).strong());
+            let new: Vec<String> = marked
+                .iter()
+                .filter(|id| app.issues.for_finding(id).is_none())
+                .cloned()
+                .collect();
+            let label = if new.len() > 1 {
+                format!("{}  Add as one issue ({})", icon::FLAG, new.len())
+            } else {
+                format!("{}  Add to issues", icon::FLAG)
+            };
+            let add = egui::Button::new(RichText::new(label).strong().color(theme::on_accent()))
+                .fill(theme::accent());
+            if ui
+                .add_enabled(!new.is_empty(), add)
+                .on_hover_text(
+                    "Bundle the selected findings in one issue. \
+                         Issues are what goes into the report.",
+                )
+                .clicked()
+            {
+                actions.add_issues = Some((new.clone(), IssueTarget::Bundle));
+            }
+            ui.add_enabled_ui(!new.is_empty(), |ui| {
+                ui.menu_button(icon::CARET_DOWN, |ui| {
+                    ui.set_min_width(260.0);
+                    if new.len() > 1
+                        && ui
+                            .button(format!("{}  As {} separate issues", icon::COPY, new.len()))
+                            .clicked()
+                    {
+                        actions.add_issues = Some((new.clone(), IssueTarget::Separate));
+                        ui.close();
+                    }
+                    if !app.issues.list.is_empty() {
+                        ui.separator();
+                        ui.label(
+                            RichText::new("Add to an existing issue")
+                                .small()
+                                .color(theme::text_muted()),
+                        );
+                        for issue in app.issues.list.iter().rev() {
+                            let text = format!(
+                                "{}  {}  ({})",
+                                icon::FLAG,
+                                issue.title,
+                                issue.findings.len()
+                            );
+                            if ui.button(text).clicked() {
+                                actions.add_issues =
+                                    Some((new.clone(), IssueTarget::Existing(issue.guid.clone())));
+                                ui.close();
+                            }
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("More ways to add");
+            });
+            if ui
+                .button(RichText::new(format!("{}  Accept", icon::CHECK)).color(accepted()))
+                .clicked()
+            {
+                actions.decide = Some((marked.clone(), Some(Decision::Accepted)));
+            }
+            if ui.button(format!("{}  Reject", icon::X)).clicked() {
+                actions.decide = Some((marked.clone(), Some(Decision::Rejected)));
+            }
+            let suggested = marked
+                .iter()
+                .filter(|id| {
+                    app.checking
+                        .ratings
+                        .get(*id)
+                        .is_some_and(Rating::is_proposed)
+                })
+                .count();
+            if suggested > 0
+                && ui
+                    .button(format!(
+                        "{}  Approve suggestions ({suggested})",
+                        icon::SPARKLE
+                    ))
+                    .on_hover_text(APPROVE_HELP)
+                    .clicked()
+            {
+                actions.approve = Some((marked.clone(), None));
+            }
+            if ui
+                .button(format!("{}  Show", icon::EYE))
+                .on_hover_text("Show the selected findings in 3D")
+                .clicked()
+            {
+                actions.show_group = Some(marked.clone());
+            }
+            if ui.button("Clear").clicked() {
+                actions.toggle_group = Some((marked.clone(), false));
+            }
+        });
+    });
 }
 
 fn finding_detail(app: &OpenCheckApp, ui: &mut egui::Ui, id: &str, actions: &mut Actions) {
@@ -1637,7 +1704,9 @@ fn finding_detail(app: &OpenCheckApp, ui: &mut egui::Ui, id: &str, actions: &mut
             );
         });
     }
-    if let Some(r) = app.checking.ratings.get(id) {
+    if app.checking.tab == ResultsTab::Presort
+        && let Some(r) = app.checking.ratings.get(id)
+    {
         suggestion_box(ui, id, r, actions);
     }
     ui.add_space(6.0);
@@ -1672,6 +1741,39 @@ fn finding_detail(app: &OpenCheckApp, ui: &mut egui::Ui, id: &str, actions: &mut
         }
         if decision.is_some() && ui.button("Reset").clicked() {
             actions.decide = Some((one, None));
+        }
+        // Clashes like this one are noise: their rule's pre-sorting then
+        // suggests them all as C1.
+        let lookup = opencheck_core::triage::Lookup::new(&app.federation);
+        if matches!(f.kind, FindingKind::Clash | FindingKind::Inside)
+            && !f.is_single()
+            && let (Some(ea), Some(eb)) = (lookup.element(&f.a), lookup.element(&f.b))
+        {
+            use opencheck_core::triage::{NoisePattern, PatternBy};
+            ui.menu_button(format!("{}  C1 pre-sort", icon::FUNNEL), |ui| {
+                ui.set_min_width(280.0);
+                ui.label(
+                    RichText::new(
+                        "Clashes like this one are noise: Pre-sort then suggests them all as \
+                         C1, to approve on the Pre-sort tab.",
+                    )
+                    .small()
+                    .color(theme::text_muted()),
+                );
+                ui.separator();
+                for (by, what) in [
+                    (PatternBy::Type, "Same types"),
+                    (PatternBy::Class, "Same classes"),
+                ] {
+                    let pattern = NoisePattern::of(ea, eb, by);
+                    if ui.button(format!("{what}: {}", pattern.label())).clicked() {
+                        actions.add_noise = Some((id.to_owned(), pattern));
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Add clashes like this one to the C1 pre-sorting");
         }
     });
 }
@@ -1741,6 +1843,9 @@ fn apply(app: &mut OpenCheckApp, actions: Actions, order: &[String], advance: bo
     if let Some(element) = actions.select {
         app.view.selection = vec![element];
         app.view.modes_dirty = true;
+    }
+    if let Some((id, pattern)) = actions.add_noise {
+        app.add_noise_pattern(&id, pattern);
     }
     if actions.presort {
         let n = app.presort(true);
@@ -2173,16 +2278,6 @@ pub fn marker_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         for s in StatusFilter::ALL {
             if ui
                 .selectable_value(&mut filter.status, s, s.label())
-                .clicked()
-            {
-                ui.close();
-            }
-        }
-    });
-    ui.menu_button(filter.suggestion.label(), |ui| {
-        for s in SuggestionFilter::ALL {
-            if ui
-                .selectable_value(&mut filter.suggestion, s, s.label())
                 .clicked()
             {
                 ui.close();

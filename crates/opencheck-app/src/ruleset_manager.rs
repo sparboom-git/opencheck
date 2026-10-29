@@ -122,6 +122,20 @@ pub fn show(app: &mut OpenCheckApp, ctx: &egui::Context) {
             ui.vertical(|ui| match app.manager.item {
                 Item::Project(i) if i < app.checking.rulesets.len() => project_editor(app, ui, i),
                 Item::Builtin(i) => {
+                    if BUILTIN_RULESETS[i].work_in_progress {
+                        ui.label(
+                            RichText::new(format!(
+                                "{}  {}",
+                                crate::checking_ui::wip_heading(),
+                                crate::checking_ui::WIP_NOTE
+                            ))
+                            .color(
+                                crate::checking_ui::severity_color(
+                                    opencheck_core::check::Severity::Moderate,
+                                ),
+                            ),
+                        );
+                    }
                     let ruleset = Ruleset::from_toml(BUILTIN_RULESETS[i].toml).ok();
                     read_only(app, ui, ruleset, None);
                 }
@@ -242,15 +256,42 @@ fn item_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             }
             ui.add_space(12.0);
             ui.label(RichText::new("BUILT-IN").small().strong().color(theme::text_muted()));
-            for (i, builtin) in BUILTIN_RULESETS.iter().enumerate() {
-                let name = Ruleset::from_toml(builtin.toml)
-                    .map(|r| r.ruleset.name)
-                    .unwrap_or_else(|_| builtin.file_name.to_owned());
-                let selected = app.manager.item == Item::Builtin(i);
-                if list_button(ui, selected, RichText::new(format!("{}  {name}", icon::LOCK_SIMPLE))).clicked() {
-                    app.manager.item = Item::Builtin(i);
+            // Not finished: folded away under their own heading, open while
+            // one of them is shown.
+            let selected_wip = matches!(
+                app.manager.item,
+                Item::Builtin(i) if BUILTIN_RULESETS.get(i).is_some_and(|b| b.work_in_progress)
+            );
+            let mut builtin = |ui: &mut egui::Ui, wip: bool| {
+                for (i, builtin) in BUILTIN_RULESETS.iter().enumerate() {
+                    if builtin.work_in_progress != wip {
+                        continue;
+                    }
+                    let name = Ruleset::from_toml(builtin.toml)
+                        .map(|r| r.ruleset.name)
+                        .unwrap_or_else(|_| builtin.file_name.to_owned());
+                    let selected = app.manager.item == Item::Builtin(i);
+                    if list_button(ui, selected, RichText::new(format!("{}  {name}", icon::LOCK_SIMPLE))).clicked() {
+                        app.manager.item = Item::Builtin(i);
+                    }
                 }
-            }
+            };
+            builtin(ui, false);
+            egui::CollapsingHeader::new(
+                RichText::new("WIP").small().strong().color(theme::text_muted()),
+            )
+            .id_salt("manager_wip")
+            .default_open(selected_wip)
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(crate::checking_ui::WIP_NOTE)
+                        .small()
+                        .color(theme::text_muted()),
+                );
+                builtin(ui, true);
+            })
+            .header_response
+            .on_hover_text(crate::checking_ui::WIP_NOTE);
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("MY LIBRARY").small().strong().color(theme::text_muted()));
@@ -1900,10 +1941,11 @@ fn presort_settings(
             "Suggest known noise as C1 after each check",
         )
         .on_hover_text(
-            "Off: the results are raw. The Pre-sort button in the results runs it on demand.",
+            "Off: the results are raw. The Pre-sort button on the Pre-sort tab runs it on demand,              with the settings below.",
         )
         .changed();
-    ui.add_enabled_ui(presort.enabled, |ui| {
+    // Used by the Pre-sort button too, so they can be set either way.
+    ui.scope(|ui| {
         ui.horizontal(|ui| {
             *changed |= ui
                 .add(
@@ -1930,4 +1972,34 @@ fn presort_settings(
             .on_hover_text("IfcOpeningElement, or elements named provision for void, opening, udsparing or hulafsætning")
             .changed();
     });
+    // Kinds of clashes marked as noise from a finding (C1 pre-sort).
+    if !presort.noise.is_empty() {
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Clashes you marked as noise")
+                .small()
+                .color(theme::text_muted()),
+        );
+        let mut remove = None;
+        for (i, pattern) in presort.noise.iter().enumerate() {
+            ui.horizontal(|ui| {
+                if ui
+                    .small_button(icon::X)
+                    .on_hover_text("No longer noise")
+                    .clicked()
+                {
+                    remove = Some(i);
+                }
+                let by = match pattern.by {
+                    opencheck_core::triage::PatternBy::Type => "types",
+                    opencheck_core::triage::PatternBy::Class => "classes",
+                };
+                ui.label(RichText::new(format!("{}  ({by})", pattern.label())).small());
+            });
+        }
+        if let Some(i) = remove {
+            presort.noise.remove(i);
+            *changed = true;
+        }
+    }
 }
