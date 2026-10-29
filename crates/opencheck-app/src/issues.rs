@@ -453,6 +453,8 @@ pub struct Issues {
     pub people: Vec<String>,
     /// Header fields of the issue report.
     pub report: ReportSettings,
+    /// What `issues.json` held that could not be read, written back on save.
+    leftovers: crate::lenient::Leftovers,
 }
 
 /// What the issue report says about itself: who made it, for which project
@@ -510,19 +512,24 @@ impl Issues {
     }
 
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::to_value(SavedIssues {
+        let mut json = serde_json::to_value(SavedIssues {
             issues: self.list.clone(),
             bcf: self.bcf.clone(),
             people: self.people.clone(),
             report: self.report.clone(),
         })
-        .expect("issues always serialise")
+        .expect("issues always serialise");
+        self.leftovers.restore::<SavedIssues>(&mut json);
+        json
     }
 
-    pub fn load(json: Option<serde_json::Value>) -> Self {
-        let saved = json
-            .and_then(|j| serde_json::from_value::<SavedIssues>(j).ok())
-            .unwrap_or_default();
+    /// Loads `issues.json`; issues that cannot be read are left out with a
+    /// message, and kept in the file.
+    pub fn load(json: Option<serde_json::Value>) -> (Self, Vec<String>) {
+        let (saved, leftovers, errors) = match json {
+            Some(json) => crate::lenient::read::<SavedIssues>(json, &["issues"], "issues.json"),
+            None => Default::default(),
+        };
         let bcf = saved.bcf;
         let report = saved.report;
         let mut people = saved.people;
@@ -549,14 +556,18 @@ impl Issues {
         for issue in &list {
             remember_person(&mut people, &issue.assigned_to);
         }
-        Self {
-            list,
-            selected: None,
-            marked: Vec::new(),
-            bcf,
-            people,
-            report,
-        }
+        (
+            Self {
+                list,
+                selected: None,
+                marked: Vec::new(),
+                bcf,
+                people,
+                report,
+                leftovers,
+            },
+            errors,
+        )
     }
 
     /// Compares the issues with a finished check run. A finding that is gone,
@@ -736,7 +747,7 @@ mod tests {
             list: vec![issue.clone()],
             ..Default::default()
         };
-        let loaded = Issues::load(Some(issues.to_json()));
+        let loaded = Issues::load(Some(issues.to_json())).0;
         assert_eq!(loaded.list, vec![issue]);
     }
 }
@@ -831,7 +842,7 @@ mod bundle_tests {
         // `source` is not written any more, so put it back as an older file had it.
         let mut json = json;
         json["issues"][0]["source"] = serde_json::to_value(source("f9")).unwrap();
-        let loaded = Issues::load(Some(json));
+        let loaded = Issues::load(Some(json)).0;
         assert_eq!(loaded.list[0].findings.len(), 1);
         assert!(loaded.for_finding("f9").is_some());
     }
@@ -892,7 +903,7 @@ mod bundle_tests {
         );
 
         // The flags survive saving.
-        let reloaded = Issues::load(Some(issues.to_json()));
+        let reloaded = Issues::load(Some(issues.to_json())).0;
         assert_eq!(reloaded.list, issues.list);
 
         // f1 comes back in a later version: the issue is reopened.

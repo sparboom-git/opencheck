@@ -16,9 +16,10 @@ use rhai::{AST, Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map, Pos
 
 use super::engine::{
     CheckModel, Finding, FindingElement, FindingKind, Prepared, blocked_zones, connected, distance,
-    finding_element, finding_id, joins,
+    finding_element, finding_id, joins, zones_bounds,
 };
 use super::freezone::{RunFrame, ZoneBox, intersect, merge};
+use super::index::BoxIndex;
 use super::ruleset::{Rule, ZoneSide};
 use crate::{Aabb, PropertyValue};
 
@@ -42,6 +43,8 @@ struct World {
     models: Vec<CheckModel>,
     subjects: Vec<usize>,
     others: Vec<usize>,
+    /// `others` by where they are, for `nearby` and `blocked`.
+    index: BoxIndex,
     params: BTreeMap<String, f64>,
     rule: Rule,
     ruleset_id: String,
@@ -123,6 +126,7 @@ pub(super) fn run(
         models: models.to_vec(),
         subjects: subjects.to_vec(),
         others: others.to_vec(),
+        index: BoxIndex::new(prepared, others),
         params: rule.params.clone(),
         rule: rule.clone(),
         ruleset_id: ruleset_id.to_owned(),
@@ -319,10 +323,11 @@ fn engine(world: &Arc<World>) -> Engine {
             max: b.max + Vec3::splat(grow),
         };
         e.world
-            .others
-            .iter()
-            .filter(|&&j| j != e.index && e.world.prepared[j].bounds.intersects(&reach))
-            .map(|&j| {
+            .index
+            .near(&reach)
+            .into_iter()
+            .filter(|&j| j != e.index && e.world.prepared[j].bounds.intersects(&reach))
+            .map(|j| {
                 Dynamic::from(El {
                     world: Arc::clone(&e.world),
                     index: j,
@@ -422,7 +427,6 @@ fn blocked(e: &El, side: &str, depth: f64, by: Option<Vec<usize>>) -> Result<Arr
         return Err(fail("the zone depth must be above 0 mm"));
     }
     let world = &e.world;
-    let others = by.unwrap_or_else(|| world.others.clone());
     // "left"/"right" and "front"/"back" are single zones of the pairs.
     let (zone_side, pick): (ZoneSide, Option<usize>) = match side {
         "above" => (ZoneSide::Above, None),
@@ -440,6 +444,7 @@ fn blocked(e: &El, side: &str, depth: f64, by: Option<Vec<usize>>) -> Result<Arr
         }
     };
     let mut zones = ZoneBox::around(&frame, zone_side, depth);
+    let others = by.unwrap_or_else(|| world.index.near(&zones_bounds(&zones)));
     // Both zones of a pair are measured, so an element surrounding this one
     // (the edges of an opening it passes through) is seen as a crossing.
     let mut per_zone = blocked_zones(&world.prepared, &world.models, e.index, &zones, &others);

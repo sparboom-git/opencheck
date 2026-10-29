@@ -21,6 +21,7 @@ use super::geom::{
     Triangle, closest_point_on_triangle, point_in_mesh, triangle_aabb, triangle_intersection,
 };
 use super::ids::{Ids, check_ids, ids_path};
+use super::index::BoxIndex;
 use super::information::{
     InformationStandard, InformationSummary, ItemCoverage, ModelFacts, PartCoverage,
     builtin_standard, is_checked,
@@ -709,6 +710,8 @@ fn check_free_zone(
 ) -> Vec<Finding> {
     let allowed = zone.max_blocked_mm / 1000.0;
     let min_free = zone.min_free_mm / 1000.0;
+    // Without `[rule.b]` that is every element of every model.
+    let index = BoxIndex::new(prepared, b);
     a.par_iter()
         .flat_map_iter(|&i| {
             let mut findings = Vec::new();
@@ -727,7 +730,8 @@ fn check_free_zone(
                     continue;
                 }
                 let zones = ZoneBox::around(&frame, zone.side, depth);
-                for problem in zone_problems(prepared, models, i, &zones, zone.side, b) {
+                let near = index.near(&zones_bounds(&zones));
+                for problem in zone_problems(prepared, models, i, &zones, zone.side, &near) {
                     let (stretch, _, _) = &problem;
                     if stretch[1] - stretch[0] <= allowed + MIN_STRETCH {
                         continue;
@@ -741,6 +745,13 @@ fn check_free_zone(
             findings
         })
         .collect()
+}
+
+/// The box around all of `zones`.
+pub(super) fn zones_bounds(zones: &[ZoneBox]) -> Aabb {
+    zones
+        .iter()
+        .fold(Aabb::EMPTY, |acc, z| acc.union(&z.bounds()))
 }
 
 /// Lines describing a blocked stretch of a free zone.
@@ -1223,6 +1234,11 @@ fn clearance(a: &Prepared, b: &Prepared, required: f32) -> Option<Detection> {
 /// The closest points on `a` and on `b` and their distance, if less than
 /// `limit` metres.
 fn closest_points(a: &Prepared, b: &Prepared, limit: f32) -> Option<(Vec3, Vec3, f32)> {
+    // Surfaces that cross, or one element inside the other, are 0 apart:
+    // the vertices alone would miss a pipe through a slab.
+    if let Some(p) = crossing(a, b) {
+        return Some((p, p, 0.0));
+    }
     let near_a = triangles_in(a, &grow(&b.bounds, limit));
     let near_b = triangles_in(b, &grow(&a.bounds, limit));
     if near_a.is_empty() || near_b.is_empty() {
@@ -1262,6 +1278,27 @@ fn closest_points(a: &Prepared, b: &Prepared, limit: f32) -> Option<(Vec3, Vec3,
     } else {
         (from, to, best)
     })
+}
+
+/// A point where the surfaces of `a` and `b` cross, or inside both when
+/// one lies within the other.
+fn crossing(a: &Prepared, b: &Prepared) -> Option<Vec3> {
+    let region = grow(&overlap(&a.bounds, &b.bounds)?, 1e-4);
+    let ta = triangles_in(a, &region);
+    let tb = triangles_in(b, &region);
+    let mut points = Vec::new();
+    for &i in &ta {
+        for &j in &tb {
+            if a.boxes[i].intersects(&b.boxes[j])
+                && triangle_intersection(&a.triangles[i], &b.triangles[j], &mut points)
+            {
+                return points.first().copied();
+            }
+        }
+    }
+    containment(a, b)
+        .or_else(|| containment(b, a))
+        .map(|(_, at, _, _)| at)
 }
 
 /// Whether `b` continues `a`'s run across a small gap of at most `limit`
@@ -1408,6 +1445,63 @@ mod tests {
         let (_, _, _, distance) = clearance(&a, &b, 0.05).expect("too close");
         assert!((distance - 0.03).abs() < 1e-4);
         assert!(clearance(&a, &b, 0.02).is_none());
+    }
+
+    #[test]
+    fn box_index_finds_what_a_full_scan_finds() {
+        // A row of small boxes and one long one, on a 60 m site.
+        let mut list: Vec<Prepared> = (0..60)
+            .map(|i| {
+                let x = i as f32;
+                prepared(
+                    Vec3::new(x, (i % 7) as f32, 0.0),
+                    Vec3::new(x + 0.5, (i % 7) as f32 + 0.5, 1.0),
+                )
+            })
+            .collect();
+        list.push(prepared(
+            Vec3::new(0.0, 3.0, 0.0),
+            Vec3::new(60.0, 3.2, 0.3),
+        ));
+        let items: Vec<usize> = (0..list.len()).collect();
+        let index = BoxIndex::new(&list, &items);
+        for probe in [
+            Aabb {
+                min: Vec3::new(10.2, 0.0, 0.0),
+                max: Vec3::new(14.0, 6.0, 1.0),
+            },
+            Aabb {
+                min: Vec3::new(-5.0, -5.0, -1.0),
+                max: Vec3::new(-1.0, -1.0, 0.0),
+            },
+            Aabb {
+                min: Vec3::new(30.0, 3.1, 0.0),
+                max: Vec3::new(30.1, 3.15, 0.1),
+            },
+        ] {
+            let full: Vec<usize> = items
+                .iter()
+                .copied()
+                .filter(|&i| list[i].bounds.intersects(&probe))
+                .collect();
+            let near: Vec<usize> = index
+                .near(&probe)
+                .into_iter()
+                .filter(|&i| list[i].bounds.intersects(&probe))
+                .collect();
+            assert_eq!(near, full);
+        }
+    }
+
+    #[test]
+    fn crossing_elements_have_zero_clearance() {
+        // The pipe's vertices sit 1 m from the slab; its sides cross it.
+        let slab = prepared(Vec3::new(-2.0, -2.0, 0.0), Vec3::new(2.0, 2.0, 0.25));
+        let pipe = prepared(Vec3::new(-0.05, -0.05, -1.0), Vec3::new(0.05, 0.05, 1.0));
+        assert_eq!(distance(&pipe, &slab, 0.05), Some(0.0));
+        let inner = prepared(Vec3::splat(0.5), Vec3::splat(1.0));
+        let outer = prepared(Vec3::ZERO, Vec3::splat(2.0));
+        assert_eq!(distance(&inner, &outer, 0.05), Some(0.0));
     }
 
     fn from_triangles(triangles: Vec<Triangle>) -> Prepared {

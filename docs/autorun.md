@@ -32,7 +32,10 @@ solved since the run before, per pair of disciplines.
 output folder; the configuration is also kept in the project. *Run now*
 runs once in the background. *Create scheduled task* adds the task to
 Windows Task Scheduler on this machine (`schtasks`); change or remove it
-there. *Open dashboard* opens the page.
+there. The task starts `opencheck.exe` directly, not `autorun.bat`: the bat
+file lies on the shared drive, and anyone who can write there could change
+what the task runs. Keep write access to the output folder to the people
+who run the checks. *Open dashboard* opens the page.
 
 The task runs on the machine it is created on. That machine must be on and
 reach the network drive at the time: the user's own computer, or a machine
@@ -40,13 +43,17 @@ that is always on.
 
 ## A run
 
-`opencheck autorun <folder>\autorun.json` (what `autorun.bat` starts; add
+`opencheck autorun <folder>\autorun.json` (what the task and `autorun.bat` start; add
 `--force` to run even when nothing changed):
 
 1. **Lock**: `autorun.lock` in the output folder, with the machine name and
    start time, keeps two machines from checking the project at the same
-   time. A run that finds the lock skips and logs it; a lock older than 12
-   hours was left by a run that stopped and is taken over.
+   time. The lock file is created exclusively, so two machines starting at
+   once cannot both get it. A run that finds the lock skips and logs it; a
+   lock older than 12 hours was left by a run that stopped and is taken over.
+   A run also skips, saving nothing, when a listed file is missing, still
+   being copied or cannot be read: the findings in it would otherwise look
+   resolved. The next run tries again.
 2. **Copying**: each file must keep its size and date for
    `settle_seconds` (10 by default) and be readable, so a file still being
    copied is not checked. A file that does not settle is left out.

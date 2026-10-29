@@ -424,7 +424,9 @@ impl OpenCheckApp {
                             contents.documents.checking,
                         );
                         self.errors.extend(errors);
-                        self.issues = Issues::load(contents.documents.issues);
+                        let (issues, errors) = Issues::load(contents.documents.issues);
+                        self.issues = issues;
+                        self.errors.extend(errors);
                         self.session.pending_view = contents.documents.view;
                         self.session.dirty = false;
                     }
@@ -434,7 +436,8 @@ impl OpenCheckApp {
                     )),
                 },
                 JobResult::ProjectModelsDone => {
-                    self.checking.apply_pending(&self.federation.ids());
+                    let errors = self.checking.apply_pending(&self.federation.ids());
+                    self.errors.extend(errors);
                     self.apply_area();
                     self.checking.stale = false;
                     if let Some(view) = self.session.pending_view.take() {
@@ -474,6 +477,15 @@ impl OpenCheckApp {
                         self.errors.push(format!("Could not save: {message}"));
                     }
                 },
+                JobResult::Failed { label } => {
+                    self.errors.push(format!(
+                        "{label} stopped unexpectedly. The file may be damaged or use \
+                         something OpenCheck cannot handle yet."
+                    ));
+                    if label == "Checking" {
+                        self.checking.progress = None;
+                    }
+                }
                 JobResult::CheckDone { report } => {
                     self.checking.finish_run(*report);
                     self.evaluate_issues();

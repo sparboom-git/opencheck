@@ -5,6 +5,7 @@ pub mod freezone;
 mod geom;
 mod ids;
 mod ids_export;
+mod index;
 mod information;
 mod ruleset;
 mod script;

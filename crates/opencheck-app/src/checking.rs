@@ -232,6 +232,8 @@ pub struct Checking {
     pub stale: bool,
     /// `checking.json` waiting for the project's models to load.
     pending: Option<serde_json::Value>,
+    /// What `checking.json` held that could not be read, written back on save.
+    leftovers: crate::lenient::Leftovers,
     /// Information level (LOD) of the project; None: the standard's default.
     pub level: Option<String>,
     /// Models that use another level than the project.
@@ -796,7 +798,9 @@ impl Checking {
                 list
             },
         };
-        serde_json::to_value(saved).expect("checking state always serialises")
+        let mut json = serde_json::to_value(saved).expect("checking state always serialises");
+        self.leftovers.restore::<SavedChecking>(&mut json);
+        json
     }
 
     /// Loads rulesets now; settings that refer to models wait for
@@ -849,13 +853,18 @@ impl Checking {
         errors
     }
 
-    pub fn apply_pending(&mut self, model_order: &[ModelId]) {
+    /// Returns a message per part of `checking.json` that could not be
+    /// read; those parts are kept in the file.
+    pub fn apply_pending(&mut self, model_order: &[ModelId]) -> Vec<String> {
         let Some(json) = self.pending.take() else {
-            return;
+            return Vec::new();
         };
-        let Ok(saved) = serde_json::from_value::<SavedChecking>(json) else {
-            return;
-        };
+        let (saved, leftovers, errors) = crate::lenient::read::<SavedChecking>(
+            json,
+            &["rulesets", "decisions", "ratings", "model_levels"],
+            "checking.json",
+        );
+        self.leftovers = leftovers;
         for s in saved.rulesets {
             if let Some(r) = self.rulesets.iter_mut().find(|r| r.path == s.path) {
                 r.enabled = s.enabled;
@@ -886,6 +895,7 @@ impl Checking {
             .into_iter()
             .filter_map(|l| Some((*model_order.get(l.model)?, l.level)))
             .collect();
+        errors
     }
 }
 

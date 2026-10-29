@@ -124,28 +124,9 @@ pub fn autorun(config_path: &Path, force: bool) -> Result<()> {
 
     // Only one machine runs a project at a time.
     let lock_path = output.join(LOCK);
-    if let Ok(existing) = fs::read_to_string(&lock_path) {
-        let age = fs::metadata(&lock_path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|m| m.elapsed().ok())
-            .unwrap_or_default();
-        let who = serde_json::from_str::<LockFile>(&existing)
-            .map(|l| format!("{} since {}", l.machine, l.started))
-            .unwrap_or_else(|_| "another run".to_owned());
-        if age < STALE_LOCK {
-            log.line(&format!("Skipped: the project is being checked by {who}."));
-            return Ok(());
-        }
-        log.line(&format!("Taking over a lock left by {who}."));
-    }
-    let lock = LockFile {
-        machine: machine(),
-        started: local(SystemTime::now()),
+    let Some(_guard) = take_lock(&lock_path, &mut log)? else {
+        return Ok(());
     };
-    fs::write(&lock_path, serde_json::to_string_pretty(&lock)?)
-        .with_context(|| format!("writing {}", lock_path.display()))?;
-    let _guard = LockGuard(lock_path);
 
     let result = run(&config, &output, force, &mut log);
     if let Err(e) = &result {
@@ -154,12 +135,66 @@ pub fn autorun(config_path: &Path, force: bool) -> Result<()> {
     result
 }
 
+/// Takes the project's lock, or `None` when another machine holds it. The
+/// lock file is created exclusively, so two machines starting at once cannot
+/// both get it; a lock older than [`STALE_LOCK`] is taken over.
+fn take_lock(path: &Path, log: &mut Log) -> Result<Option<LockGuard>> {
+    let lock = LockFile {
+        machine: machine(),
+        started: local(SystemTime::now()),
+    };
+    let text = serde_json::to_string_pretty(&lock)?;
+    let create = || OpenOptions::new().write(true).create_new(true).open(path);
+    let mut file = match create() {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let age = fs::metadata(path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|m| m.elapsed().ok())
+                .unwrap_or_default();
+            let who = fs::read_to_string(path)
+                .ok()
+                .and_then(|t| serde_json::from_str::<LockFile>(&t).ok())
+                .map(|l| format!("{} since {}", l.machine, l.started))
+                .unwrap_or_else(|| "another run".to_owned());
+            if age < STALE_LOCK {
+                log.line(&format!("Skipped: the project is being checked by {who}."));
+                return Ok(None);
+            }
+            log.line(&format!("Taking over a lock left by {who}."));
+            let _ = fs::remove_file(path);
+            match create() {
+                Ok(file) => file,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    log.line("Skipped: another machine took over the lock first.");
+                    return Ok(None);
+                }
+                Err(e) => return Err(e).with_context(|| format!("creating {}", path.display())),
+            }
+        }
+        Err(e) => return Err(e).with_context(|| format!("creating {}", path.display())),
+    };
+    let guard = LockGuard(path.to_owned());
+    file.write_all(text.as_bytes())
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(Some(guard))
+}
+
 fn run(config: &AutorunConfig, output: &Path, force: bool, log: &mut Log) -> Result<()> {
+    // A run must see every listed file: one left out would make all its
+    // findings look resolved, and come back as new the next time. So a file
+    // that is missing (e.g. while being replaced on the network drive),
+    // still being copied or unreadable skips the run, and nothing is saved;
+    // the next run tries again.
     let files = source_files(config, log);
-    if files.is_empty() {
-        bail!("none of the IFC files in the configuration could be found");
+    if files.len() < config.files.len() {
+        bail!("skipped: not every listed IFC file was found; nothing was saved");
     }
     let files = settle(files, Duration::from_secs(config.settle_seconds), log);
+    if files.len() < config.files.len() {
+        bail!("skipped: not every listed IFC file finished copying; nothing was saved");
+    }
 
     // Version check: size and date first, the hash only for files that changed.
     let state_path = output.join(STATE);
@@ -224,14 +259,21 @@ fn run(config: &AutorunConfig, output: &Path, force: bool, log: &mut Log) -> Res
     let mut by_id: BTreeMap<ModelId, String> = BTreeMap::new();
     let mut hashes: BTreeMap<String, String> = BTreeMap::new();
     let mut really_changed = 0;
+    let mut unreadable = 0;
+    let mut models = Vec::new();
     for result in loaded {
-        let (name, bytes, mut model) = match result {
-            Ok(x) => x,
+        match result {
+            Ok(x) => models.push(x),
             Err(e) => {
-                log.line(&format!("Left out: {e:#}"));
-                continue;
+                log.line(&format!("Could not read: {e:#}"));
+                unreadable += 1;
             }
-        };
+        }
+    }
+    if unreadable > 0 {
+        bail!("skipped: {unreadable} of the IFC files could not be read; nothing was saved");
+    }
+    for (name, bytes, mut model) in models {
         let hash = sha256_hex(&bytes);
         if let Some(entry) = seen.get_mut(&name) {
             if changed.contains(&name) && entry.hash != hash {
@@ -521,4 +563,25 @@ fn write_dashboard(config: &AutorunConfig, output: &Path, log: &mut Log) -> Resu
         runs.len()
     ));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lock_is_taken_once_and_released() {
+        let dir = std::env::temp_dir().join(format!("opencheck-lock-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(LOCK);
+        let _ = fs::remove_file(&path);
+        let mut log = Log(None);
+        let first = take_lock(&path, &mut log).unwrap();
+        assert!(first.is_some());
+        assert!(take_lock(&path, &mut log).unwrap().is_none());
+        drop(first);
+        assert!(!path.exists());
+        assert!(take_lock(&path, &mut log).unwrap().is_some());
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

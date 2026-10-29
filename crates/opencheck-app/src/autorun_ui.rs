@@ -638,14 +638,32 @@ fn run_now(app: &mut OpenCheckApp) {
     }
 }
 
-/// Adds (or replaces) the task in Windows Task Scheduler.
+/// Adds (or replaces) the task in Windows Task Scheduler. The task starts
+/// the program itself, not the batch file next to the settings: that one
+/// lies on the shared drive, where anyone who can write there could change
+/// what runs under this account.
 fn schedule(app: &mut OpenCheckApp) {
-    let Some(bat) = save(app) else {
+    if save(app).is_none() {
         return;
-    };
+    }
     let Some(config) = &app.autorun.config else {
         return;
     };
+    let program = &app.autorun.program;
+    if program.contains('"') {
+        app.autorun.status = format!("{}  The program path cannot contain quotes.", icon::WARNING);
+        return;
+    }
+    let config_path = Path::new(&config.output).join(CONFIG_FILE);
+    let command = format!("\"{program}\" autorun \"{}\"", config_path.display());
+    // Task Scheduler's limit for the command.
+    if command.chars().count() > 261 {
+        app.autorun.status = format!(
+            "{}  The paths are too long for Task Scheduler (over 261 characters);              use a shorter output folder.",
+            icon::WARNING
+        );
+        return;
+    }
     let name = format!(
         "OpenCheck autorun - {}",
         config.name.replace(['\\', '/', ':'], "-")
@@ -656,7 +674,7 @@ fn schedule(app: &mut OpenCheckApp) {
         "/TN".into(),
         name.clone(),
         "/TR".into(),
-        format!("\"{}\"", bat.display()),
+        command,
         "/ST".into(),
         config.schedule.time.clone(),
     ];

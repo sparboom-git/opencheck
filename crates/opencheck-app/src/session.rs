@@ -153,9 +153,8 @@ pub fn apply_view(
     camera: &mut Camera,
     measurements: &mut Vec<Measurement>,
 ) {
-    let Ok(saved) = serde_json::from_value::<SavedView>(value) else {
-        return;
-    };
+    // The view is redrawn on every save: what cannot be read is only left out.
+    let (saved, _, _) = crate::lenient::read::<SavedView>(value, &[], "view.json");
     let origin = federation.origin();
     let ids = federation.ids();
     let load = |s: &SavedElement| -> Option<ElementRef> {

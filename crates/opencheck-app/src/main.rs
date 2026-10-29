@@ -23,6 +23,7 @@ mod issue_dialog;
 mod issues;
 mod issues_ui;
 mod jobs;
+mod lenient;
 mod library;
 mod markers;
 mod measure;

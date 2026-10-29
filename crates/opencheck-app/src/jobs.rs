@@ -44,6 +44,11 @@ pub enum JobResult {
     CheckDone {
         report: Box<CheckReport>,
     },
+    /// A job stopped without finishing, e.g. on a file it could not cope
+    /// with; sent so the app is not left waiting for it.
+    Failed {
+        label: String,
+    },
 }
 
 /// Everything a background save needs, captured on the UI thread.
@@ -88,16 +93,20 @@ impl Default for Jobs {
     }
 }
 
-/// Sends messages for one job.
+/// Sends messages for one job. Dropped without having sent the last one
+/// (the job panicked), it sends [`JobResult::Failed`].
 struct Reporter {
     sender: Sender<Message>,
     generation: u64,
     job: JobId,
+    label: String,
     ctx: egui::Context,
+    finished: std::cell::Cell<bool>,
 }
 
 impl Reporter {
     fn send(&self, result: JobResult, finished: bool) {
+        self.finished.set(self.finished.get() || finished);
         // The receiver only disappears when the app is closing.
         let _ = self.sender.send(Message {
             generation: self.generation,
@@ -109,16 +118,27 @@ impl Reporter {
     }
 }
 
+impl Drop for Reporter {
+    fn drop(&mut self) {
+        if !self.finished.get() {
+            let label = std::mem::take(&mut self.label);
+            self.send(JobResult::Failed { label }, true);
+        }
+    }
+}
+
 impl Jobs {
     fn start(&mut self, label: String, ctx: &egui::Context) -> Reporter {
         let job = self.next_id;
         self.next_id += 1;
-        self.running.push((job, label));
+        self.running.push((job, label.clone()));
         Reporter {
             sender: self.sender.clone(),
             generation: self.generation,
             job,
+            label,
             ctx: ctx.clone(),
+            finished: std::cell::Cell::new(false),
         }
     }
 

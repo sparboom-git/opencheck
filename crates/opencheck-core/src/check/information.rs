@@ -15,8 +15,9 @@
 //! The format is close to buildingSMART IDS (applicability and requirements),
 //! with alternatives per requirement added.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -281,15 +282,21 @@ pub fn builtin_standard(id: &str) -> Option<&'static InformationStandard> {
 }
 
 /// A compiled, case-insensitive pattern. Patterns are few and reused for
-/// every element, so they are compiled once.
+/// every element, so they are compiled once per thread: the checks run in
+/// parallel, and a shared cache would make every thread wait on its lock.
 pub(crate) fn pattern(text: &str) -> Option<Regex> {
-    static CACHE: LazyLock<Mutex<FxHashMap<String, Option<Regex>>>> =
-        LazyLock::new(Default::default);
-    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    cache
-        .entry(text.to_owned())
-        .or_insert_with(|| Regex::new(&format!("(?i){text}")).ok())
-        .clone()
+    thread_local! {
+        static CACHE: RefCell<FxHashMap<String, Option<Regex>>> = RefCell::default();
+    }
+    CACHE.with_borrow_mut(|cache| {
+        if let Some(found) = cache.get(text) {
+            // Cloning a compiled pattern only counts a reference.
+            return found.clone();
+        }
+        let compiled = Regex::new(&format!("(?i){text}")).ok();
+        cache.insert(text.to_owned(), compiled.clone());
+        compiled
+    })
 }
 
 pub(crate) fn matches_pattern(pattern_text: &str, value: &str) -> bool {

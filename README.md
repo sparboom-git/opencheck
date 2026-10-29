@@ -220,8 +220,8 @@ rulesets and the ticked visual checks run, every run is kept as a compact,
 compressed JSON file in a history, and a dashboard (one HTML file) shows the findings per
 pair of disciplines, what is new and what was solved since the run before,
 and the files' objects and sizes over time. The task runs `opencheck
-autorun` from a bat file the app writes, and can be added to Windows Task
-Scheduler from the dialog. A lock file keeps two machines from checking a
+autorun` (the app also writes a bat file for running it by hand) and can be
+added to Windows Task Scheduler from the dialog. A lock file keeps two machines from checking a
 project at the same time. See [docs/autorun.md](docs/autorun.md).
 
 ### Look and feel
