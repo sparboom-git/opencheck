@@ -85,15 +85,20 @@ OpenCheck can mark known noise as C1 by fixed rules before anyone looks:
 - insulation (`IfcCovering` named insulation/isolering) around its own pipe
   or duct;
 - the same element (same GlobalId) in two models;
-- overlaps shallower than a limit (10 mm by default);
-- penetrations at a planned opening (`IfcOpeningElement`, or elements named
-  *provision for void*, *opening*, *udsparing* or *hulafsætning*).
+- overlaps shallower than a limit (20 mm by default, above the clash rules'
+  own 10 mm tolerance);
+- a planned opening (`IfcOpeningElement`, or an element named *provision
+  for void*, *opening*, *udsparing* or *hulafsætning*) as one of the two
+  elements, or a penetration where such an opening is.
+
+Both clashes and elements lying inside another are pre-sorted.
 
 The first run of a check is raw. Pre-sorting is switched on per clash rule
 in the Ruleset Manager (*Pre-sorting*), with each fixed rule and the depth
 limit; it is saved in the ruleset and then runs after every check. The
 *Pre-sort* button in the results runs it on the results you have, also for
-rules where it is off. Its suggestions are approved like Claude's, and Claude
+rules where it is off, with the rules' settings as they are now (no need to
+run the check again after changing them). Its suggestions are approved like Claude's, and Claude
 confirms or corrects them on a sample.
 
 ## Learning per project

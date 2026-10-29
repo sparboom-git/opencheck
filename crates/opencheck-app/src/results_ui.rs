@@ -1744,7 +1744,12 @@ fn apply(app: &mut OpenCheckApp, actions: Actions, order: &[String], advance: bo
     }
     if actions.presort {
         let n = app.presort(true);
-        app.checking.presort_note = Some(format!("Pre-sorting suggested {n} findings as noise."));
+        app.checking.presort_note = Some(if n == 0 {
+            "Pre-sorting found no known noise among the open clashes (decided findings and              findings with a suggestion are left alone)."
+                .to_owned()
+        } else {
+            format!("Pre-sorting suggested {n} findings as noise (C1); approve them with Approve.")
+        });
     }
     if let Some((ids, category)) = actions.approve {
         app.approve_ratings(&ids, category);

@@ -31,9 +31,23 @@ impl OpenCheckApp {
             .chain(self.checking.decisions.keys())
             .cloned()
             .collect();
+        let current: triage::PresortSettings = self
+            .checking
+            .rulesets
+            .iter()
+            .flat_map(|r| {
+                r.ruleset.rules.iter().map(|rule| {
+                    (
+                        (r.ruleset.ruleset.id.clone(), rule.id.clone()),
+                        rule.presort.clone(),
+                    )
+                })
+            })
+            .collect();
         let found = triage::presort(
             &report,
             &self.federation,
+            &current,
             all,
             &skip,
             &project::now_rfc3339(),

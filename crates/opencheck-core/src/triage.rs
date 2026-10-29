@@ -121,6 +121,7 @@ pub struct Presort {
     /// Runs after every check.
     pub enabled: bool,
     /// Overlaps shallower than this are noise, millimetres; 0 switches it off.
+    /// Above the clash rules' own tolerance (10 mm) to make a difference.
     pub depth_mm: f32,
     /// Insulation around its own pipe or duct.
     pub insulation: bool,
@@ -134,7 +135,7 @@ impl Default for Presort {
     fn default() -> Self {
         Self {
             enabled: false,
-            depth_mm: 10.0,
+            depth_mm: 20.0,
             insulation: true,
             same_element: true,
             openings: true,
@@ -387,6 +388,21 @@ const OPENING_WORDS: &[&str] = &[
     "opening",
 ];
 
+/// A planned opening: `IfcOpeningElement`, or an element named as one.
+fn is_opening(element: &Element) -> bool {
+    if element.ifc_class == "IfcOpeningElement" {
+        return true;
+    }
+    let text = format!(
+        "{} {} {}",
+        element.name,
+        type_name(element),
+        element.predefined_type.as_deref().unwrap_or_default()
+    )
+    .to_lowercase();
+    OPENING_WORDS.iter().any(|w| text.contains(w))
+}
+
 fn is_insulation(element: &Element) -> bool {
     let text = format!("{} {}", element.name, type_name(element)).to_lowercase();
     element.ifc_class == "IfcCovering"
@@ -406,9 +422,14 @@ fn is_flow(element: &Element) -> bool {
 /// Suggestions from the fixed rules, for the clash findings of the rules
 /// that have pre-sorting switched on (or of all clash rules with `all`,
 /// each with its own settings). Findings in `skip` are left alone.
+/// Rules' pre-sorting settings as they are now, by (ruleset id, rule id);
+/// they may have changed since the check ran.
+pub type PresortSettings = FxHashMap<(String, String), Presort>;
+
 pub fn presort(
     report: &CheckReport,
     federation: &Federation,
+    current: &PresortSettings,
     all: bool,
     skip: &FxHashSet<String>,
     now: &str,
@@ -421,17 +442,7 @@ pub fn presort(
             continue;
         };
         for e in &model.elements {
-            let text = format!(
-                "{} {} {}",
-                e.name,
-                type_name(e),
-                e.predefined_type.as_deref().unwrap_or_default()
-            )
-            .to_lowercase();
-            if e.has_geometry()
-                && (e.ifc_class == "IfcOpeningElement"
-                    || OPENING_WORDS.iter().any(|w| text.contains(w)))
-            {
+            if e.has_geometry() && is_opening(e) {
                 openings.push((e.bounds.transformed(&transform), e.label().to_owned()));
             }
         }
@@ -439,12 +450,17 @@ pub fn presort(
     let mut out = Vec::new();
     for ruleset in &report.rulesets {
         for rule in &ruleset.rules {
-            let settings = &rule.rule.presort;
+            let settings = current
+                .get(&(ruleset.info.id.clone(), rule.rule.id.clone()))
+                .unwrap_or(&rule.rule.presort);
             if !(settings.enabled || all) {
                 continue;
             }
             for f in &rule.findings {
-                if f.kind != FindingKind::Clash || skip.contains(&f.id) {
+                // An element inside another (a duct inside an opening's
+                // box) is a clash too.
+                let clash = matches!(f.kind, FindingKind::Clash | FindingKind::Inside);
+                if !clash || skip.contains(&f.id) {
                     continue;
                 }
                 if let Some((confidence, reason)) = noise(f, settings, &lookup, &openings) {
@@ -483,6 +499,19 @@ fn noise(
         ));
     }
     let (ea, eb) = (lookup.element(&f.a)?, lookup.element(&f.b)?);
+    // One of them is the planned opening itself (a void family modelled as
+    // an element): what runs through it is meant to.
+    if settings.openings
+        && let Some(opening) = [ea, eb].into_iter().find(|e| is_opening(e))
+    {
+        return Some((
+            0.95,
+            format!(
+                "A planned opening ({}), not a built element.",
+                opening.label()
+            ),
+        ));
+    }
     if settings.insulation {
         for (cover, other) in [(ea, eb), (eb, ea)] {
             if !is_insulation(cover) || !is_flow(other) {
@@ -514,7 +543,9 @@ fn noise(
         return Some((
             0.85,
             format!(
-                "Overlap of {depth:.0} mm, under the {:.0} mm limit.",
+                "Overlap of {:.0} mm, under the {:.0} mm limit.",
+                // Rounded down: 19.6 under a 20 mm limit reads as 19.
+                depth.floor(),
                 settings.depth_mm
             ),
         ));
