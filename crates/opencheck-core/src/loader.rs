@@ -87,6 +87,7 @@ pub fn load_ifc_bytes(file_name: &str, bytes: &[u8]) -> Result<IfcModel, LoadErr
     let meshes = convert_meshes(&geometry);
     let spatial_root = reader.build_spatial_tree();
     let elements = reader.build_elements(&meshes);
+    let layers = reader.layer_thicknesses(&elements);
     let project_name = reader.project_name();
     let connections = reader.connections();
     let port_points = reader.port_points();
@@ -121,6 +122,7 @@ pub fn load_ifc_bytes(file_name: &str, bytes: &[u8]) -> Result<IfcModel, LoadErr
     );
     model.connections = connections;
     model.file_timestamp = file_name_arg(bytes, 1);
+    crate::dimensions::add(&mut model, &layers);
     // Ports in the mesh frame, where the geometry is.
     let to_mesh = model.local_to_world.inverse();
     let port_points: FxHashMap<u32, Vec<DVec3>> = port_points
@@ -878,6 +880,42 @@ impl<'a> SemanticReader<'a> {
             }
         }
         names
+    }
+
+    /// The total thickness of the material layers an element or its type
+    /// uses (`IfcMaterialLayerSetUsage` or `IfcMaterialLayerSet`), in the
+    /// model's length unit.
+    fn layer_thickness(&mut self, id: u32) -> Option<f64> {
+        let root = *self.material_of.get(&id)?;
+        let mut set = self.decode(root)?;
+        if set.ifc_type.name() == "IfcMaterialLayerSetUsage" {
+            set = self.decode(set.get_ref(0)?)?;
+        }
+        if set.ifc_type.name() != "IfcMaterialLayerSet" {
+            return None;
+        }
+        let mut total = 0.0;
+        for layer in set.get_refs(0).unwrap_or_default() {
+            let layer = self.decode(layer)?;
+            total += layer.get_float(1).unwrap_or(0.0);
+        }
+        (total > 0.0).then_some(total)
+    }
+
+    /// [`Self::layer_thickness`] of each element, or else of its type.
+    fn layer_thicknesses(&mut self, elements: &[Element]) -> FxHashMap<u32, f64> {
+        let mut out = FxHashMap::default();
+        for e in elements {
+            let found = self.layer_thickness(e.express_id).or_else(|| {
+                e.type_object
+                    .as_ref()
+                    .and_then(|t| self.layer_thickness(t.0))
+            });
+            if let Some(t) = found {
+                out.insert(e.express_id, t);
+            }
+        }
+        out
     }
 
     fn systems_of(&mut self, id: u32) -> Vec<String> {

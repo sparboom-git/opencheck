@@ -15,6 +15,7 @@ pub mod autorun;
 pub mod bcf;
 pub mod bcf_file;
 pub mod check;
+mod dimensions;
 mod discipline;
 mod federation;
 mod geometry;

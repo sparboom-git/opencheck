@@ -40,6 +40,29 @@ Patterns are regular expressions matched without regard to case. Names are
 also tried without spaces and underscores, so `^InsulationThickness$` finds
 Revit's "Insulation Thickness".
 
+### Measured dimensions
+
+Many exports leave an element's dimensions out: Revit, for one, writes its
+length, width and height only when base quantities are exported, yet the
+geometry and the material layers carry them. OpenCheck therefore measures
+every element with geometry when it loads a model and adds the quantity set
+**Dimensions (measured by OpenCheck)**, in the model's length unit:
+
+| Quantity | Measured as |
+|---|---|
+| `LayerThickness` | the total of the material layers of a layered wall, slab or roof (from the element or its type) |
+| `Thickness` | the smallest of length, width and height |
+| `Length`, `Width` | the sides in plan of the smallest box around the element, turned to lie along it; length is the longer |
+| `Height` | the vertical extent |
+
+An assembly without geometry of its own, such as a curtain wall, is measured
+by its parts. The built-in standard's dimension items (Tykkelse, Højde,
+Længde, Bredde, Dimension) find these quantities by their names, so the
+results say where a value came from, e.g. *found in Dimensions (measured by
+OpenCheck).LayerThickness*. The set shows with the element's properties
+like any other; a project that wants only stated dimensions can leave the
+set out under *Where to look*.
+
 ## Adapting where items are found
 
 Projects name things differently, and a source can also pick up the wrong

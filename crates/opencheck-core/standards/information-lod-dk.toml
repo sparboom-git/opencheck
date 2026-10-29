@@ -96,11 +96,17 @@ name = "Placering"
 any = [{ geometry = true }]
 
 # ---- Dimensions -----------------------------------------------------------
+#
+# Many exports leave the dimensions out (Revit writes them only with base
+# quantities). OpenCheck measures every element with geometry and adds the
+# quantity set "Dimensions (measured by OpenCheck)": Length, Width, Height,
+# Thickness and, for layered walls, slabs and roofs, LayerThickness. The
+# patterns below find those too.
 
 [[item]]
 id = "thickness"
 name = "Tykkelse"
-any = [{ property = "^(Width|Thickness|NominalThickness|TotalThickness|Tykkelse)$" }]
+any = [{ property = "^(LayerThickness|Width|Thickness|NominalThickness|TotalThickness|Tykkelse)$" }]
 
 [[item]]
 id = "dimension"
