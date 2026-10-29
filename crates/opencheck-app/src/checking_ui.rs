@@ -384,7 +384,6 @@ fn scope_label(app: &OpenCheckApp, models: &Option<Vec<ModelId>>) -> (String, bo
 }
 
 fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
-    let mut remove = None;
     let mut changed = false;
     let mut new_level = None;
     let mut adapt = false;
@@ -429,18 +428,9 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     if opencheck_core::check::is_work_in_progress(&entry.ruleset.ruleset.id) {
                         wip_tag(ui);
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(RichText::new(icon::X).color(theme::text_muted()))
-                                    .frame(false),
-                            )
-                            .on_hover_text("Remove from project")
-                            .clicked()
-                        {
-                            remove = Some(index);
-                        }
-                    });
+                    // No remove here: it would throw away the decisions and
+                    // issues on its findings. That is done, with a warning,
+                    // in the Ruleset Manager.
                 });
                 if !entry.ruleset.ruleset.description.is_empty() {
                     ui.label(
@@ -554,10 +544,6 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 });
             });
         ui.add_space(6.0);
-    }
-    if let Some(index) = remove {
-        app.checking.remove_ruleset(index);
-        changed = true;
     }
     if adapt {
         crate::standard_editor::open(app, None, None);

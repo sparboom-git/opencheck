@@ -88,6 +88,9 @@ pub struct ManagerState {
     ai_answer: String,
     /// Script rules: name of the parameter being added.
     new_param: String,
+    /// The project ruleset (by id) waiting for its removal to be confirmed,
+    /// and whether the reviewer ticked that they understand.
+    confirm_remove: Option<(String, bool)>,
 }
 
 impl ManagerState {
@@ -478,7 +481,7 @@ fn project_editor(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .button(RichText::new(icon::TRASH).color(theme::danger()))
-                    .on_hover_text("Remove from project")
+                    .on_hover_text("Remove from project…")
                     .clicked()
                 {
                     remove_ruleset = true;
@@ -601,10 +604,140 @@ fn project_editor(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) {
         let id = ruleset.ruleset.id.clone();
         app.run_check(ui.ctx(), Some(&id));
     }
+    // Only asks: the removal waits for the confirmation.
     if remove_ruleset {
+        app.manager.confirm_remove = Some((
+            app.checking.rulesets[index].ruleset.ruleset.id.clone(),
+            false,
+        ));
+    }
+    confirm_remove(app, ui.ctx());
+}
+
+/// What removing a project ruleset throws away: its findings in the
+/// results, and the decisions, suggestions and issues on them.
+struct RemovalCost {
+    findings: usize,
+    decisions: usize,
+    ratings: usize,
+    issues: usize,
+}
+
+fn removal_cost(app: &OpenCheckApp, ruleset_id: &str) -> RemovalCost {
+    let ids: rustc_hash::FxHashSet<&str> = app
+        .checking
+        .report
+        .as_ref()
+        .and_then(|r| r.rulesets.iter().find(|rs| rs.info.id == ruleset_id))
+        .map(|rs| {
+            rs.rules
+                .iter()
+                .flat_map(|r| &r.findings)
+                .map(|f| f.id.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    RemovalCost {
+        findings: ids.len(),
+        decisions: app
+            .checking
+            .decisions
+            .keys()
+            .filter(|id| ids.contains(id.as_str()))
+            .count(),
+        ratings: app
+            .checking
+            .ratings
+            .keys()
+            .filter(|id| ids.contains(id.as_str()))
+            .count(),
+        issues: app
+            .issues
+            .list
+            .iter()
+            .filter(|i| i.findings.iter().any(|f| ids.contains(f.finding.as_str())))
+            .count(),
+    }
+}
+
+/// The warning before a project ruleset is removed: what is lost, a tick
+/// that it is understood, and the button only then.
+fn confirm_remove(app: &mut OpenCheckApp, ctx: &egui::Context) {
+    let Some((id, understood)) = app.manager.confirm_remove.clone() else {
+        return;
+    };
+    let Some(index) = app
+        .checking
+        .rulesets
+        .iter()
+        .position(|r| r.ruleset.ruleset.id == id)
+    else {
+        app.manager.confirm_remove = None;
+        return;
+    };
+    let name = app.checking.rulesets[index].ruleset.ruleset.name.clone();
+    let cost = removal_cost(app, &id);
+    let mut understood = understood;
+    let mut remove = false;
+    let mut cancel = false;
+    let modal = egui::Modal::new(egui::Id::new("confirm_remove_ruleset")).show(ctx, |ui| {
+        ui.set_width(440.0);
+        ui.heading(
+            RichText::new(format!("{}  Remove \"{name}\"?", icon::WARNING))
+                .strong()
+                .color(theme::danger()),
+        );
+        ui.add_space(6.0);
+        ui.label(
+            "The ruleset leaves the project. Its findings disappear from the results at the              next check, and with them what you have done with them:",
+        );
+        ui.add_space(4.0);
+        for (n, what) in [
+            (cost.findings, "findings in the current results"),
+            (cost.decisions, "accepted or rejected findings"),
+            (cost.ratings, "categories and suggestions (C1, C2, C3)"),
+            (cost.issues, "issues made from its findings, which lose them"),
+        ] {
+            let text = RichText::new(format!("{n}  {what}"));
+            ui.label(if n > 0 { text.strong() } else { text.color(theme::text_muted()) });
+        }
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new(
+                "This cannot be undone in OpenCheck. To stop running it, untick it instead:                  everything is kept.",
+            )
+            .small()
+            .color(theme::text_muted()),
+        );
+        ui.add_space(8.0);
+        ui.checkbox(&mut understood, "I understand that this is lost");
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            // Cancel first and plain; the removal only once ticked.
+            if ui.button("Cancel").clicked() {
+                cancel = true;
+            }
+            let button = egui::Button::new(
+                RichText::new(format!("{}  Remove ruleset", icon::TRASH)).color(theme::on_accent()),
+            )
+            .fill(theme::danger());
+            if ui.add_enabled(understood, button).clicked() {
+                remove = true;
+            }
+        });
+    });
+    if modal.should_close() {
+        cancel = true;
+    }
+    if remove {
         app.checking.remove_ruleset(index);
         app.manager.item = Item::None;
+        app.manager.confirm_remove = None;
         app.session.dirty = true;
+    } else if cancel {
+        app.manager.confirm_remove = None;
+    } else {
+        app.manager.confirm_remove = Some((id, understood));
     }
 }
 
