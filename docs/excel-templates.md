@@ -5,7 +5,8 @@ all) to an Excel workbook made from a template. Without one of your own,
 OpenCheck's standard template is used:
 
 - **Issues**: the project, the date and the number of issues, then one row
-  per issue with its number, title, criticality, status, responsible
+  per issue with its number, title, a picture of its viewpoint, criticality,
+  status, responsible
   disciplines, assignee, description, and per element its Revit ID, name,
   model and IFC GlobalId (one line per element in the cell).
 - **Models**: the model files the check is based on: file name, model,
@@ -39,6 +40,12 @@ A field is written as `{{name}}` in a cell, alone or within text
   end on the row grow with it.
 - A cell that is only a field holding a number (`{{issue.no}}`,
   `{{file.elements}}`) stays a number.
+- A cell that is only `{{issue.image}}` gets the issue's picture, as wide as
+  the column (less a small margin), and the row grows to fit it. Make the
+  column wider for larger pictures. The pictures are taken before the export,
+  as for the report, and only when the template has this field; leave it out
+  for a quick export without pictures. A logo or other pictures in the
+  template stay.
 - Fields per element have one line per element, in the same order in every
   such field.
 - A field that is not known is left as written, so a misspelt one shows in
@@ -54,6 +61,7 @@ A field is written as `{{name}}` in a cell, alone or within text
 | `{{opencheck_version}}` | OpenCheck's version |
 | `{{issue.no}}` | Number in the list |
 | `{{issue.title}}` | Title |
+| `{{issue.image}}` | Picture of the issue's viewpoint, as wide as its column |
 | `{{issue.criticality}}` | Criticality code: C1, C2 or C3 |
 | `{{issue.criticality_text}}` | Criticality with its meaning |
 | `{{issue.status}}` | Status |

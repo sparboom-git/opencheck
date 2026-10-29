@@ -6,10 +6,13 @@
 //! - [`fill`] fills a template: any workbook, e.g. one a user changed in
 //!   Excel, with fields written as `{{name}}` in its cells and in the page
 //!   header and footer. A row with a field of a list (`{{issue.title}}`) is
-//!   repeated once per item of the list; everything below it moves down.
+//!   repeated once per item of the list; everything below it moves down. A
+//!   cell that is only a field holding a picture gets the picture, as wide
+//!   as its column, and its row grows to fit.
 
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
+use std::sync::Arc;
 
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
@@ -19,7 +22,30 @@ use zip::write::SimpleFileOptions;
 pub enum Cell {
     Text(String),
     Number(f64),
+    /// A picture placed in the cell (when filling a template).
+    Picture(Arc<Picture>),
     Empty,
+}
+
+/// A PNG picture and its size in pixels.
+#[derive(Debug, PartialEq)]
+pub struct Picture {
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Picture {
+    /// A picture from PNG bytes; `None` when they are not a PNG.
+    pub fn from_png(png: Vec<u8>) -> Option<Self> {
+        // The size is in the header chunk, right after the signature.
+        if png.len() < 24 || &png[..8] != b"\x89PNG\r\n\x1a\n" || &png[12..16] != b"IHDR" {
+            return None;
+        }
+        let width = u32::from_be_bytes(png[16..20].try_into().ok()?);
+        let height = u32::from_be_bytes(png[20..24].try_into().ok()?);
+        (width > 0 && height > 0).then_some(Self { png, width, height })
+    }
 }
 
 impl From<&str> for Cell {
@@ -59,9 +85,35 @@ impl Cell {
         match self {
             Cell::Text(t) => t.clone(),
             Cell::Number(n) => n.to_string(),
-            Cell::Empty => String::new(),
+            Cell::Picture(_) | Cell::Empty => String::new(),
         }
     }
+}
+
+/// Whether a template has the field `name` anywhere, e.g. to take pictures
+/// only when it shows them.
+pub fn uses_field(template: &[u8], name: &str) -> bool {
+    let Ok(mut archive) = zip::ZipArchive::new(Cursor::new(template)) else {
+        return false;
+    };
+    for i in 0..archive.len() {
+        let Ok(mut entry) = archive.by_index(i) else {
+            continue;
+        };
+        let xml = entry.name().is_ok_and(|n| n.ends_with(".xml"));
+        let mut text = String::new();
+        if xml && entry.read_to_string(&mut text).is_ok() {
+            let texts = if text.contains("<sst") {
+                shared_strings(&text).join("")
+            } else {
+                unesc(&text)
+            };
+            if tokens(&texts).contains(&name) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 // ---- Writing ---------------------------------------------------------------
@@ -503,14 +555,21 @@ pub fn fill(template: &[u8], data: &Data) -> Result<Vec<u8>, String> {
         }
     }
 
+    let mut pictures: Vec<(String, Vec<Placement>)> = Vec::new();
     for (name, bytes) in &mut parts {
         let Some((sheet, position)) = sheets.get(name.as_str()) else {
             continue;
         };
         let xml = String::from_utf8_lossy(bytes).into_owned();
-        let (xml, shifts) = fill_sheet(&xml, &shared, data);
+        let (xml, shifts, placed) = fill_sheet(&xml, &shared, data);
         *bytes = xml.into_bytes();
         workbook = shift_defined_names(&workbook, sheet, *position, &shifts);
+        if !placed.is_empty() {
+            pictures.push((name.clone(), placed));
+        }
+    }
+    for (sheet, placed) in &pictures {
+        add_pictures(&mut parts, sheet, placed);
     }
     // Cells moved: Excel rebuilds its calculation order when it is missing.
     parts.retain(|(n, _)| n != "xl/calcChain.xml");
@@ -778,16 +837,19 @@ struct TemplateCell<'a> {
     text: Option<String>,
 }
 
-/// Fills one worksheet. Returns the new XML and the rows repeated.
-fn fill_sheet(xml: &str, shared: &[String], data: &Data) -> (String, Vec<Shift>) {
+/// Fills one worksheet. Returns the new XML, the rows repeated and the
+/// pictures to place.
+fn fill_sheet(xml: &str, shared: &[String], data: &Data) -> (String, Vec<Shift>, Vec<Placement>) {
     let (Some(start), Some(end)) = (xml.find("<sheetData"), xml.find("</sheetData>")) else {
         // No rows (`<sheetData/>`): only the page header and footer.
-        return (fill_header_footer(xml, data), Vec::new());
+        return (fill_header_footer(xml, data), Vec::new(), Vec::new());
     };
     let Some(open_end) = xml[start..].find('>') else {
-        return (xml.to_owned(), Vec::new());
+        return (xml.to_owned(), Vec::new(), Vec::new());
     };
     let body_start = start + open_end + 1;
+    let widths = column_widths(&xml[..start]);
+    let mut placed: Vec<Placement> = Vec::new();
 
     let mut shifts: Vec<Shift> = Vec::new();
     let mut rows = String::new();
@@ -829,11 +891,34 @@ fn fill_sheet(xml: &str, shared: &[String], data: &Data) -> (String, Vec<Shift>)
         let first = moved(row, &shifts, false);
         for (k, item) in items.iter().enumerate() {
             let r = first + k as u32;
-            rows.push_str(&format!("<row r=\"{r}\"{row_attrs}>"));
+            let mut written = String::new();
+            let mut tallest = 0u32;
             for cell in &cells {
-                rows.push_str(&write_cell(cell, r, data, *item));
+                if let Some(picture) = picture_in(cell, data, *item) {
+                    let column = column_index(&cell.column);
+                    let (width, height) = fit(&picture, widths(column));
+                    tallest = tallest.max(height);
+                    placed.push(Placement {
+                        column,
+                        row: r,
+                        picture,
+                        width,
+                        height,
+                    });
+                    written.push_str(&format!("<c r=\"{}{r}\"{}/>", cell.column, cell.attrs));
+                } else {
+                    written.push_str(&write_cell(cell, r, data, *item));
+                }
             }
-            rows.push_str("</row>");
+            let attrs = if tallest > 0 {
+                // Points: 3/4 of a pixel, with the picture's margins.
+                let points = (tallest + 2 * PICTURE_MARGIN) as f32 * 0.75;
+                let rest = without_attr(&without_attr(&row_attrs, "ht"), "customHeight");
+                format!("{rest} ht=\"{points:.1}\" customHeight=\"1\"")
+            } else {
+                row_attrs.clone()
+            };
+            rows.push_str(&format!("<row r=\"{r}\"{attrs}>{written}</row>"));
         }
         if list.is_some() {
             shifts.push(Shift {
@@ -850,7 +935,260 @@ fn fill_sheet(xml: &str, shared: &[String], data: &Data) -> (String, Vec<Shift>)
     (
         fill_header_footer(&format!("{head}{rows}{tail}"), data),
         shifts,
+        placed,
     )
+}
+
+/// Space around a picture in its cell, pixels.
+const PICTURE_MARGIN: u32 = 4;
+
+/// A picture to place at a cell.
+struct Placement {
+    /// 0-based column; 1-based row.
+    column: usize,
+    row: u32,
+    picture: Arc<Picture>,
+    /// Shown size, pixels.
+    width: u32,
+    height: u32,
+}
+
+/// The picture a cell shows: the cell is only a field holding one.
+fn picture_in(cell: &TemplateCell, data: &Data, item: Item) -> Option<Arc<Picture>> {
+    let text = cell.text.as_deref()?.trim();
+    let fields = tokens(text);
+    if fields.len() != 1 || !text.starts_with("{{") || !text.ends_with("}}") {
+        return None;
+    }
+    match data.get(fields[0], item)? {
+        Cell::Picture(p) => Some(p),
+        _ => None,
+    }
+}
+
+/// The width in pixels of each (0-based) column, from the sheet's `<cols>`.
+fn column_widths(head: &str) -> impl Fn(usize) -> u32 {
+    // Excel's default column is 8.43 characters, 64 pixels.
+    let ranges: Vec<(usize, usize, f32)> = elements(head, "col")
+        .into_iter()
+        .filter_map(|c| {
+            let min = attr(c, "min")?.parse::<usize>().ok()?;
+            let max = attr(c, "max")?.parse::<usize>().ok()?;
+            let width = attr(c, "width")?.parse::<f32>().ok()?;
+            Some((min, max, width))
+        })
+        .collect();
+    move |column| {
+        let n = column + 1;
+        ranges
+            .iter()
+            .find(|(min, max, _)| (*min..=*max).contains(&n))
+            .map_or(64, |(_, _, w)| (w * 7.0 + 5.0).round() as u32)
+    }
+}
+
+/// The size a picture is shown at: the column's width less the margins,
+/// keeping its proportions.
+fn fit(picture: &Picture, column_px: u32) -> (u32, u32) {
+    let width = column_px.saturating_sub(2 * PICTURE_MARGIN).max(16);
+    let height = (picture.height as u64 * width as u64 / picture.width.max(1) as u64) as u32;
+    (width, height.max(1))
+}
+
+/// A part path relative to another part's folder (`../drawings/x.xml`).
+fn resolve(from: &str, target: &str) -> String {
+    if let Some(absolute) = target.strip_prefix('/') {
+        return absolute.to_owned();
+    }
+    let mut path: Vec<&str> = from.split('/').collect();
+    path.pop();
+    for piece in target.split('/') {
+        match piece {
+            ".." => {
+                path.pop();
+            }
+            "." | "" => {}
+            p => path.push(p),
+        }
+    }
+    path.join("/")
+}
+
+/// The relationships file of a part: `a/b.xml` → `a/_rels/b.xml.rels`.
+fn rels_of(part: &str) -> String {
+    match part.rsplit_once('/') {
+        Some((dir, file)) => format!("{dir}/_rels/{file}.rels"),
+        None => format!("_rels/{part}.rels"),
+    }
+}
+
+/// A relationship id not used in `rels`.
+fn free_id(rels: &str) -> String {
+    let used: Vec<u32> = elements(rels, "Relationship")
+        .into_iter()
+        .filter_map(|r| attr(r, "Id")?.strip_prefix("rId")?.parse().ok())
+        .collect();
+    format!("rId{}", used.into_iter().max().unwrap_or(0) + 1)
+}
+
+const RELS_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
+const DOC_RELS_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+/// Places pictures on a sheet: in its drawing (the one with a logo, say,
+/// or a new one), each picture a part of its own.
+fn add_pictures(parts: &mut Vec<(String, Vec<u8>)>, sheet: &str, placed: &[Placement]) {
+    let get = |parts: &Vec<(String, Vec<u8>)>, name: &str| -> Option<String> {
+        parts
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, b)| String::from_utf8_lossy(b).into_owned())
+    };
+    let set = |parts: &mut Vec<(String, Vec<u8>)>, name: &str, text: String| match parts
+        .iter_mut()
+        .find(|(n, _)| n == name)
+    {
+        Some((_, bytes)) => *bytes = text.into_bytes(),
+        None => parts.push((name.to_owned(), text.into_bytes())),
+    };
+    let empty_rels = || {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="{RELS_NS}"></Relationships>"#
+        )
+    };
+    let add_rel = |rels: &str, rel: String| -> String {
+        match rels.rfind("</Relationships>") {
+            Some(i) => format!("{}{rel}{}", &rels[..i], &rels[i..]),
+            None => rels.to_owned(),
+        }
+    };
+    let mut types = get(parts, "[Content_Types].xml").unwrap_or_default();
+
+    // The sheet's drawing, or a new one.
+    let sheet_rels_path = rels_of(sheet);
+    let mut sheet_rels = get(parts, &sheet_rels_path).unwrap_or_else(empty_rels);
+    let existing = elements(&sheet_rels, "Relationship")
+        .into_iter()
+        .find(|r| attr(r, "Type").is_some_and(|t| t.ends_with("/drawing")))
+        .and_then(|r| attr(r, "Target"))
+        .map(|t| resolve(sheet, &t));
+    let drawing = match existing {
+        Some(path) => path,
+        None => {
+            let path = (1..)
+                .map(|n| format!("xl/drawings/drawing{n}.xml"))
+                .find(|p| !parts.iter().any(|(n, _)| n == p))
+                .unwrap_or_default();
+            let id = free_id(&sheet_rels);
+            sheet_rels = add_rel(
+                &sheet_rels,
+                format!(
+                    r#"<Relationship Id="{id}" Type="{DOC_RELS_NS}/drawing" Target="../drawings/{}"/>"#,
+                    path.rsplit('/').next().unwrap_or_default()
+                ),
+            );
+            set(parts, &sheet_rels_path, sheet_rels.clone());
+            types = add_rel_like(
+                &types,
+                "</Types>",
+                &format!(
+                    r#"<Override PartName="/{path}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>"#
+                ),
+            );
+            // The drawing goes after the page set-up, before the parts that
+            // must follow it.
+            let mut xml = get(parts, sheet).unwrap_or_default();
+            if !xml.contains("xmlns:r=") {
+                xml = xml.replacen(
+                    "<worksheet ",
+                    &format!("<worksheet xmlns:r=\"{DOC_RELS_NS}\" "),
+                    1,
+                );
+            }
+            let element = format!(r#"<drawing r:id="{id}"/>"#);
+            let at = [
+                "<legacyDrawing",
+                "<legacyDrawingHF",
+                "<drawingHF",
+                "<picture",
+                "<oleObjects",
+                "<controls",
+                "<webPublishItems",
+                "<tableParts",
+                "<extLst",
+                "</worksheet>",
+            ]
+            .iter()
+            .filter_map(|t| xml.find(t))
+            .min();
+            if let Some(at) = at {
+                xml.insert_str(at, &element);
+            }
+            set(parts, sheet, xml);
+            set(
+                parts,
+                &path,
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"></xdr:wsDr>"#
+                    .to_owned(),
+            );
+            path
+        }
+    };
+
+    if !types.to_ascii_lowercase().contains(r#"extension="png""#) {
+        types = add_rel_like(
+            &types,
+            "</Types>",
+            r#"<Default Extension="png" ContentType="image/png"/>"#,
+        );
+    }
+    set(parts, "[Content_Types].xml", types);
+
+    // The pictures: each its own part, linked from the drawing.
+    let drawing_rels_path = rels_of(&drawing);
+    let mut drawing_rels = get(parts, &drawing_rels_path).unwrap_or_else(empty_rels);
+    let mut anchors = String::new();
+    let emu = |px: u32| px as u64 * 9525;
+    for (k, p) in placed.iter().enumerate() {
+        let media = (1..)
+            .map(|n| format!("xl/media/opencheck{n}.png"))
+            .find(|m| !parts.iter().any(|(n, _)| n == m))
+            .unwrap_or_default();
+        parts.push((media.clone(), p.picture.png.clone()));
+        let id = free_id(&drawing_rels);
+        drawing_rels = add_rel(
+            &drawing_rels,
+            format!(
+                r#"<Relationship Id="{id}" Type="{DOC_RELS_NS}/image" Target="../media/{}"/>"#,
+                media.rsplit('/').next().unwrap_or_default()
+            ),
+        );
+        let (cx, cy) = (emu(p.width), emu(p.height));
+        let shape = 100_000 + k;
+        // The namespaces are declared here too, whatever the drawing uses.
+        anchors.push_str(&format!(
+            r#"<xdr:oneCellAnchor xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="{DOC_RELS_NS}"><xdr:from><xdr:col>{col}</xdr:col><xdr:colOff>{off}</xdr:colOff><xdr:row>{row}</xdr:row><xdr:rowOff>{off}</xdr:rowOff></xdr:from><xdr:ext cx="{cx}" cy="{cy}"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="{shape}" name="Picture {shape}"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="{id}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor>"#,
+            col = p.column,
+            row = p.row - 1,
+            off = emu(PICTURE_MARGIN),
+        ));
+    }
+    set(parts, &drawing_rels_path, drawing_rels);
+    let mut xml = get(parts, &drawing).unwrap_or_default();
+    // Before the drawing's closing tag, whatever its prefix.
+    if let Some(i) = xml.rfind("</") {
+        xml.insert_str(i, &anchors);
+    }
+    set(parts, &drawing, xml);
+}
+
+/// `text` with `insert` put before `before`.
+fn add_rel_like(text: &str, before: &str, insert: &str) -> String {
+    match text.rfind(before) {
+        Some(i) => format!("{}{insert}{}", &text[..i], &text[i..]),
+        None => text.to_owned(),
+    }
 }
 
 /// Moves the references in `ref="…"` and `sqref="…"` attributes (filters,
@@ -1094,6 +1432,139 @@ mod tests {
         let sheet = read(&filled, "xl/worksheets/sheet1.xml");
         assert!(!sheet.contains("{{issue"), "{sheet}");
         assert!(sheet.contains(r#"<row r="3"><c r="A3" s="5""#), "{sheet}");
+    }
+
+    /// The start of a PNG: signature and header chunk with the size.
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        b.extend(width.to_be_bytes());
+        b.extend(height.to_be_bytes());
+        b.extend([8, 6, 0, 0, 0]);
+        b
+    }
+
+    #[test]
+    fn places_pictures_in_their_cells() {
+        let template = workbook(&[Sheet {
+            name: "Issues".into(),
+            columns: vec![Column { width: 10.0 }, Column { width: 40.0 }],
+            rows: vec![
+                vec![
+                    (Cell::from("No."), Style::Heading),
+                    (Cell::from("Picture"), Style::Heading),
+                ],
+                vec![
+                    (Cell::from("{{issue.no}}"), Style::Table),
+                    (Cell::from("{{issue.image}}"), Style::Table),
+                ],
+            ],
+            freeze_rows: 0,
+            filter_row: None,
+            print_title_row: None,
+            header: String::new(),
+            footer: String::new(),
+        }])
+        .unwrap();
+        assert!(uses_field(&template, "issue.image"));
+        assert!(!uses_field(&template, "issue.title"));
+        let picture = Arc::new(Picture::from_png(png(960, 600)).unwrap());
+        let mut data = data(2);
+        for item in data.lists.get_mut("issue").unwrap() {
+            item.insert("image".into(), Cell::Picture(picture.clone()));
+        }
+        let filled = fill(&template, &data).unwrap();
+        let sheet = read(&filled, "xl/worksheets/sheet1.xml");
+        // Column B is 40 characters, 285 px: the picture 277 × 173 px.
+        assert!(
+            sheet.contains(r#"<row r="2" ht="135.8" customHeight="1">"#),
+            "{sheet}"
+        );
+        assert!(sheet.contains(r#"<c r="B3" s="2"/>"#), "{sheet}");
+        assert!(
+            sheet.contains(r#"<drawing r:id="rId1"/></worksheet>"#),
+            "{sheet}"
+        );
+        let rels = read(&filled, "xl/worksheets/_rels/sheet1.xml.rels");
+        assert!(
+            rels.contains(r#"Target="../drawings/drawing1.xml""#),
+            "{rels}"
+        );
+        let drawing = read(&filled, "xl/drawings/drawing1.xml");
+        assert_eq!(drawing.matches("<xdr:oneCellAnchor").count(), 2);
+        assert!(drawing.contains("<xdr:col>1</xdr:col>"));
+        assert!(drawing.contains("<xdr:row>2</xdr:row>"));
+        assert!(
+            drawing.contains(&format!(r#"cx="{}""#, 277 * 9525)),
+            "{drawing}"
+        );
+        let drels = read(&filled, "xl/drawings/_rels/drawing1.xml.rels");
+        assert!(drels.contains("../media/opencheck2.png"), "{drels}");
+        let types = read(&filled, "[Content_Types].xml");
+        assert!(
+            types.contains(r#"Extension="png""#) && types.contains("/xl/drawings/drawing1.xml")
+        );
+        let mut zip = zip::ZipArchive::new(Cursor::new(&filled)).unwrap();
+        assert!(zip.by_name("xl/media/opencheck1.png").is_ok());
+    }
+
+    #[test]
+    fn adds_pictures_to_a_drawing_with_a_logo() {
+        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+        let o = SimpleFileOptions::default();
+        let files = [
+            (
+                "[Content_Types].xml",
+                r#"<Types><Default Extension="PNG" ContentType="image/png"/></Types>"#,
+            ),
+            (
+                "xl/workbook.xml",
+                r#"<workbook xmlns:r="r"><sheets><sheet name="A" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                r#"<Relationships><Relationship Id="rId1" Type="ws" Target="worksheets/sheet1.xml"/></Relationships>"#,
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<worksheet xmlns:r="r"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>{{issue.image}}</t></is></c></row></sheetData><drawing r:id="rId4"/></worksheet>"#,
+            ),
+            (
+                "xl/worksheets/_rels/sheet1.xml.rels",
+                r#"<Relationships><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing7.xml"/></Relationships>"#,
+            ),
+            (
+                "xl/drawings/drawing7.xml",
+                r#"<xdr:wsDr><xdr:twoCellAnchor>logo</xdr:twoCellAnchor></xdr:wsDr>"#,
+            ),
+            (
+                "xl/drawings/_rels/drawing7.xml.rels",
+                r#"<Relationships><Relationship Id="rId1" Type="image" Target="../media/image1.png"/></Relationships>"#,
+            ),
+            ("xl/media/image1.png", "logo"),
+        ];
+        for (name, text) in files {
+            zip.start_file(name, o).unwrap();
+            zip.write_all(text.as_bytes()).unwrap();
+        }
+        let template = zip.finish().unwrap().into_inner();
+        let mut data = data(1);
+        let picture = Arc::new(Picture::from_png(png(100, 50)).unwrap());
+        data.lists.get_mut("issue").unwrap()[0].insert("image".into(), Cell::Picture(picture));
+        let filled = fill(&template, &data).unwrap();
+        let drawing = read(&filled, "xl/drawings/drawing7.xml");
+        assert!(
+            drawing.contains("logo</xdr:twoCellAnchor><xdr:oneCellAnchor"),
+            "{drawing}"
+        );
+        assert!(drawing.ends_with("</xdr:wsDr>"));
+        let drels = read(&filled, "xl/drawings/_rels/drawing7.xml.rels");
+        assert!(
+            drels.contains(r#"Id="rId2""#) && drels.contains("image1.png"),
+            "{drels}"
+        );
+        let sheet = read(&filled, "xl/worksheets/sheet1.xml");
+        assert_eq!(sheet.matches("<drawing ").count(), 1, "{sheet}");
+        assert!(!read(&filled, "[Content_Types].xml").contains(r#"Extension="png""#));
     }
 
     #[test]

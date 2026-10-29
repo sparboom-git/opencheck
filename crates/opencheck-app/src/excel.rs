@@ -5,11 +5,14 @@
 //! Fields are written as `{{name}}` in the template's cells and page header
 //! and footer. A row with an issue field (`{{issue.title}}`) is repeated for
 //! every issue, a row with a file field (`{{file.name}}`) for every model
-//! file; see [`FIELDS`].
+//! file; see [`FIELDS`]. `{{issue.image}}` shows the issue's picture, taken
+//! before the export only when the template uses it.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use opencheck_core::xlsx::{self, Cell, Column, Data, Fields, Sheet, Style};
+use opencheck_core::xlsx::{self, Cell, Column, Data, Fields, Picture, Sheet, Style};
+use rustc_hash::FxHashMap;
 
 use crate::app::OpenCheckApp;
 use crate::c402;
@@ -31,6 +34,10 @@ pub const FIELDS: &[(&str, &str)] = &[
     ("opencheck_version", "OpenCheck's version"),
     ("issue.no", "Number in the list"),
     ("issue.title", "Title"),
+    (
+        "issue.image",
+        "Picture of the issue's viewpoint, as wide as its column",
+    ),
     ("issue.criticality", "Criticality code: C1, C2 or C3"),
     ("issue.criticality_text", "Criticality with its meaning"),
     ("issue.status", "Status"),
@@ -91,16 +98,17 @@ pub fn standard_template() -> std::io::Result<Vec<u8>> {
             cell(&format!("{{{{{field}}}}}"), Style::Plain),
         ]
     };
-    let issue_columns: [(&str, &str, f32); 11] = [
+    let issue_columns: [(&str, &str, f32); 12] = [
         ("No.", "issue.no", 5.0),
-        ("Title", "issue.title", 26.0),
+        ("Title", "issue.title", 22.0),
+        ("Picture", "issue.image", 30.0),
         ("Criticality", "issue.criticality", 9.0),
         ("Status", "issue.status", 10.0),
         ("Responsible", "issue.responsible", 13.0),
         ("Assigned to", "issue.assigned_to", 11.0),
-        ("Description", "issue.description", 26.0),
+        ("Description", "issue.description", 22.0),
         ("Revit ID", "issue.revit_id", 10.0),
-        ("Element", "issue.element", 26.0),
+        ("Element", "issue.element", 22.0),
         ("Model", "issue.model", 10.0),
         ("IFC GlobalId", "issue.global_id", 24.0),
     ];
@@ -177,26 +185,35 @@ impl OpenCheckApp {
             .unwrap_or_default()
     }
 
-    /// The workbook for `issues` (GUIDs), in that order, from the user's
-    /// template or the standard one.
-    pub fn excel_file(&self, issues: &[String]) -> Result<Vec<u8>, String> {
-        let template = match &self.excel_template {
+    /// The template exports use: the user's, or the standard one.
+    pub fn excel_template_bytes(&self) -> Result<Vec<u8>, String> {
+        match &self.excel_template {
             Some(path) => std::fs::read(path).map_err(|e| {
                 format!(
                     "the Excel template {} could not be read ({e}); choose another under File → Settings",
                     path.display()
                 )
-            })?,
-            None => standard_template().map_err(|e| e.to_string())?,
-        };
-        xlsx::fill(&template, &self.excel_data(issues)).map_err(|e| {
+            }),
+            None => standard_template().map_err(|e| e.to_string()),
+        }
+    }
+
+    /// The workbook for `issues` (GUIDs), in that order, with their
+    /// pictures (PNG by GUID; none when the template shows none).
+    pub fn excel_file(
+        &self,
+        issues: &[String],
+        images: &FxHashMap<String, Vec<u8>>,
+    ) -> Result<Vec<u8>, String> {
+        let template = self.excel_template_bytes()?;
+        xlsx::fill(&template, &self.excel_data(issues, images)).map_err(|e| {
             format!(
                 "the Excel template could not be used ({e}); choose another under File → Settings"
             )
         })
     }
 
-    fn excel_data(&self, issues: &[String]) -> Data {
+    fn excel_data(&self, issues: &[String], images: &FxHashMap<String, Vec<u8>>) -> Data {
         let mut data = Data::default();
         let project = if self.issues.report.project.trim().is_empty() {
             self.session
@@ -229,7 +246,17 @@ impl OpenCheckApp {
             "issue".into(),
             list.iter()
                 .enumerate()
-                .map(|(n, issue)| self.issue_fields(n + 1, issue))
+                .map(|(n, issue)| {
+                    let mut fields = self.issue_fields(n + 1, issue);
+                    let picture = images
+                        .get(&issue.guid)
+                        .and_then(|png| Picture::from_png(png.clone()));
+                    fields.insert(
+                        "image".into(),
+                        picture.map_or(Cell::Empty, |p| Cell::Picture(Arc::new(p))),
+                    );
+                    fields
+                })
                 .collect(),
         );
         data.lists.insert("file".into(), self.file_fields());
@@ -493,12 +520,14 @@ mod tests {
         data.lists.insert(
             "issue".into(),
             vec![
-                issue(
-                    1,
-                    "Duct vs Beam",
-                    "3949807
-3595938",
-                ),
+                {
+                    let mut first = issue(1, "Duct vs Beam", "3949807\n3595938");
+                    first.insert(
+                        "image".into(),
+                        Cell::Picture(Arc::new(Picture::from_png(test_png(160, 100)).unwrap())),
+                    );
+                    first
+                },
                 issue(2, "Pipe vs Wall", "17"),
             ],
         );
@@ -511,6 +540,20 @@ mod tests {
             }],
         );
         data
+    }
+
+    /// A grey PNG of the given size.
+    fn test_png(width: u32, height: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer
+            .write_image_data(&vec![128; (width * height * 4) as usize])
+            .unwrap();
+        drop(writer);
+        out
     }
 
     fn sheet(bytes: &[u8], name: &str) -> String {
@@ -539,11 +582,12 @@ mod tests {
         let issues = sheet(&filled, "xl/worksheets/sheet1.xml");
         assert!(issues.contains("Duct vs Beam"));
         assert!(issues.contains("Pipe vs Wall"));
-        assert!(issues.contains(
-            "3949807
-3595938"
-        ));
+        assert!(issues.contains("3949807\n3595938"));
         assert!(!issues.contains("{{issue."), "{issues}");
+        // The first issue's picture, in column C; the second has none.
+        let drawing = sheet(&filled, "xl/drawings/drawing1.xml");
+        assert_eq!(drawing.matches("<xdr:oneCellAnchor").count(), 1);
+        assert!(drawing.contains("<xdr:col>2</xdr:col>"), "{drawing}");
         assert!(issues.contains(r#"orientation="portrait""#));
         assert!(issues.contains(r#"paperSize="9""#));
         assert!(

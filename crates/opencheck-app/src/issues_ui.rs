@@ -278,7 +278,7 @@ fn export_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     .clicked()
                 {
                     ui.close();
-                    app.export_excel_dialog();
+                    app.export_excel_dialog(&ctx);
                 }
                 if ui
                     .button(format!("{}  Report…", icon::FILE_TEXT))

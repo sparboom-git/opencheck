@@ -24,6 +24,8 @@ use crate::scene::{ElementRef, Focus, SectionPlane};
 pub enum ExportKind {
     Bcf(PathBuf),
     Report(PathBuf),
+    /// An Excel workbook whose template shows pictures.
+    Excel(PathBuf),
     /// Pictures for new topics, then these issues are sent to the BCF server.
     Live(Vec<String>),
 }
@@ -264,6 +266,15 @@ impl OpenCheckApp {
                         format!("{} issues written as BCF", capture.issues.len()),
                     )
                 }),
+            ExportKind::Excel(path) => self
+                .excel_file(&capture.issues, &capture.images)
+                .and_then(|bytes| crate::platform::write(path, &bytes).map_err(|e| e.to_string()))
+                .map(|()| {
+                    (
+                        path.clone(),
+                        format!("{} issues written to Excel", capture.issues.len()),
+                    )
+                }),
             ExportKind::Report(path) => {
                 let html = crate::report::build(self, &capture.issues, &capture.images);
                 crate::platform::write(path, html.as_bytes())
@@ -367,11 +378,20 @@ impl OpenCheckApp {
 
     /// Writes the issues to an Excel workbook, one row per issue. Needs no
     /// pictures, so it is written at once.
-    pub fn export_excel_dialog(&mut self) {
+    /// Writes the issues to an Excel workbook from the template. When the
+    /// template shows pictures they are taken first, as for the report.
+    pub fn export_excel_dialog(&mut self, ctx: &egui::Context) {
         let issues = self.export_scope();
         if issues.is_empty() {
             return;
         }
+        let template = match self.excel_template_bytes() {
+            Ok(t) => t,
+            Err(e) => {
+                self.errors.push(format!("Could not export: {e}"));
+                return;
+            }
+        };
         let name = format!(
             "{}-issues-{}.xlsx",
             self.export_base_name(),
@@ -384,8 +404,12 @@ impl OpenCheckApp {
         ) else {
             return;
         };
+        if opencheck_core::xlsx::uses_field(&template, "issue.image") {
+            self.start_export(ExportKind::Excel(path), ctx);
+            return;
+        }
         match self
-            .excel_file(&issues)
+            .excel_file(&issues, &FxHashMap::default())
             .and_then(|bytes| crate::platform::write(&path, &bytes).map_err(|e| e.to_string()))
         {
             Ok(()) => self.notify(format!(
