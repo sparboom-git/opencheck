@@ -78,6 +78,7 @@ A field is written as `{{name}}` in a cell, alone or within text
 | `{{issue.model}}` | Model per element |
 | `{{issue.global_id}}` | IFC GlobalId per element |
 | `{{issue.created}}` | Date created |
+| `{{issue.created_by}}` | Issued by (initials, or Claude) |
 | `{{issue.modified}}` | Date last changed |
 | `{{issue.bcf_status}}` | Status on the BCF server |
 | `{{issue.id}}` | Issue ID (the BCF topic's GUID) |

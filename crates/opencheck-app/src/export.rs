@@ -33,9 +33,9 @@ pub enum ExportKind {
 
 /// Frames to let the view settle after showing an issue (focus colours and
 /// geometry uploads take effect on the next frames).
-const SETTLE_FRAMES: u8 = 3;
+pub const SETTLE_FRAMES: u8 = 3;
 
-enum Stage {
+pub enum Stage {
     Show,
     Settle(u8),
     /// Waiting for the window capture, counting frames.
@@ -46,10 +46,10 @@ enum Stage {
 const MAX_PICTURE_WIDTH: usize = 960;
 
 /// Frames to wait for a capture before going on without a picture.
-const CAPTURE_TIMEOUT_FRAMES: u16 = 120;
+pub const CAPTURE_TIMEOUT_FRAMES: u16 = 120;
 
 /// What the 3D view showed before the capture, restored afterwards.
-struct SavedView {
+pub struct SavedView {
     camera: Camera,
     focus: Option<Focus>,
     focus_marker: Option<Vec3>,
@@ -135,7 +135,12 @@ impl OpenCheckApp {
     /// The issues an export covers: the ticked ones, or else all.
     pub fn export_scope(&self) -> Vec<String> {
         if self.issues.marked.is_empty() {
-            self.issues.list.iter().map(|i| i.guid.clone()).collect()
+            self.issues
+                .list
+                .iter()
+                .filter(|i| self.issues.shown(i))
+                .map(|i| i.guid.clone())
+                .collect()
         } else {
             // In list order, not tick order.
             self.issues
@@ -147,7 +152,41 @@ impl OpenCheckApp {
         }
     }
 
+    /// What the 3D view shows now, to put back after pictures.
+    pub fn save_view(&self) -> SavedView {
+        SavedView {
+            camera: self.camera,
+            focus: self.view.focus.clone(),
+            focus_marker: self.focus_marker,
+            selection: self.view.selection.clone(),
+            section: self.view.section,
+            show_context: self.view.show_context,
+            isolated: self.view.isolated.clone(),
+            hidden: self.view.hidden.clone(),
+            issue: self.issues.selected.clone(),
+            finding: self.checking.selected.clone(),
+        }
+    }
+
+    pub fn restore_view(&mut self, saved: SavedView) {
+        self.camera = saved.camera;
+        self.view.focus = saved.focus;
+        self.focus_marker = saved.focus_marker;
+        self.view.selection = saved.selection;
+        self.view.section = saved.section;
+        self.view.show_context = saved.show_context;
+        self.view.isolated = saved.isolated;
+        self.view.hidden = saved.hidden;
+        self.view.modes_dirty = true;
+        self.issues.selected = saved.issue;
+        self.checking.selected = saved.finding;
+    }
+
     pub fn is_capturing(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.claude.pictures.is_some() {
+            return true;
+        }
         self.capture.is_some() || self.check_docs.shot.is_some()
     }
 
@@ -162,18 +201,7 @@ impl OpenCheckApp {
         if issues.is_empty() || self.capture.is_some() {
             return;
         }
-        let saved = SavedView {
-            camera: self.camera,
-            focus: self.view.focus.clone(),
-            focus_marker: self.focus_marker,
-            selection: self.view.selection.clone(),
-            section: self.view.section,
-            show_context: self.view.show_context,
-            isolated: self.view.isolated.clone(),
-            hidden: self.view.hidden.clone(),
-            issue: self.issues.selected.clone(),
-            finding: self.checking.selected.clone(),
-        };
+        let saved = self.save_view();
         self.capture = Some(Capture {
             kind,
             issues,
@@ -249,18 +277,7 @@ impl OpenCheckApp {
         let Some(capture) = self.capture.take() else {
             return;
         };
-        let saved = capture.saved;
-        self.camera = saved.camera;
-        self.view.focus = saved.focus;
-        self.focus_marker = saved.focus_marker;
-        self.view.selection = saved.selection;
-        self.view.section = saved.section;
-        self.view.show_context = saved.show_context;
-        self.view.isolated = saved.isolated;
-        self.view.hidden = saved.hidden;
-        self.view.modes_dirty = true;
-        self.issues.selected = saved.issue;
-        self.checking.selected = saved.finding;
+        self.restore_view(capture.saved);
 
         let result = match &capture.kind {
             ExportKind::Live(guids) => {
@@ -331,7 +348,11 @@ impl OpenCheckApp {
                         .filter_map(|d| c402::discipline_label(*d).map(str::to_owned))
                         .collect(),
                     creation_date: issue.created.clone(),
-                    creation_author: author.clone(),
+                    creation_author: if issue.created_by.is_empty() {
+                        author.clone()
+                    } else {
+                        issue.created_by.clone()
+                    },
                     modified_date: issue.modified.clone(),
                     assigned_to: issue
                         .effective_assignee(link)

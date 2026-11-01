@@ -10,8 +10,11 @@
 //! thread, so Claude sees exactly what the reviewer sees, and its
 //! suggestions show up in the Check tab as they come in.
 //!
-//! Claude only reads and suggests: it cannot approve, create issues, or
-//! change models and rulesets.
+//! Claude reads, suggests and, when the reviewer allows it, makes issues
+//! (marked as issued by Claude). It cannot approve suggestions, decide on
+//! findings, or change models and rulesets. It can ask for pictures of findings: the 3D
+//! view is turned to each finding in turn and captured, as for a BCF
+//! export, and put back as it was.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
@@ -34,13 +37,19 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::{Value, json};
 use web_time::Instant;
 
-use crate::app::OpenCheckApp;
+use crate::app::{IssueTarget, OpenCheckApp};
+use crate::export::{CAPTURE_TIMEOUT_FRAMES, SETTLE_FRAMES, SavedView, Stage};
+use crate::issues::CLAUDE;
 use crate::theme;
 
 /// Longest list a tool returns in one page.
 const MAX_PAGE: usize = 100;
 /// Elements within this distance of a finding are listed with it, metres.
 const NEARBY: f32 = 0.5;
+/// Most pictures in one call.
+const MAX_PICTURES: usize = 12;
+/// Width of a picture unless Claude asks for another, pixels.
+const PICTURE_WIDTH: usize = 800;
 
 /// State of the connection.
 pub struct Link {
@@ -48,10 +57,14 @@ pub struct Link {
     pub open: bool,
     /// Element properties may be sent to Claude.
     pub properties: bool,
+    /// Claude may make issues.
+    pub issues: bool,
     /// Recent calls, newest last.
     pub log: VecDeque<String>,
     pub last_call: Option<Instant>,
     pub status: String,
+    /// Pictures being taken for Claude.
+    pub pictures: Option<Pictures>,
     server: Option<Server>,
 }
 
@@ -60,9 +73,11 @@ impl Default for Link {
         Self {
             open: false,
             properties: true,
+            issues: true,
             log: VecDeque::new(),
             last_call: None,
             status: String::new(),
+            pictures: None,
             server: None,
         }
     }
@@ -77,6 +92,35 @@ impl Link {
 struct Request {
     tool: String,
     args: Value,
+    reply: Sender<Result<Value, String>>,
+}
+
+/// The direction a picture is taken from.
+#[derive(Clone, Copy, PartialEq)]
+enum Direction {
+    /// From above at an angle, as the 3D view opens.
+    Angle,
+    /// Plan, straight from above.
+    Top,
+    /// From the south, north, west or east, as a parallel elevation.
+    Side(f32),
+    /// The direction the reviewer has the view turned to now.
+    Current,
+}
+
+/// Pictures for one call: each finding is shown, the view settles, the
+/// window is captured and the 3D view cut out of it.
+pub struct Pictures {
+    /// Finding ids; `None` is the view as it is.
+    targets: Vec<Option<String>>,
+    direction: Direction,
+    width: usize,
+    next: usize,
+    stage: Stage,
+    taken: Vec<Value>,
+    missing: Vec<Value>,
+    folder: PathBuf,
+    saved: Option<SavedView>,
     reply: Sender<Result<Value, String>>,
 }
 
@@ -204,19 +248,258 @@ pub fn poll(app: &mut OpenCheckApp) {
     };
     let requests: Vec<Request> = server.requests.try_iter().collect();
     for request in requests {
+        if matches!(request.tool.as_str(), "finding_pictures" | "view_picture") {
+            let note = match start_pictures(app, &request) {
+                Ok(()) => continue,
+                Err(e) => {
+                    let _ = request.reply.send(Err(e.clone()));
+                    format!("{} failed: {e}", request.tool)
+                }
+            };
+            log(app, note);
+            continue;
+        }
         let result = handle(app, &request.tool, &request.args);
         let note = match &result {
             Ok(_) => request.tool.clone(),
             Err(e) => format!("{} failed: {e}", request.tool),
         };
-        let link = &mut app.claude;
-        link.last_call = Some(Instant::now());
-        link.log.push_back(format!("{}  {note}", chrono_like_now()));
-        while link.log.len() > 200 {
-            link.log.pop_front();
-        }
+        log(app, note);
         let _ = request.reply.send(result);
     }
+}
+
+/// Notes a call in the dialog's list.
+fn log(app: &mut OpenCheckApp, note: String) {
+    let link = &mut app.claude;
+    link.last_call = Some(Instant::now());
+    link.log.push_back(format!("{}  {note}", chrono_like_now()));
+    while link.log.len() > 200 {
+        link.log.pop_front();
+    }
+}
+
+// ---- Pictures --------------------------------------------------------------
+
+fn start_pictures(app: &mut OpenCheckApp, request: &Request) -> Result<(), String> {
+    let args = &request.args;
+    if app.is_capturing() {
+        return Err("OpenCheck is taking other pictures: try again in a moment.".to_owned());
+    }
+    let targets: Vec<Option<String>> = if request.tool == "view_picture" {
+        vec![None]
+    } else {
+        need_report(app)?;
+        let ids: Vec<String> = args["ids"]
+            .as_array()
+            .ok_or("give the finding ids")?
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect();
+        if ids.is_empty() {
+            return Err("give the finding ids".to_owned());
+        }
+        if ids.len() > MAX_PICTURES {
+            return Err(format!(
+                "at most {MAX_PICTURES} pictures per call: ask for the rest in another call"
+            ));
+        }
+        if let Some(unknown) = ids.iter().find(|id| app.checking.find(id).is_none()) {
+            return Err(format!("no finding {unknown}"));
+        }
+        ids.into_iter().map(Some).collect()
+    };
+    let direction = match args["view"].as_str().unwrap_or("angle") {
+        "angle" => Direction::Angle,
+        "top" => Direction::Top,
+        "south" => Direction::Side(0.0),
+        "north" => Direction::Side(std::f32::consts::PI),
+        "west" => Direction::Side(std::f32::consts::FRAC_PI_2),
+        "east" => Direction::Side(-std::f32::consts::FRAC_PI_2),
+        "current" => Direction::Current,
+        other => return Err(format!("unknown view {other}")),
+    };
+    let width = args["width"]
+        .as_u64()
+        .map_or(PICTURE_WIDTH, |w| w as usize)
+        .clamp(320, 1600);
+    let folder = picture_folder(app);
+    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    app.claude.pictures = Some(Pictures {
+        targets,
+        direction,
+        width,
+        next: 0,
+        stage: Stage::Show,
+        taken: Vec::new(),
+        missing: Vec::new(),
+        folder,
+        saved: None,
+        reply: request.reply.clone(),
+    });
+    log(app, format!("{}: taking pictures", request.tool));
+    Ok(())
+}
+
+/// Where pictures are saved: next to the project file, or in the temporary
+/// folder while the project is not saved.
+fn picture_folder(app: &OpenCheckApp) -> PathBuf {
+    match &app.session.path {
+        Some(path) => {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            path.with_file_name(format!("{stem} pictures"))
+        }
+        None => std::env::temp_dir().join("OpenCheck pictures"),
+    }
+}
+
+/// A finding id as a file name.
+fn file_stem(id: &str) -> String {
+    id.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// One step of the pictures; called every frame, also while the windows are
+/// hidden for the pictures.
+pub fn step_pictures(app: &mut OpenCheckApp, ctx: &egui::Context) {
+    let Some(job) = &mut app.claude.pictures else {
+        return;
+    };
+    ctx.request_repaint();
+    match job.stage {
+        Stage::Show => {
+            if job.next >= job.targets.len() {
+                finish_pictures(app);
+                return;
+            }
+            if ctx.input(|i| i.viewport().minimized) == Some(true) {
+                let job = app.claude.pictures.take().expect("checked above");
+                if let Some(saved) = job.saved {
+                    app.restore_view(saved);
+                }
+                let _ = job.reply.send(Err(
+                    "OpenCheck's window is minimized: restore it so the 3D view can be captured."
+                        .to_owned(),
+                ));
+                return;
+            }
+            job.stage = Stage::Settle(0);
+            let target = job.targets[job.next].clone();
+            let direction = job.direction;
+            if job.saved.is_none() {
+                let saved = app.save_view();
+                if let Some(job) = &mut app.claude.pictures {
+                    job.saved = Some(saved);
+                }
+            }
+            if let Some(id) = target {
+                turn(app, direction);
+                app.show_finding(&id, true);
+            }
+        }
+        Stage::Settle(n) if n < SETTLE_FRAMES => job.stage = Stage::Settle(n + 1),
+        Stage::Settle(_) => {
+            job.stage = Stage::Requested(0);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+        }
+        Stage::Requested(waited) => {
+            let image: Option<Arc<egui::ColorImage>> = ctx.input(|i| {
+                i.raw.events.iter().find_map(|e| match e {
+                    egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                    _ => None,
+                })
+            });
+            if let Some(image) = image {
+                let png = crate::export::crop_png(
+                    &image,
+                    app.viewport_rect,
+                    ctx.pixels_per_point(),
+                    job.width,
+                );
+                let target = job.targets[job.next].clone();
+                let name = target
+                    .as_deref()
+                    .map_or_else(|| "view".to_owned(), file_stem);
+                let file = job.folder.join(format!("{name}.png"));
+                match png.map(|png| std::fs::write(&file, &png).map(|()| png)) {
+                    Some(Ok(png)) => job.taken.push(json!({
+                        "finding": target,
+                        "file": file.display().to_string(),
+                        "png_base64": opencheck_core::bcf::base64(&png),
+                    })),
+                    Some(Err(e)) => job.missing.push(json!({
+                        "finding": target,
+                        "why": format!("{}: {e}", file.display()),
+                    })),
+                    None => job.missing.push(json!({
+                        "finding": target,
+                        "why": "the 3D view is not on screen",
+                    })),
+                }
+                job.next += 1;
+                job.stage = Stage::Show;
+            } else if waited >= CAPTURE_TIMEOUT_FRAMES {
+                let target = job.targets[job.next].clone();
+                job.missing.push(json!({
+                    "finding": target,
+                    "why": "the window could not be captured",
+                }));
+                job.next += 1;
+                job.stage = Stage::Show;
+            } else {
+                job.stage = Stage::Requested(waited + 1);
+            }
+        }
+    }
+}
+
+/// Turns the camera for a picture; the finding is framed after.
+fn turn(app: &mut OpenCheckApp, direction: Direction) {
+    let home = crate::camera::Camera::default();
+    let (yaw, pitch, ortho) = match direction {
+        Direction::Current => return,
+        Direction::Angle => (home.yaw, home.pitch, false),
+        Direction::Top => (0.0, -89.9_f32.to_radians(), true),
+        Direction::Side(yaw) => (yaw, 0.0, true),
+    };
+    app.camera.yaw = yaw;
+    app.camera.pitch = pitch;
+    app.camera.ortho = ortho;
+}
+
+fn finish_pictures(app: &mut OpenCheckApp) {
+    let Some(job) = app.claude.pictures.take() else {
+        return;
+    };
+    if let Some(saved) = job.saved {
+        app.restore_view(saved);
+    }
+    let count = job.taken.len();
+    let _ = job.reply.send(Ok(json!({
+        "pictures": job.taken,
+        "missing": job.missing,
+        "folder": job.folder.display().to_string(),
+        "colours": "The finding's first element (a) is orange, the second (b) blue; the point of the finding has a marker. Other elements are drawn faint.",
+    })));
+    log(app, format!("pictures: {count} taken"));
+}
+
+/// Where a finding is: in the frame OpenCheck shows the models in (metres
+/// from the first model's origin) and in the models' IFC coordinates.
+fn location(app: &OpenCheckApp, f: &Finding) -> Value {
+    let round = |v: f64| (v * 1000.0).round() / 1000.0;
+    let shown = f.point.as_dvec3();
+    let ifc = shown + app.federation.origin();
+    let point = [shown.x, shown.y, shown.z].map(round);
+    let ifc_point = [ifc.x, ifc.y, ifc.z].map(round);
+    json!({ "point_m": point, "ifc_point_m": ifc_point })
 }
 
 /// The time of day, `HH:MM:SS`, without a time zone library.
@@ -239,6 +522,8 @@ fn handle(app: &mut OpenCheckApp, tool: &str, args: &Value) -> Result<Value, Str
         "get_finding" => get_finding(app, args),
         "get_element" => get_element(app, args),
         "rate" => rate(app, args),
+        "list_issues" => list_issues(app, args),
+        "create_issues" => create_issues(app, args),
         "summary" => Ok(summary(app)),
         other => Err(format!("unknown tool {other}")),
     }
@@ -300,6 +585,8 @@ fn project_info(app: &OpenCheckApp) -> Value {
             "examples": app.checking.triage.examples.len(),
         },
         "properties_allowed": app.claude.properties,
+        "issues_allowed": app.claude.issues,
+        "issues": app.issues.list.len(),
         "categories": {
             "C1": "Not critical: no effect on quality, cost or time. Noise, agreed and theoretical overlaps. Needs no action.",
             "C2": "Critical: affects quality, cost, time, buildability or construction.",
@@ -491,6 +778,7 @@ fn list_findings(app: &OpenCheckApp, args: &Value) -> Result<Value, String> {
                 "b": if f.is_single() { Value::Null } else { json!(short(&lookup, &f.b)) },
                 "depth_mm": (f.magnitude * 1000.0).round(),
                 "storey": storey,
+                "ifc_point_m": location(app, f)["ifc_point_m"],
                 "rating": rating.map(rating_json),
             })
         })
@@ -548,6 +836,7 @@ fn get_finding(app: &OpenCheckApp, args: &Value) -> Result<Value, String> {
         "measure": crate::results_ui::magnitude_text(f),
         "depth_mm": (f.magnitude * 1000.0).round(),
         "region_mm": mm3(size),
+        "location": location(app, f),
         "details": f.details,
         "a": side(&f.a),
         "b": if f.is_single() { Value::Null } else { side(&f.b) },
@@ -735,6 +1024,139 @@ fn rate(app: &mut OpenCheckApp, args: &Value) -> Result<Value, String> {
     }))
 }
 
+fn issue_json(index: usize, issue: &crate::issues::Issue) -> Value {
+    json!({
+        "number": index + 1,
+        "id": issue.guid,
+        "title": issue.title,
+        "status": issue.status.label(),
+        "category": crate::c402::code(issue.priority),
+        "responsible": issue.responsible.iter().map(|d| d.code()).collect::<Vec<_>>(),
+        "issued_by": issue.created_by,
+        "created": issue.created,
+        "findings": issue.findings.iter().map(|f| f.finding.clone()).collect::<Vec<_>>(),
+    })
+}
+
+fn list_issues(app: &OpenCheckApp, args: &Value) -> Result<Value, String> {
+    let by = args["issued_by"].as_str();
+    let rows: Vec<Value> = app
+        .issues
+        .list
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| by.is_none_or(|b| i.created_by.eq_ignore_ascii_case(b)))
+        .map(|(n, i)| issue_json(n, i))
+        .collect();
+    let (offset, limit) = page(args, 50);
+    let total = rows.len();
+    let list: Vec<Value> = rows.into_iter().skip(offset).take(limit).collect();
+    Ok(json!({ "total": total, "offset": offset, "issues": list }))
+}
+
+/// Makes issues of findings, as issued by Claude.
+fn create_issues(app: &mut OpenCheckApp, args: &Value) -> Result<Value, String> {
+    if !app.claude.issues {
+        return Err(
+            "The reviewer has not allowed Claude to make issues (File → Claude connection). \
+             Suggest categories with rate instead."
+                .to_owned(),
+        );
+    }
+    need_report(app)?;
+    let items = args["issues"].as_array().ok_or(
+        "give \"issues\": a list of {findings or group, category, title, description, bundle}",
+    )?;
+    // Every item is checked before any issue is made.
+    let mut batch = Vec::with_capacity(items.len());
+    for (n, item) in items.iter().enumerate() {
+        let category = item["category"]
+            .as_str()
+            .and_then(Category::parse)
+            .ok_or_else(|| format!("issue {}: needs a category: C1, C2 or C3", n + 1))?;
+        let mut ids: Vec<String> = item["findings"]
+            .as_array()
+            .map(|list| {
+                list.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(gid) = item["group"].as_str() {
+            let report = app.checking.report.as_ref().expect("checked above");
+            let lookup = Lookup::new(&app.federation);
+            let group = triage::groups(report, &lookup, |_| true)
+                .into_iter()
+                .find(|g| g.id == gid)
+                .ok_or_else(|| format!("issue {}: no group {gid}", n + 1))?;
+            ids.extend(group.findings);
+        }
+        if ids.is_empty() {
+            return Err(format!("issue {}: give its findings or a group", n + 1));
+        }
+        if let Some(unknown) = ids.iter().find(|id| app.checking.find(id).is_none()) {
+            return Err(format!("issue {}: no finding {unknown}", n + 1));
+        }
+        let text = |key: &str| item[key].as_str().unwrap_or_default().trim().to_owned();
+        batch.push((
+            ids,
+            category,
+            text("title"),
+            text("description"),
+            item["bundle"].as_bool().unwrap_or(true),
+        ));
+    }
+
+    // Making issues clears the ticked findings: the reviewer's stay ticked.
+    let ticked = app.checking.marked.clone();
+    let mut made = Vec::new();
+    let mut skipped = Vec::new();
+    for (ids, category, title, description, bundle) in batch {
+        // The reviewer's decisions and existing issues stand.
+        let (free, taken): (Vec<String>, Vec<String>) = ids.into_iter().partition(|id| {
+            app.issues.for_finding(id).is_none() && !app.checking.decisions.contains_key(id)
+        });
+        skipped.extend(taken);
+        if free.is_empty() {
+            continue;
+        }
+        let before: FxHashSet<String> = app.issues.list.iter().map(|i| i.guid.clone()).collect();
+        let target = if bundle {
+            IssueTarget::BundleFramed
+        } else {
+            IssueTarget::EachFramed
+        };
+        app.add_issues(&free, target);
+        for (index, issue) in app.issues.list.iter_mut().enumerate() {
+            if before.contains(&issue.guid) {
+                continue;
+            }
+            issue.created_by = CLAUDE.to_owned();
+            issue.priority = category.severity();
+            if !title.is_empty() && (bundle || free.len() == 1) {
+                issue.title = title.clone();
+            }
+            if !description.is_empty() {
+                issue.description = description.clone();
+            }
+            made.push(issue_json(index, issue));
+        }
+    }
+    app.checking.marked = ticked
+        .into_iter()
+        .filter(|id| app.issues.for_finding(id).is_none())
+        .collect();
+    app.refresh_finding_focus();
+    if !made.is_empty() {
+        app.session.dirty = true;
+    }
+    Ok(json!({
+        "made": made,
+        "skipped": skipped,
+        "note": "Findings already in an issue, or decided on by the reviewer, were skipped.",
+    }))
+}
+
 fn summary(app: &OpenCheckApp) -> Value {
     let mut by: FxHashMap<String, usize> = FxHashMap::default();
     let (mut sure, mut likely, mut unsure) = (0, 0, 0);
@@ -908,8 +1330,10 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui, ctx: &egui::Context) {
         RichText::new(
             "Lets Claude Desktop review the findings of the open project: it reads them and \
              suggests a category (C1–C3) with how sure it is and why. You approve the \
-             suggestions in the Check tab; Claude cannot approve, create issues or change \
-             anything else.",
+             suggestions in the Check tab. If you allow it, Claude also makes issues, \
+             shown as issued by Claude. Claude cannot approve, decide on findings or change \
+             models and rulesets. It can ask for pictures of findings: the 3D view turns to \
+             each in turn and comes back to yours.",
         )
         .color(theme::text_muted()),
     );
@@ -941,14 +1365,18 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     if !status.is_empty() {
         ui.label(RichText::new(status).small().color(theme::text_muted()));
     }
+    ui.checkbox(&mut app.claude.issues, "Let Claude make issues")
+        .on_hover_text(
+            "Issues Claude makes are shown as issued by Claude; filter the issue list to see them",
+        );
     ui.checkbox(&mut app.claude.properties, "Share element properties")
         .on_hover_text(
             "Off: Claude sees classes, names, types, systems and sizes, but no property sets",
         );
     ui.label(
         RichText::new(
-            "What Claude reads (names, systems, properties) is sent to Anthropic. Check that \
-             the project allows it.",
+            "What Claude reads (names, systems, properties, pictures of the 3D view) is sent \
+             to Anthropic. Check that the project allows it.",
         )
         .small()
         .color(theme::text_muted()),

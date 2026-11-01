@@ -8,9 +8,100 @@ use opencheck_core::Discipline;
 use crate::app::OpenCheckApp;
 use crate::c402;
 use crate::checking_ui::{FOCUS_A, FOCUS_B, dot, severity_color};
-use crate::issues::{ComponentRole, IssueStatus};
+use crate::issues::{CLAUDE, ComponentRole, IssueStatus, created_day};
 use crate::results_ui::class_label;
 use crate::theme;
+
+/// A time from an issue as `YYYY-MM-DD HH:MM`.
+fn when(time: &str) -> String {
+    time.replace('T', " ").chars().take(16).collect()
+}
+
+/// The filter of the issue list: who made the issues and on which day.
+pub fn filter_button(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
+    if app.issues.list.is_empty() {
+        return;
+    }
+    let mut people: Vec<(String, usize)> = Vec::new();
+    let mut days: Vec<(String, usize)> = Vec::new();
+    for issue in &app.issues.list {
+        let day = created_day(issue).to_owned();
+        for (list, key) in [(&mut people, issue.created_by.clone()), (&mut days, day)] {
+            match list.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, n)) => *n += 1,
+                None => list.push((key, 1)),
+            }
+        }
+    }
+    people.sort();
+    days.sort_by(|a, b| b.0.cmp(&a.0));
+    let active = app.issues.is_filtered();
+    let text = RichText::new(format!("{}  Filter", icon::FUNNEL_SIMPLE));
+    let text = if active {
+        text.color(theme::accent()).family(theme::bold())
+    } else {
+        text
+    };
+    ui.menu_button(text, |ui| {
+        ui.set_min_width(220.0);
+        ui.label(
+            RichText::new("Issued by")
+                .small()
+                .color(theme::text_muted()),
+        );
+        if ui.radio(app.issues.filter_by.is_none(), "Anyone").clicked() {
+            app.issues.filter_by = None;
+        }
+        for (who, n) in &people {
+            let name = match who.as_str() {
+                "" => "Not noted",
+                CLAUDE => "Claude",
+                other => other,
+            };
+            if ui
+                .radio(
+                    app.issues.filter_by.as_ref() == Some(who),
+                    format!("{name}  ({n})"),
+                )
+                .clicked()
+            {
+                app.issues.filter_by = Some(who.clone());
+            }
+        }
+        ui.separator();
+        ui.label(RichText::new("Created").small().color(theme::text_muted()));
+        if ui
+            .radio(app.issues.filter_day.is_none(), "Any day")
+            .clicked()
+        {
+            app.issues.filter_day = None;
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("issue_filter_days")
+            .max_height(220.0)
+            .show(ui, |ui| {
+                for (day, n) in &days {
+                    if ui
+                        .radio(
+                            app.issues.filter_day.as_ref() == Some(day),
+                            format!("{day}  ({n})"),
+                        )
+                        .clicked()
+                    {
+                        app.issues.filter_day = Some(day.clone());
+                    }
+                }
+            });
+        if active {
+            ui.separator();
+            if ui.button("Show all issues").clicked() {
+                app.issues.filter_by = None;
+                app.issues.filter_day = None;
+                ui.close();
+            }
+        }
+    });
+}
 
 pub fn issues(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     bcf_bar(app, ui);
@@ -105,6 +196,29 @@ pub fn issues(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 .color(theme::text_muted()),
         );
     }
+    if app.issues.is_filtered() {
+        let shown = app
+            .issues
+            .list
+            .iter()
+            .filter(|i| app.issues.shown(i))
+            .count();
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{}  Showing {shown} of {} issues",
+                    icon::FUNNEL_SIMPLE,
+                    app.issues.list.len()
+                ))
+                .small()
+                .color(theme::accent()),
+            );
+            if ui.small_button("Show all").clicked() {
+                app.issues.filter_by = None;
+                app.issues.filter_day = None;
+            }
+        });
+    }
     ui.add_space(4.0);
 
     let mut show = None;
@@ -121,6 +235,9 @@ pub fn issues(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
             for (index, issue) in app.issues.list.iter().enumerate() {
+                if !app.issues.shown(issue) {
+                    continue;
+                }
                 let selected = app.issues.selected.as_deref() == Some(issue.guid.as_str());
                 ui.horizontal(|ui| {
                     let mut ticked = app.issues.marked.contains(&issue.guid);
@@ -156,6 +273,10 @@ pub fn issues(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                         )
                     })
                     .on_hover_text(&issue.title);
+                    if issue.created_by == CLAUDE {
+                        ui.label(RichText::new(icon::SPARKLE).small().color(theme::accent()))
+                            .on_hover_text("Made by Claude");
+                    }
                     if let Some(link) = &issue.bcf {
                         let (glyph, tip) = if issue.needs_sending() {
                             (
@@ -530,6 +651,17 @@ fn issue_detail(app: &mut OpenCheckApp, ui: &mut egui::Ui, guid: &str) {
                     .on_hover_text("The default person of the first responsible discipline");
                 }
             });
+            ui.end_row();
+            ui.label(RichText::new("Issued by").color(theme::text_muted()));
+            let by = if issue.created_by.is_empty() {
+                "–".to_owned()
+            } else if issue.created_by == CLAUDE {
+                format!("{}  {CLAUDE}", icon::SPARKLE)
+            } else {
+                issue.created_by.clone()
+            };
+            ui.label(format!("{by} · {}", when(&issue.created)))
+                .on_hover_text("Who made the issue, and when");
             ui.end_row();
         });
     if let Some(bcf) = &issue.bcf {

@@ -51,6 +51,22 @@ pub fn set(key: &str, value: Value) {
     );
 }
 
+const INITIALS_SETTING: &str = "initials";
+
+/// Who works in OpenCheck, for "Issued by": the saved initials, or else a
+/// short user name in capitals (`dsp` becomes `DSP`).
+pub fn initials() -> String {
+    if let Some(saved) = get(INITIALS_SETTING).and_then(|v| v.as_str().map(str::to_owned)) {
+        return saved;
+    }
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .ok()
+        .filter(|u| (1..=5).contains(&u.chars().count()) && u.chars().all(char::is_alphanumeric))
+        .map(|u| u.to_uppercase())
+        .unwrap_or_default()
+}
+
 /// The Excel template chosen last time.
 pub fn saved_excel_template() -> Option<PathBuf> {
     saved_path(excel::TEMPLATE_SETTING)
@@ -140,6 +156,26 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
         scroll: crate::dialog::Scroll::Both,
     };
     crate::dialog::show(ctx, &dialog, &mut open, |ui| {
+        ui.label(RichText::new(format!("{}  You", icon::USER)).strong());
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Initials").color(theme::text_muted()));
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut app.initials)
+                        .hint_text("e.g. ABC")
+                        .desired_width(80.0),
+                )
+                .on_hover_text("Shown as \"Issued by\" on the issues you make")
+                .changed()
+            {
+                set(
+                    INITIALS_SETTING,
+                    Value::String(app.initials.trim().to_owned()),
+                );
+            }
+        });
+        ui.add_space(12.0);
         ui.label(RichText::new(format!("{}  Excel export", icon::FILE_XLS)).strong());
         ui.add_space(4.0);
         ui.label(

@@ -22,8 +22,10 @@ const PROTOCOL: &str = "2025-06-18";
 const INSTRUCTIONS: &str = "Reviews the clash and clearance findings of the project open in \
 OpenCheck. Follow the opencheck-triage skill: suggest a C402 category (C1 not critical, C2 \
 critical, C3 very critical; noise is C1) with a confidence from 0 to 1 and a short reason for \
-each finding or group of alike findings. The reviewer approves the suggestions in OpenCheck; \
-you cannot approve, create issues or change anything else.";
+each finding or group of alike findings. The reviewer approves the suggestions in OpenCheck. \
+When the user asks for issues and the reviewer allows it, create_issues makes them, shown as \
+issued by Claude; you cannot approve, decide on findings or change anything else. \
+finding_pictures shows findings in the 3D view, and get_finding gives their coordinates.";
 
 const NOT_OPEN: &str = "OpenCheck is not open, or its Claude connection is off. Open the \
 project in OpenCheck, run the check, and switch on File → Claude connection → Allow Claude to \
@@ -62,7 +64,7 @@ fn tools() -> Value {
         },
         {
             "name": "list_findings",
-            "description": "Findings one per row: id, rule, the two elements, depth, storey and any suggestion.",
+            "description": "Findings one per row: id, rule, the two elements, depth, storey, the point in IFC coordinates (metres) and any suggestion.",
             "inputSchema": { "type": "object", "properties": with_page(json!({
                 "group": { "type": "string", "description": "Only the findings of this group id." },
                 "rule": { "type": "string", "description": "Only rules whose name contains this." },
@@ -72,7 +74,7 @@ fn tools() -> Value {
         },
         {
             "name": "get_finding",
-            "description": "One finding in full: both elements (class, name, type, systems and their kind, materials, storey, size), depth, the elements around it, and any decision, issue or suggestion.",
+            "description": "One finding in full: both elements (class, name, type, systems and their kind, materials, storey, size), depth, where it is (location.ifc_point_m: x, y, z in metres in the models' IFC coordinates; location.point_m: from the origin OpenCheck shows the models around), the elements around it, and any decision, issue or suggestion.",
             "inputSchema": { "type": "object", "properties": {
                 "id": { "type": "string", "description": "The finding's id." },
             }, "required": ["id"] },
@@ -84,6 +86,22 @@ fn tools() -> Value {
                 "global_id": { "type": "string" },
                 "model": { "type": "string", "description": "The model's name, when the GlobalId is in several models." },
             }, "required": ["global_id"] },
+        },
+        {
+            "name": "finding_pictures",
+            "description": "Pictures of findings from OpenCheck's 3D view: each finding framed with some context around it, its first element orange and the second blue, the rest faint. Each picture is also saved as a PNG file (paths in the answer) for use in reports. The reviewer's view is put back afterwards. OpenCheck's window must not be minimized.",
+            "inputSchema": { "type": "object", "properties": {
+                "ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 12, "description": "Finding ids, at most 12 per call." },
+                "view": { "type": "string", "enum": ["angle", "top", "south", "north", "west", "east", "current"], "description": "From above at an angle (default), a plan from the top, an elevation from one side, or the direction the reviewer has the view turned to." },
+                "width": { "type": "integer", "minimum": 320, "maximum": 1600, "description": "Widest picture in pixels (default 800)." },
+            }, "required": ["ids"] },
+        },
+        {
+            "name": "view_picture",
+            "description": "A picture of OpenCheck's 3D view exactly as the reviewer sees it now, also saved as a PNG file.",
+            "inputSchema": { "type": "object", "properties": {
+                "width": { "type": "integer", "minimum": 320, "maximum": 1600, "description": "Widest picture in pixels (default 800)." },
+            } },
         },
         {
             "name": "rate",
@@ -98,6 +116,27 @@ fn tools() -> Value {
                     "reason": { "type": "string", "description": "One or two short sentences the reviewer can check, in the user's language." },
                 }, "required": ["category", "confidence", "reason"] } },
             }, "required": ["ratings"] },
+        },
+        {
+            "name": "list_issues",
+            "description": "The project's issues: number, title, status, category, responsible disciplines, who issued it (initials, or Claude), when, and its finding ids.",
+            "inputSchema": { "type": "object", "properties": with_page(json!({
+                "issued_by": { "type": "string", "description": "Only issues made by these initials, or by Claude." },
+            })) },
+        },
+        {
+            "name": "create_issues",
+            "description": "Makes issues of findings, shown in OpenCheck as issued by Claude. Only when the user asks for issues, and only if the reviewer allows it (project_info.issues_allowed). Findings already in an issue or decided on by the reviewer are skipped. An issue's viewpoint frames its findings.",
+            "inputSchema": { "type": "object", "properties": {
+                "issues": { "type": "array", "items": { "type": "object", "properties": {
+                    "findings": { "type": "array", "items": { "type": "string" }, "description": "Finding ids (or give group)." },
+                    "group": { "type": "string", "description": "A group id from list_groups: all its findings." },
+                    "category": { "type": "string", "enum": ["C1", "C2", "C3"] },
+                    "bundle": { "type": "boolean", "description": "One issue for all its findings (default), or one issue per finding." },
+                    "title": { "type": "string", "description": "Short title; OpenCheck makes one when left out." },
+                    "description": { "type": "string", "description": "What is wrong and what must be done, in the user's language." },
+                }, "required": ["category"] } },
+            }, "required": ["issues"] },
         },
         {
             "name": "summary",
@@ -164,6 +203,22 @@ impl App {
     }
 }
 
+/// An answer as MCP content: the text, then any pictures as images.
+fn content(mut value: Value) -> Vec<Value> {
+    let mut images = Vec::new();
+    if let Some(pictures) = value["pictures"].as_array_mut() {
+        for picture in pictures {
+            if let Some(data) = picture.as_object_mut().and_then(|p| p.remove("png_base64")) {
+                images.push(json!({ "type": "image", "data": data, "mimeType": "image/png" }));
+            }
+        }
+    }
+    let text = serde_json::to_string_pretty(&value).unwrap_or_default();
+    std::iter::once(json!({ "type": "text", "text": text }))
+        .chain(images)
+        .collect()
+}
+
 pub fn serve() -> Result<()> {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
@@ -201,11 +256,7 @@ pub fn serve() -> Result<()> {
                     .cloned()
                     .unwrap_or_else(|| json!({}));
                 Ok(match app.call(name, &args) {
-                    Ok(value) => json!({
-                        "content": [{ "type": "text",
-                            "text": serde_json::to_string_pretty(&value).unwrap_or_default() }],
-                        "isError": false,
-                    }),
+                    Ok(value) => json!({ "content": content(value), "isError": false }),
                     Err(e) => json!({
                         "content": [{ "type": "text", "text": e }],
                         "isError": true,
@@ -232,10 +283,26 @@ mod tests {
     fn every_tool_has_a_schema() {
         let tools = tools();
         let list = tools.as_array().unwrap();
-        assert_eq!(list.len(), 8);
+        assert_eq!(list.len(), 12);
         for t in list {
             assert!(t["name"].is_string());
             assert_eq!(t["inputSchema"]["type"], "object");
         }
+    }
+
+    #[test]
+    fn pictures_become_images_after_the_text() {
+        let answer = json!({
+            "pictures": [{ "finding": "f1", "file": "f1.png", "png_base64": "iVBOR" }],
+            "missing": [],
+        });
+        let content = content(answer);
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        let text = content[0]["text"].as_str().unwrap();
+        assert!(text.contains("f1.png") && !text.contains("iVBOR"));
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["data"], "iVBOR");
+        assert_eq!(content[1]["mimeType"], "image/png");
     }
 }

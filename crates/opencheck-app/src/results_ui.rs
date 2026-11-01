@@ -344,6 +344,11 @@ pub fn results_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                         app.checking.tab = tab;
                     }
                 }
+                if app.checking.tab == ResultsTab::Issues {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        issues_ui::filter_button(app, ui);
+                    });
+                }
             });
             ui.separator();
             match app.checking.tab {

@@ -234,6 +234,10 @@ pub struct Issue {
     /// usually an e-mail address); empty when not assigned.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub assigned_to: String,
+    /// Who made the issue: the reviewer's initials, or [`CLAUDE`]. Empty for
+    /// issues made before OpenCheck noted it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub created_by: String,
     /// The topic on the BCF server, once the issue has been sent there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bcf: Option<BcfTopicLink>,
@@ -441,6 +445,14 @@ impl Issue {
     }
 }
 
+/// "Issued by" of the issues Claude makes.
+pub const CLAUDE: &str = "Claude";
+
+/// The day an issue was made, `YYYY-MM-DD`.
+pub fn created_day(issue: &Issue) -> &str {
+    issue.created.get(..10).unwrap_or(&issue.created)
+}
+
 #[derive(Debug, Default)]
 pub struct Issues {
     pub list: Vec<Issue>,
@@ -451,6 +463,10 @@ pub struct Issues {
     pub bcf: Option<BcfProjectLink>,
     /// Assignees used before (initials or e-mail), offered again.
     pub people: Vec<String>,
+    /// The list shows only issues made by this person.
+    pub filter_by: Option<String>,
+    /// The list shows only issues made on this day, `YYYY-MM-DD`.
+    pub filter_day: Option<String>,
     /// Header fields of the issue report.
     pub report: ReportSettings,
     /// What `issues.json` held that could not be read, written back on save.
@@ -491,6 +507,21 @@ fn is_default_report(r: &ReportSettings) -> bool {
 }
 
 impl Issues {
+    /// The issue passes the list's filter.
+    pub fn shown(&self, issue: &Issue) -> bool {
+        self.filter_by
+            .as_ref()
+            .is_none_or(|by| issue.created_by == *by)
+            && self
+                .filter_day
+                .as_ref()
+                .is_none_or(|day| created_day(issue) == day)
+    }
+
+    pub fn is_filtered(&self) -> bool {
+        self.filter_by.is_some() || self.filter_day.is_some()
+    }
+
     pub fn get(&self, guid: &str) -> Option<&Issue> {
         self.list.iter().find(|i| i.guid == guid)
     }
@@ -563,6 +594,8 @@ impl Issues {
                 marked: Vec::new(),
                 bcf,
                 people,
+                filter_by: None,
+                filter_day: None,
                 report,
                 leftovers,
             },
@@ -755,6 +788,7 @@ mod tests {
             solved_by_update: false,
             responsible: vec![],
             assigned_to: String::new(),
+            created_by: String::new(),
             bcf: None,
         };
         let issues = Issues {
@@ -822,6 +856,7 @@ mod bundle_tests {
             solved_by_update: false,
             responsible: vec![],
             assigned_to: String::new(),
+            created_by: String::new(),
             bcf: None,
         }
     }
@@ -950,5 +985,35 @@ mod bundle_tests {
         let outcome = issues.apply_run(&run_with(&absent, &not_checked, &updated), "t");
         assert_eq!(outcome, RunOutcome::default());
         assert_eq!(issues.get("one").unwrap().solved_count(), 0);
+    }
+
+    #[test]
+    fn the_filter_shows_issues_by_who_made_them_and_the_day() {
+        let mut a = issue("a", &["f1"], Severity::Moderate);
+        a.created_by = CLAUDE.to_owned();
+        a.created = "2026-11-01T10:00:00Z".to_owned();
+        let mut b = issue("b", &["f2"], Severity::Moderate);
+        b.created_by = "DSP".to_owned();
+        b.created = "2026-10-30T08:00:00Z".to_owned();
+        let mut issues = Issues::default();
+        assert!(!issues.is_filtered());
+        assert!(issues.shown(&a) && issues.shown(&b));
+        issues.filter_by = Some(CLAUDE.to_owned());
+        assert!(issues.shown(&a) && !issues.shown(&b));
+        issues.filter_by = None;
+        issues.filter_day = Some("2026-10-30".to_owned());
+        assert!(!issues.shown(&a) && issues.shown(&b));
+    }
+
+    #[test]
+    fn issued_by_is_kept_and_old_issues_have_none() {
+        let mut a = issue("a", &["f1"], Severity::Moderate);
+        a.created_by = "DSP".to_owned();
+        let text = serde_json::to_string(&a).unwrap();
+        let back: Issue = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.created_by, "DSP");
+        let old = text.replace(",\"created_by\":\"DSP\"", "");
+        let back: Issue = serde_json::from_str(&old).unwrap();
+        assert_eq!(back.created_by, "");
     }
 }

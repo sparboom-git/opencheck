@@ -66,7 +66,8 @@ fn main() -> eframe::Result {
             .with_title("OpenCheck")
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([900.0, 560.0])
-            .with_drag_and_drop(true),
+            .with_drag_and_drop(true)
+            .with_icon(app_icon()),
         renderer: eframe::Renderer::Wgpu,
         depth_buffer: 32,
         multisampling: render::MSAA_SAMPLES as u16,
@@ -78,6 +79,17 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| Ok(Box::new(app::OpenCheckApp::new(cc, files)))),
     )
+}
+
+/// The window's icon, from the PNG made by `scripts/app-icons.py`.
+#[cfg(not(target_arch = "wasm32"))]
+fn app_icon() -> egui::IconData {
+    let image = report_ui::png_image(include_bytes!("../assets/icon.png"));
+    image.map_or_else(egui::IconData::default, |image| egui::IconData {
+        width: image.size[0] as u32,
+        height: image.size[1] as u32,
+        rgba: image.pixels.iter().flat_map(|p| p.to_array()).collect(),
+    })
 }
 
 /// In the browser the app draws on the page's `<canvas id="opencheck">`.

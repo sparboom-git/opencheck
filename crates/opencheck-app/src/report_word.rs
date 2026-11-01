@@ -793,6 +793,7 @@ mod tests {
             solved_by_update: false,
             responsible: vec![],
             assigned_to: "ABC".into(),
+            created_by: String::new(),
             bcf: None,
         };
         let mut blocks = default_blocks();

@@ -4,8 +4,9 @@ A model check often gives thousands of findings of which only a few need
 action. OpenCheck can let **Claude Desktop** review the findings of the open
 project and suggest a category for each by the Danish C402 practice, with how
 sure it is and why. You approve, change or dismiss the suggestions in the
-Check tab. Claude only reads and suggests: it cannot approve, create issues or
-change models and rulesets.
+Check tab. Claude reads and suggests and, if you allow it, makes issues when
+you ask for them. It cannot approve suggestions, decide on findings or change
+models and rulesets.
 
 | Category | Meaning | What approving does |
 |---|---|---|
@@ -120,9 +121,35 @@ project, so the next review follows the project's practice.
 
 ## Data
 
-What Claude reads (element and type names, systems, sizes and, if shared,
-properties) is sent to Anthropic. Geometry and IFC files are not. Check that
-your company's rules and the project allow it before using it on a project.
+What Claude reads (element and type names, systems, sizes, coordinates, and,
+if shared, properties) is sent to Anthropic, and so are the pictures Claude
+asks for. IFC files and the models' geometry are not. Check that your
+company's rules and the project allow it before using it on a project.
+
+## Issues made by Claude
+
+With *Let Claude make issues* on (File → Claude connection), Claude can make
+issues when you ask for them, e.g. "make issues of the ventilation clashes
+through the walls". Findings already in an issue, or that you decided on, are
+left alone. Every issue shows who made it under *Issued by*: your initials
+(File → Settings → You; by default your Windows user name when it is short)
+or *Claude*, with a sparkle in the list. *Filter* at the top right of the
+Issues list shows only the issues of one person, or of one day.
+
+## Pictures and coordinates
+
+Claude can ask for pictures of findings (`finding_pictures`): OpenCheck
+turns the 3D view to each finding in turn, as for a BCF export, captures
+it and puts your view back afterwards. The finding's first element is
+orange, the second blue. Claude sees the pictures, and each is also saved
+as a PNG file in a folder next to the project file (*<project> pictures*;
+the temporary folder while the project is not saved), so a report Claude
+writes can use them. A picture can be taken at an angle (default), as a
+plan from the top, or as an elevation from one side. The window must not be
+minimized while the pictures are taken.
+
+`get_finding` gives where a finding is: `ifc_point_m` in the models' IFC
+coordinates and `point_m` from the origin OpenCheck shows the models around.
 
 ## The tools
 
@@ -135,7 +162,11 @@ each call goes to the running app.
 | `triage_rules` | The project's triage rules and corrected examples |
 | `list_groups` | Groups of alike findings with depth and examples |
 | `list_findings` | Findings one per row, by group, rule, storey or status |
-| `get_finding` | One finding in full, with the elements around it |
+| `get_finding` | One finding in full, with its coordinates and the elements around it |
+| `finding_pictures` | Pictures of up to 12 findings from the 3D view, also saved as PNG |
+| `view_picture` | A picture of the 3D view as you see it now |
 | `get_element` | One element's properties (if shared) |
 | `rate` | Suggestions for findings or whole groups |
+| `list_issues` | The project's issues, with who made them |
+| `create_issues` | Makes issues of findings or groups, as issued by Claude (if allowed) |
 | `summary` | Where the review stands |

@@ -57,6 +57,7 @@ pub const FIELDS: &[(&str, &str)] = &[
     ("issue.model", "Model per element"),
     ("issue.global_id", "IFC GlobalId per element"),
     ("issue.created", "Date created"),
+    ("issue.created_by", "Issued by (initials, or Claude)"),
     ("issue.modified", "Date last changed"),
     ("issue.bcf_status", "Status on the BCF server"),
     ("issue.id", "Issue ID (the BCF topic's GUID)"),
@@ -356,6 +357,7 @@ impl OpenCheckApp {
             field("model", per_element(&|c| c.model.clone())),
             field("global_id", per_element(&|c| c.global_id.clone())),
             field("created", Cell::from(date(&issue.created))),
+            field("created_by", Cell::from(issue.created_by.as_str())),
             field("modified", Cell::from(date(&issue.modified))),
             field(
                 "bcf_status",

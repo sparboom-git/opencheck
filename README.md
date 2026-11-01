@@ -29,6 +29,10 @@ You do not need to build OpenCheck to try it. For Windows:
 The program is not code-signed, so Windows SmartScreen may show "Windows
 protected your PC" the first time. Click **More info** and then **Run anyway**.
 
+A Microsoft Store version is being prepared; see
+[docs/microsoft-store.md](docs/microsoft-store.md) for how it is packaged and
+how its version numbers work.
+
 ### In the browser
 
 OpenCheck also runs in the browser, without installing anything:

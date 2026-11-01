@@ -1,0 +1,6 @@
+{
+  "_comment": "The package identity from Microsoft Partner Center > Product Identity. Copy the three values exactly. Until they are filled in, releases are made without the MSIX.",
+  "name": "",
+  "publisher": "",
+  "publisher_display_name": ""
+}

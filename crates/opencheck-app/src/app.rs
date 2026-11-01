@@ -76,6 +76,10 @@ pub enum Walk {
 pub enum IssueTarget {
     /// One issue holding all of them.
     Bundle,
+    /// One issue holding all of them, framed on them rather than on what is
+    /// on screen: for issues Claude makes.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    BundleFramed,
     /// One issue per finding. A single finding takes what is on screen:
     /// the reviewer is looking at it.
     Separate,
@@ -134,6 +138,8 @@ pub struct OpenCheckApp {
     pub excel_template: Option<std::path::PathBuf>,
     /// The user's report template; `None` for the standard one.
     pub report_template: Option<std::path::PathBuf>,
+    /// The reviewer's initials, for "Issued by".
+    pub initials: String,
     /// The report preview shows the pages (true) or the draft.
     pub report_pages: bool,
     /// Issues about to be created, waiting for their fields in the dialog.
@@ -239,6 +245,7 @@ impl OpenCheckApp {
             settings_open: false,
             excel_template: crate::settings::saved_excel_template(),
             report_template: crate::settings::saved_path(crate::report::TEMPLATE_SETTING),
+            initials: crate::settings::initials(),
             report_pages: crate::settings::get(crate::report_ui::PAGES_SETTING)
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true),
@@ -1286,6 +1293,7 @@ impl OpenCheckApp {
                 solved_by_update: false,
                 responsible: Vec::new(),
                 assigned_to: String::new(),
+                created_by: self.initials.clone(),
                 bcf: None,
             };
             for e in entries {
@@ -1300,8 +1308,8 @@ impl OpenCheckApp {
 
         let refs: Vec<&Entry> = entries.iter().collect();
         let guid = match target {
-            IssueTarget::Bundle => {
-                let issue = make(&refs, true);
+            IssueTarget::Bundle | IssueTarget::BundleFramed => {
+                let issue = make(&refs, target == IssueTarget::Bundle);
                 let guid = issue.guid.clone();
                 self.issues.list.push(issue);
                 guid
@@ -1999,6 +2007,8 @@ impl eframe::App for OpenCheckApp {
         self.handle_bcf(&ctx);
         self.step_capture(&ctx);
         self.step_view_picture(&ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::claude_link::step_pictures(self, &ctx);
         self.handle_dropped_files(&ctx);
         self.handle_shortcuts(&ctx);
         self.handle_close_request(&ctx);
