@@ -286,6 +286,8 @@ struct Actions {
     approve: Option<(Vec<String>, Option<Category>)>,
     dismiss: Option<Vec<String>>,
     presort: bool,
+    /// Open the project's triage rules.
+    triage: bool,
     /// Mark clashes like this one as noise in its rule's pre-sorting.
     add_noise: Option<(String, opencheck_core::triage::NoisePattern)>,
     /// Select one element of the finding (its properties then show).
@@ -1852,6 +1854,9 @@ fn apply(app: &mut OpenCheckApp, actions: Actions, order: &[String], advance: bo
     if let Some((id, pattern)) = actions.add_noise {
         app.add_noise_pattern(&id, pattern);
     }
+    if actions.triage {
+        app.checking.triage_open = true;
+    }
     if actions.presort {
         let n = app.presort(true);
         app.checking.presort_note = Some(if n == 0 {
@@ -1999,10 +2004,135 @@ fn suggestions_bar(
         {
             actions.presort = true;
         }
+        let examples = app.checking.triage.examples.len();
+        let text = if examples == 0 {
+            format!("{}  Triage rules", icon::NOTEBOOK)
+        } else {
+            format!("{}  Triage rules ({examples})", icon::NOTEBOOK)
+        };
+        if ui
+            .button(text)
+            .on_hover_text(
+                "The project's own rules for sorting findings, and the suggestions you corrected. \
+                 Claude reads them before every review.",
+            )
+            .clicked()
+        {
+            actions.triage = true;
+        }
         if let Some(note) = &app.checking.presort_note {
             ui.label(RichText::new(note).small().color(theme::text_muted()));
         }
     });
+}
+
+/// The project's triage rules in plain words, and the examples kept when a
+/// suggestion was approved as another category. Claude reads both before
+/// every review.
+pub fn triage_window(app: &mut OpenCheckApp, ctx: &egui::Context) {
+    let dialog = crate::dialog::Dialog {
+        id: "triage_rules",
+        icon: icon::NOTEBOOK,
+        title: "Triage rules",
+        size: egui::vec2(680.0, 560.0),
+        min: egui::vec2(380.0, 300.0),
+        scroll: crate::dialog::Scroll::Both,
+    };
+    let mut open = app.checking.triage_open;
+    let mut changed = false;
+    crate::dialog::show(ctx, &dialog, &mut open, |ui| {
+        let triage = &mut app.checking.triage;
+        ui.label(
+            RichText::new(
+                "Claude reads these before every review of this project, so it sorts the \
+                 findings the way the project does. They are saved in the project.",
+            )
+            .color(theme::text_muted()),
+        );
+        ui.add_space(8.0);
+        ui.label(RichText::new("Rules").strong());
+        ui.label(
+            RichText::new(
+                "In plain words, one per line, e.g. \"Insulation against pipes in shafts is \
+                 always C1\" or \"Sprinkler pipes through beams are C3\".",
+            )
+            .small()
+            .color(theme::text_muted()),
+        );
+        changed |= ui
+            .add(
+                egui::TextEdit::multiline(&mut triage.rules)
+                    .desired_rows(6)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("No rules yet"),
+            )
+            .changed();
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!("Corrected suggestions ({})", triage.examples.len()))
+                    .strong(),
+            );
+            if !triage.examples.is_empty() {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("Remove all").clicked() {
+                        triage.examples.clear();
+                        changed = true;
+                    }
+                });
+            }
+        });
+        ui.label(
+            RichText::new(
+                "Kept when you approve a suggestion as another category. Remove the ones that \
+                 should not be followed.",
+            )
+            .small()
+            .color(theme::text_muted()),
+        );
+        if triage.examples.is_empty() {
+            ui.label(RichText::new("None yet.").color(theme::text_muted()));
+        }
+        let mut remove = None;
+        for (index, example) in triage.examples.iter().enumerate() {
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "{} → {}",
+                        example.suggested.code(),
+                        example.category.code()
+                    ))
+                    .strong(),
+                );
+                ui.label(&example.finding);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .small_button(icon::TRASH)
+                        .on_hover_text("Remove this example")
+                        .clicked()
+                    {
+                        remove = Some(index);
+                    }
+                });
+            });
+            if !example.reason.is_empty() {
+                ui.label(
+                    RichText::new(format!("Suggested because: {}", example.reason))
+                        .small()
+                        .color(theme::text_muted()),
+                );
+            }
+        }
+        if let Some(index) = remove {
+            triage.examples.remove(index);
+            changed = true;
+        }
+    });
+    app.checking.triage_open = open;
+    if changed {
+        app.session.dirty = true;
+    }
 }
 
 /// The suggestion for the finding under review, with approve, change and

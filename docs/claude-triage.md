@@ -116,8 +116,13 @@ confirms or corrects them on a sample.
 When you approve a suggestion as another category, the finding (classes,
 types, systems, depth, storey), the suggestion and the category you chose are
 kept as an example in the project's triage file. Claude reads the file before
-every review (`triage_rules`), together with any rules you write for the
-project, so the next review follows the project's practice.
+every review (`triage_rules`), together with the project's own rules, so the
+next review follows the project's practice.
+
+*Triage rules* on the *Pre-sort* tab opens both: write the project's rules in
+plain words, one per line (e.g. "Insulation against pipes in shafts is always
+C1"), and see the corrected suggestions, where the ones that should not be
+followed can be removed. Both are saved in the project.
 
 ## Data
 

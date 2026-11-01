@@ -306,6 +306,8 @@ pub struct Checking {
     pub triage: TriageFile,
     /// What the last pre-sorting did, shown next to its button.
     pub presort_note: Option<String>,
+    /// The window with the project's triage rules and examples is open.
+    pub triage_open: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]

@@ -2064,6 +2064,7 @@ impl eframe::App for OpenCheckApp {
             crate::claude_link::window(self, &ctx);
             panels::properties_window(self, &ctx);
             results_ui::finding_window(self, &ctx);
+            results_ui::triage_window(self, &ctx);
         }
         self.confirm_dialog(&ctx);
         self.welcome_dialog(&ctx, frame);
