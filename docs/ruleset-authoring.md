@@ -132,6 +132,33 @@ equals = "true"            # optional; omitted = the property must exist
 Comparison is case-insensitive. `true` / `false` match boolean properties,
 numbers are compared as numbers.
 
+### Leaving elements out: `[[rule.exclude]]`
+
+Rows of elements left out of a rule, on both sides. A row names the models
+of a discipline, a category (an IFC class, subtypes included) and a
+property; an element is left out when it matches every field set in one
+row. In the app this is the *Leave out…* table on a ruleset card and in the
+Ruleset Manager.
+
+```toml
+[[rule.exclude]]
+discipline = "structural"      # optional; omitted = any model
+category = "IfcColumn"         # optional; omitted = any category
+
+[[rule.exclude]]
+category = "IfcCovering"
+property = "Pset_CoveringCommon.FireRating"   # or Name, Type, Material,
+operator = "is"                               # System, Tag, Description,
+value = "EI60"                                # GlobalId, or Property
+off = true                                    # kept, but switched off
+```
+
+`operator` is `contains` (the default), `is`, `is_not`, `starts_with`,
+`below`, `above` or `exists`. Values are compared as text, ignoring case;
+`below` and `above` compare the first number in each (`Ø50 mm` is 50), as
+the property gives it, so write the value in the property's unit. A property written
+without a set (`FireRating`) is looked for in every set.
+
 ### Disciplines
 
 `architectural`, `structural`, `mechanical` (shown as Ventilation, code VEN),

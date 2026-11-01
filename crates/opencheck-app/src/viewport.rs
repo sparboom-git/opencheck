@@ -98,11 +98,18 @@ pub fn show(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         return;
     }
     if app.is_capturing() {
-        // Pictures for exports: the model and the issue marker only.
+        // Pictures for exports: the model and the issue marker only; a
+        // documented check also shows its levels.
+        if app.check_docs.shot.is_some() {
+            crate::visual_ui::draw_levels(app, ui, rect, aspect);
+            crate::visual_ui::draw_plan(app, ui, rect, aspect);
+        }
         draw_focus_marker(app, ui, rect, aspect);
         capture_progress(app, ui, rect);
         return;
     }
+    crate::visual_ui::draw_levels(app, ui, rect, aspect);
+    crate::visual_ui::draw_plan(app, ui, rect, aspect);
     draw_measurements(app, ui, rect, aspect);
     draw_focus_zones(app, ui, rect, aspect);
     draw_focus_marker(app, ui, rect, aspect);
@@ -622,7 +629,7 @@ fn snap_point(
     };
     let ray = pointer_ray(app, rect, aspect, cursor);
     let depth = hit.point.distance(app.camera.eye);
-    let world_per_pixel = 2.0 * depth * (app.camera.fov_y * 0.5).tan() / rect.height().max(1.0);
+    let world_per_pixel = app.camera.world_per_pixel(depth, rect.height());
     let radius = SNAP_CORNER_PX * world_per_pixel * 1.5;
 
     let mut candidates = Candidates::new();
@@ -844,6 +851,9 @@ fn handle_keyboard(app: &mut OpenCheckApp, ui: &egui::Ui, response: &egui::Respo
     if pressed(egui::Key::M) {
         app.measure.toggle();
     }
+    if pressed(egui::Key::P) {
+        app.toggle_parallel();
+    }
 
     // Walk with WASD / arrow keys; Q and E move down and up.
     let speed = ui.input(|i| {
@@ -1008,7 +1018,7 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
             }
             _ => {
                 let distance = app.camera.eye.distance(anchor).max(1.0);
-                let per_pixel = 2.0 * distance * (app.camera.fov_y / 2.0).tan() / rect.height();
+                let per_pixel = app.camera.world_per_pixel(distance, rect.height());
                 -response.drag_delta().y * per_pixel
             }
         };
@@ -1030,7 +1040,7 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
         if active {
             theme::accent()
         } else {
-            Color32::WHITE
+            theme::panel()
         },
     );
     painter.circle_stroke(center, 17.0, Stroke::new(2.0, theme::accent()));
@@ -1040,7 +1050,7 @@ fn section_handle(app: &mut OpenCheckApp, ui: &mut egui::Ui, rect: Rect, aspect:
         icon::SCISSORS,
         FontId::proportional(19.0),
         if active {
-            Color32::WHITE
+            theme::on_accent()
         } else {
             theme::accent()
         },
@@ -1279,7 +1289,7 @@ fn label_box(painter: &egui::Painter, pos: Pos2, align: Align2, text: &str, colo
     let rect = align
         .anchor_size(pos, galley.size())
         .expand2(Vec2::new(7.0, 4.0));
-    painter.rect_filled(rect, 6.0, Color32::WHITE);
+    painter.rect_filled(rect, 6.0, theme::panel());
     painter.rect_stroke(rect, 6.0, Stroke::new(1.0, color), egui::StrokeKind::Inside);
     painter.galley(rect.min + Vec2::new(7.0, 4.0), galley, color);
 }
@@ -1287,7 +1297,7 @@ fn label_box(painter: &egui::Painter, pos: Pos2, align: Align2, text: &str, colo
 /// The tool bar's size: on a narrow view its buttons wrap onto more rows
 /// instead of being cut off.
 fn tool_bar_size(view: Rect) -> (f32, f32) {
-    const FULL_WIDTH: f32 = 600.0;
+    const FULL_WIDTH: f32 = 690.0;
     let width = FULL_WIDTH.min(view.width() - 16.0).max(60.0);
     let rows = (FULL_WIDTH / width).ceil();
     (width, 46.0 + (rows - 1.0) * 42.0)
@@ -1374,6 +1384,40 @@ fn tool_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
             if icon_button(ui, icon::CORNERS_OUT, false, "Zoom to selection (F)").clicked() {
                 app.fit_selection();
             }
+            let ortho = app.camera.ortho;
+            if icon_button(
+                ui,
+                icon::PERSPECTIVE,
+                ortho,
+                "Parallel view: no perspective, as an elevation or a plan (P)",
+            )
+            .clicked()
+            {
+                app.toggle_parallel();
+            }
+            ui.menu_button(RichText::new(icon::CUBE_FOCUS).size(19.0), |ui| {
+                ui.set_min_width(200.0);
+                for (direction, label) in [
+                    (ViewFrom::Top, "Top (plan)"),
+                    (ViewFrom::South, "Front, from the south"),
+                    (ViewFrom::North, "Back, from the north"),
+                    (ViewFrom::West, "Left, from the west"),
+                    (ViewFrom::East, "Right, from the east"),
+                ] {
+                    if ui.button(label).clicked() {
+                        app.view_from(direction);
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                ui.label(
+                    RichText::new("Side views are parallel: elevations without perspective.")
+                        .small()
+                        .color(theme::text_muted()),
+                );
+            })
+            .response
+            .on_hover_text("Look straight from above or from a side");
             ui.separator();
             let isolated = app.view.isolated.is_some();
             if icon_button(
@@ -1591,5 +1635,48 @@ fn drop_overlay(ui: &egui::Ui, rect: Rect) {
             FontId::proportional(22.0),
             Color32::from_rgb(20, 60, 140),
         );
+    }
+}
+
+/// Where a fixed view looks from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ViewFrom {
+    Top,
+    South,
+    North,
+    West,
+    East,
+}
+
+impl OpenCheckApp {
+    /// Parallel view on or off, keeping the scale of what is in the middle.
+    pub fn toggle_parallel(&mut self) {
+        let bounds = self.visible_or_scene_bounds();
+        let depth = if bounds.is_empty() {
+            10.0
+        } else {
+            (bounds.center() - self.camera.eye).dot(self.camera.forward())
+        };
+        self.camera
+            .set_ortho(!self.camera.ortho, depth, &self.scene_bounds);
+    }
+
+    /// Looks at everything shown from above or straight from a side; the
+    /// side views are parallel, as elevations.
+    pub fn view_from(&mut self, from: ViewFrom) {
+        use std::f32::consts::{FRAC_PI_2, PI};
+        let (yaw, pitch) = match from {
+            ViewFrom::Top => (0.0, -89.9_f32.to_radians()),
+            ViewFrom::South => (0.0, 0.0),
+            ViewFrom::North => (PI, 0.0),
+            ViewFrom::West => (FRAC_PI_2, 0.0),
+            ViewFrom::East => (-FRAC_PI_2, 0.0),
+        };
+        self.camera.yaw = yaw;
+        self.camera.pitch = pitch;
+        if from != ViewFrom::Top {
+            self.camera.ortho = true;
+        }
+        self.fit_all();
     }
 }

@@ -93,7 +93,8 @@ Navigation that needs no training:
 
 ### Checking
 
-The Check tab runs rulesets against the loaded models, much like Solibri.
+The Check tab runs rulesets against the loaded models, as in other model
+checkers.
 
 - A new project has no rulesets; *Add* offers the **built-in rulesets**, your
   own rulesets and **IDS 1.0** files (buildingSMART Information Delivery
@@ -131,6 +132,13 @@ The Check tab runs rulesets against the loaded models, much like Solibri.
   a language model: *Copy prompt* hands it the description, the groups and
   the script reference, and *Use the answer* puts its code and parameters in
   place. See [docs/rule-scripts.md](docs/rule-scripts.md).
+- **Leave out…** on a ruleset card (and under each rule in the Ruleset
+  Manager) is a table of what the check leaves out: per row the discipline's
+  models, then a category (walls, columns, coverings, ducts, …), then if
+  needed a property with *contains*, *is*, *is not*, *starts with*, *is
+  under*, *is over* (numbers, e.g. pipes under 50 mm) or *exists*. Each row shows how many elements it leaves out and can be
+  switched off. It works for clashes between disciplines and within each
+  model alike.
 - The **Ruleset Manager** creates and edits rulesets and rules in forms (check
   type, severity, tolerance, groups A and B by discipline, IFC class and
   property), shows how many elements each group matches, explains why an
@@ -159,16 +167,64 @@ rulesets (the app offers it as a download).
   camera, section plane, what was hidden and whether the rest of the model
   was ghosted. Each object keeps its IFC GlobalId and its Revit Element ID.
 - *Export* in the Issues tab writes the ticked issues (or all) as a **BCF 2.1
-  file** (`.bcfzip`, with pictures and viewpoints) or as an illustrated
-  **report**: one HTML file in Danish, printable to PDF, with introduction,
-  models, software, an overview, and every issue with a small picture,
-  criticality, responsible disciplines and the Revit IDs and GlobalIds of its
-  objects. It can also write an **Excel workbook** (`.xlsx`) on A4 portrait:
+  file** (`.bcfzip`, with pictures and viewpoints) or as an **Excel workbook** (`.xlsx`) on A4 portrait:
   one row per issue with its fields, a picture and its objects' Revit IDs and GlobalIds,
   and a sheet with the model files the check is based on and their dates.
   The workbook is made from a template: OpenCheck's standard one, or your
   own with your company's name and layout (*File → Settings*); see
   [docs/excel-templates.md](docs/excel-templates.md).
+
+### Documented checks
+
+A visual check can be written down as done, to show that the models were
+checked and how. *Document check…* beside a visual check's result opens a
+record of it: a title, what the check does (written by OpenCheck from its
+settings), what was checked and how, who checked it and the
+result as a traffic light: **Approved** (green), **Approved with remarks**
+(orange) or **Not approved** (red). It keeps the colours with how many
+elements had each, the models and their versions, and pictures of the view;
+turn the view and add more pictures for large models. In reports the
+colours are one short line, at most 16 of them, or left out when the
+pictures say enough. No elements are kept.
+Problems found are made issues as usual. The documented checks are listed on
+the Visual Check tab and saved with the project.
+
+### Reports
+
+The **Report** tab builds the written documentation of the check, after the
+Danish C402 practice: a report in Danish with introduction (prepared by,
+checked by, company, disciplines, phase), basis (models with their versions
+and companies, software and rulesets), the check (general remarks,
+properties, geometry, clashes) and a conclusion. A new report starts with
+those chapters; blocks can be added, moved and deleted, and each has a
+heading, a text and, for issues, filters (criticality, status, responsible
+discipline, ruleset), issues left out by hand and a comment per issue.
+
+- **Revisions**: a report keeps its revisions (A, B, … or the project's own
+  labels). Each freezes its data when made: the issues with their pictures,
+  the models and the rulesets. *Issue revision* locks it with date, who issued
+  it and what changed; *Update data → new revision* takes the latest check
+  into the next revision, texts and choices included. Every revision stays in
+  the project and can be opened and exported again.
+- **Preview** beside the editor shows the report set in A4 pages, exactly as
+  it prints, or as a quick draft without pages. A block chosen on the left is
+  scrolled into view; a block clicked in the preview is edited.
+- **Export PDF** and **Export Word** write the revision shown, with a table
+  of the revisions on the first page and page header and footer. OpenCheck
+  sets the PDF itself (with [Typst](https://typst.app)); nothing else is
+  needed.
+- **Visual checks**: the section *Visuelle kontroller* shows the documented
+  checks with their result, method, colours and pictures; checks can be left
+  out by hand.
+- **Template**: reports are made from a Word template. *File → Settings*
+  saves the standard one to change in Word (logo, header and footer, page
+  margins, fonts, colours, the Heading 1 and Heading 2 styles, the text on
+  the first page) and choose again. Fields such as `{{project}}`,
+  `{{revision}}` and `{{company}}` mark where the report's values go;
+  `{{revisions}}` and `{{content}}`, each alone in a paragraph, where the
+  revision table and the chapters go. A Word export is the template filled
+  in; the PDF and the preview follow the same template, so the two read
+  alike. The preview follows the template file as it is saved.
 
 ### BCF Live (Dalux)
 
@@ -217,6 +273,14 @@ Each check is added on its own:
   and by pipe size.
 - **Storeys**: each storey in its own colour; elements standing on another
   storey than they belong to are red, elements without a storey purple.
+- **Rooms**: rooms (`IfcSpace`) green. Per storey the walls, doors, windows
+  and columns of the chosen models (usually architect and structure) are cut
+  above the floor; a place they enclose without a room is an area without a
+  room, its walls red. A button per storey shows it in plan: cut above its
+  floor, seen from above.
+- **Levels**: the storeys of all models side by side by height, as a table
+  and as levels drawn in the 3D view, a colour per model. A level with
+  different names, or a name at different heights, is red.
 
 The system checks follow the ports of the elements (`IfcRelConnectsPorts`)
 and, for loose elements, where their ends meet; sizes and falls are measured
@@ -241,7 +305,7 @@ The "Grafit" design: graphite on paper, IBM Plex fonts, colour only where it
 means something. *File → Theme* switches between the light design and a dark
 one; the 3D view keeps its background in both.
 
-The larger dialogs (Ruleset Manager, Where to look, BCF Live, Issue report,
+The larger dialogs (Ruleset Manager, Where to look, BCF Live, Settings,
 Autorun) open within the screen, can be made smaller and scroll what does not
 fit. On the desktop the button next to a dialog's close button opens it in a
 window of its own, which can be moved outside OpenCheck's window, for
@@ -278,7 +342,7 @@ opencheck autorun \\server\share\project\OpenCheck\autorun.json
 
 | Crate | Purpose |
 |---|---|
-| `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine (clashes, clearances, duplicates, free zones, Rhai script rules), visual checks (alignment, pipe and duct systems with their port network, drain fall, storeys), triage of findings (C402 categories, groups, pre-sorting), information requirements and IDS, BCF data and files, project files, autorun runs and the dashboard |
+| `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine (clashes, clearances, duplicates, free zones, Rhai script rules), visual checks (alignment, pipe and duct systems with their port network, drain fall, storeys, rooms, levels), triage of findings (C402 categories, groups, pre-sorting), information requirements and IDS, BCF data and files, project files, autorun runs and the dashboard |
 | `opencheck-cli` | The `opencheck` command line tool, including `autorun` and the `mcp` server for Claude Desktop |
 | `opencheck-app` | The application, for the desktop and the browser: federated 3D viewer (egui + wgpu), checking, visual checks, issues, reports, BCF Live, the autorun setup and the Claude connection |
 

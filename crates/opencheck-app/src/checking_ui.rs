@@ -385,6 +385,7 @@ fn scope_label(app: &OpenCheckApp, models: &Option<Vec<ModelId>>) -> (String, bo
 
 fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     let mut changed = false;
+    let mut open_exclusions = None;
     let mut new_level = None;
     let mut adapt = false;
     let adapted = app.checking.adapted.is_some();
@@ -472,6 +473,36 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                         }
                     });
                 });
+                let can_exclude = entry
+                    .ruleset
+                    .rules
+                    .iter()
+                    .any(|r| crate::exclusions_ui::takes_exclusions(r.kind));
+                if can_exclude {
+                    let rows: usize = entry
+                        .ruleset
+                        .rules
+                        .iter()
+                        .map(|r| r.exclude.iter().filter(|x| !x.off && x.is_set()).count())
+                        .sum();
+                    ui.horizontal(|ui| {
+                        let text = if rows == 0 {
+                            format!("{}  Leave out…", icon::FUNNEL)
+                        } else {
+                            format!("{}  Leave out…  ({rows})", icon::FUNNEL)
+                        };
+                        if ui
+                            .small_button(text)
+                            .on_hover_text(
+                                "Leave elements out of the check: choose the model, the category \
+                                 and a property in a table",
+                            )
+                            .clicked()
+                        {
+                            open_exclusions = Some(index);
+                        }
+                    });
+                }
                 let information = entry.ruleset.rules.iter().any(checking::uses_levels);
                 if information {
                     ui.horizontal(|ui| {
@@ -544,6 +575,9 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 });
             });
         ui.add_space(6.0);
+    }
+    if open_exclusions.is_some() {
+        app.exclusions.open = open_exclusions;
     }
     if adapt {
         crate::standard_editor::open(app, None, None);

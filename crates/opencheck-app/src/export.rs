@@ -23,9 +23,10 @@ use crate::scene::{ElementRef, Focus, SectionPlane};
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExportKind {
     Bcf(PathBuf),
-    Report(PathBuf),
     /// An Excel workbook whose template shows pictures.
     Excel(PathBuf),
+    /// A report revision: pictures of every issue, then the revision.
+    Revision(crate::reports::NewRevision),
     /// Pictures for new topics, then these issues are sent to the BCF server.
     Live(Vec<String>),
 }
@@ -77,7 +78,12 @@ impl Capture {
 }
 
 /// Cuts `rect` (points) out of a window capture and encodes it as PNG.
-fn crop_png(image: &egui::ColorImage, rect: egui::Rect, pixels_per_point: f32) -> Option<Vec<u8>> {
+pub fn crop_png(
+    image: &egui::ColorImage,
+    rect: egui::Rect,
+    pixels_per_point: f32,
+    max_width: usize,
+) -> Option<Vec<u8>> {
     let [width, height] = image.size;
     let x0 = ((rect.min.x * pixels_per_point).round().max(0.0) as usize).min(width);
     let y0 = ((rect.min.y * pixels_per_point).round().max(0.0) as usize).min(height);
@@ -87,7 +93,7 @@ fn crop_png(image: &egui::ColorImage, rect: egui::Rect, pixels_per_point: f32) -
         return None;
     }
     // Pictures are for orientation: shrink large views by averaging blocks.
-    let step = (x1 - x0).div_ceil(MAX_PICTURE_WIDTH).max(1);
+    let step = (x1 - x0).div_ceil(max_width).max(1);
     let (w, h) = ((x1 - x0) / step, (y1 - y0) / step);
     if w == 0 || h == 0 {
         return None;
@@ -142,7 +148,7 @@ impl OpenCheckApp {
     }
 
     pub fn is_capturing(&self) -> bool {
-        self.capture.is_some()
+        self.capture.is_some() || self.check_docs.shot.is_some()
     }
 
     /// Starts taking pictures of the issues; the export is written when done.
@@ -218,8 +224,12 @@ impl OpenCheckApp {
                 });
                 if let Some(image) = image {
                     let guid = capture.issues[capture.next].clone();
-                    if let Some(png) = crop_png(&image, self.viewport_rect, ctx.pixels_per_point())
-                    {
+                    if let Some(png) = crop_png(
+                        &image,
+                        self.viewport_rect,
+                        ctx.pixels_per_point(),
+                        MAX_PICTURE_WIDTH,
+                    ) {
                         capture.images.insert(guid, png);
                     }
                     capture.next += 1;
@@ -275,16 +285,9 @@ impl OpenCheckApp {
                         format!("{} issues written to Excel", capture.issues.len()),
                     )
                 }),
-            ExportKind::Report(path) => {
-                let html = crate::report::build(self, &capture.issues, &capture.images);
-                crate::platform::write(path, html.as_bytes())
-                    .map_err(|e| e.to_string())
-                    .map(|()| {
-                        (
-                            path.clone(),
-                            format!("Report with {} issues written", capture.issues.len()),
-                        )
-                    })
+            ExportKind::Revision(what) => {
+                self.make_revision(what.clone(), &capture.images);
+                return;
             }
         };
         match result {
@@ -293,12 +296,6 @@ impl OpenCheckApp {
                     "{message}: {}",
                     path.file_name().unwrap_or_default().to_string_lossy()
                 ));
-                if matches!(capture.kind, ExportKind::Report(_)) {
-                    // In the browser the report was downloaded instead.
-                    if !crate::platform::IS_WEB {
-                        let _ = webbrowser::open(&path.to_string_lossy());
-                    }
-                }
             }
             Err(e) => self.errors.push(format!("Could not export: {e}")),
         }
@@ -421,19 +418,6 @@ impl OpenCheckApp {
         }
     }
 
-    pub fn export_report_dialog(&mut self, ctx: &egui::Context) {
-        let name = format!(
-            "{}-K&K-rapport-{}.html",
-            self.export_base_name(),
-            &project::now_rfc3339()[..10]
-        );
-        if let Some(path) =
-            crate::platform::save_file("Export issue report", ("Report (HTML)", &["html"]), &name)
-        {
-            self.start_export(ExportKind::Report(path), ctx);
-        }
-    }
-
     fn export_base_name(&self) -> String {
         let name = if self.issues.report.project.trim().is_empty() {
             self.session
@@ -460,16 +444,16 @@ mod tests {
         let mut image = egui::ColorImage::filled([4, 4], egui::Color32::WHITE);
         image.pixels[5] = egui::Color32::RED; // (1, 1)
         let rect = egui::Rect::from_min_max(egui::pos2(0.5, 0.5), egui::pos2(1.5, 1.5));
-        let png = crop_png(&image, rect, 2.0).unwrap();
+        let png = crop_png(&image, rect, 2.0, MAX_PICTURE_WIDTH).unwrap();
         let decoder = png::Decoder::new(std::io::Cursor::new(png));
         let reader = decoder.read_info().unwrap();
         assert_eq!((reader.info().width, reader.info().height), (2, 2));
-        assert!(crop_png(&image, egui::Rect::NOTHING, 1.0).is_none());
+        assert!(crop_png(&image, egui::Rect::NOTHING, 1.0, MAX_PICTURE_WIDTH).is_none());
 
         // A wide view is scaled down to at most MAX_PICTURE_WIDTH.
         let wide = egui::ColorImage::filled([2000, 100], egui::Color32::WHITE);
         let all = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(2000.0, 100.0));
-        let png = crop_png(&wide, all, 1.0).unwrap();
+        let png = crop_png(&wide, all, 1.0, MAX_PICTURE_WIDTH).unwrap();
         let reader = png::Decoder::new(std::io::Cursor::new(png))
             .read_info()
             .unwrap();

@@ -20,6 +20,10 @@ pub struct Leftovers {
 }
 
 impl Leftovers {
+    pub fn is_empty(&self) -> bool {
+        self.fields.is_empty() && self.entries.is_empty()
+    }
+
     /// Puts the unread parts back into a document about to be saved. A
     /// field is only put back while it still has its default value, so a
     /// field set again since is not overwritten.

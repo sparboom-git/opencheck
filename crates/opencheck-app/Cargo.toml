@@ -27,6 +27,11 @@ sha2.workspace = true
 toml.workspace = true
 webbrowser = "1"
 png = "0.18.1"
+# Typesetting of reports: PDF and the page preview.
+typst = "=0.15.1"
+typst-layout = "=0.15.1"
+typst-pdf = "=0.15.1"
+typst-render = "=0.15.1"
 
 # Desktop only: BCF Live's HTTP client and sign-in.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

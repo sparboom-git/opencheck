@@ -187,6 +187,7 @@ fn ids_ruleset(path: &PathBuf) -> Result<(Ruleset, (String, Arc<Ids>))> {
             script: String::new(),
             params: Default::default(),
             presort: Default::default(),
+            exclude: Vec::new(),
         }],
     };
     Ok((ruleset, (key, Arc::new(ids))))

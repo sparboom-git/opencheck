@@ -75,6 +75,35 @@ impl Discipline {
         Self::guess_from_classes(ifc_classes)
     }
 
+    /// The discipline of a Danish K code, as in "K09" (structure). Codes
+    /// that are no discipline of a model check (K00 shared, K05 design,
+    /// K06 survey, K10 process plants) give none.
+    pub fn from_k_code(token: &str) -> Option<Self> {
+        let digits = token
+            .strip_prefix('k')
+            .or_else(|| token.strip_prefix('K'))?;
+        if digits.len() != 2 || !digits.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        Some(match digits {
+            // Architecture and interiors.
+            "01" | "03" => Discipline::Architectural,
+            // Landscape and terrain, urban spaces.
+            "02" | "04" => Discipline::Landscape,
+            // Electrical installations and IT.
+            "07" => Discipline::Electrical,
+            // Mechanical installations: ventilation, unless the name says
+            // water or drainage (see `guess_from_file_name`).
+            "08" => Discipline::Mechanical,
+            "09" => Discipline::Structural,
+            // Transport and infrastructure.
+            "11" => Discipline::Infrastructure,
+            // Shared, design, survey and process plants are no discipline
+            // here: the rest of the name decides.
+            _ => return None,
+        })
+    }
+
     fn guess_from_file_name(file_name: &str) -> Option<Self> {
         let stem = file_name
             .rsplit(['/', '\\'])
@@ -91,7 +120,20 @@ impl Discipline {
                 std::iter::once(t).chain(without_z)
             })
             .collect();
+        // A K code (the Danish discipline code in file names, e.g. "K09")
+        // decides before anything else.
         let has = |words: &[&str]| tokens.iter().any(|t| words.contains(t));
+        if let Some(d) = tokens.iter().find_map(|t| Self::from_k_code(t)) {
+            // K08 covers water and drainage too.
+            if d == Discipline::Mechanical
+                && (has(&["vvs", "plu", "san", "vand", "afl"])
+                    || stem.contains("plumbing")
+                    || stem.contains("sanitary"))
+            {
+                return Some(Discipline::Plumbing);
+            }
+            return Some(d);
+        }
         let contains = |words: &[&str]| words.iter().any(|w| stem.contains(w));
 
         // Order matters: "hvac" must be checked before shorter tokens such as "el".
@@ -192,6 +234,16 @@ mod tests {
             ("P0001_C07.02_K01_ZARK-model.ifc", Discipline::Architectural),
             ("P0001_C07.02_K08_ZVENT-model.ifc", Discipline::Mechanical),
             ("Projekt_ZVVS.ifc", Discipline::Plumbing),
+            // The K code decides, whatever else the name says.
+            ("Newtec_K07_GEN_F3_N001.ifc", Discipline::Electrical),
+            ("Newtec_K08_GEN_F3_N001.ifc", Discipline::Mechanical),
+            ("NEWTEC_K01_ADM_F3_N001.ifc", Discipline::Architectural),
+            ("Newtec_K09_GEN_F3_N001.ifc", Discipline::Structural),
+            ("P1_K08_ZVVS.ifc", Discipline::Plumbing),
+            ("P1_K03_Indretning.ifc", Discipline::Architectural),
+            ("P1_K11_GEN.ifc", Discipline::Infrastructure),
+            // Codes that are no discipline leave it to the rest of the name.
+            ("P1_K00_KON.ifc", Discipline::Structural),
         ] {
             assert_eq!(Discipline::guess(name, []), expected, "{name}");
         }

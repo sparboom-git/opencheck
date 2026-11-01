@@ -42,6 +42,8 @@ pub enum Tab {
     Checking,
     /// Visual checking: rules that colour elements.
     Visual,
+    /// Reports documenting the check, built from blocks.
+    Report,
 }
 
 /// Navigation state carried between frames.
@@ -120,11 +122,20 @@ pub struct OpenCheckApp {
     /// Where the 3D view was drawn last frame, for pictures.
     pub viewport_rect: egui::Rect,
     /// The report settings window is open.
-    pub report_window: bool,
+    /// The project's reports and the Report tab's state.
+    pub reports: crate::reports::Reports,
+    /// Visual checks documented as done.
+    pub check_docs: crate::check_docs::CheckDocs,
+    /// The exclusion tables' state.
+    pub exclusions: crate::exclusions_ui::State,
     /// File → Settings is open.
     pub settings_open: bool,
     /// The user's Excel template; `None` for the standard one.
     pub excel_template: Option<std::path::PathBuf>,
+    /// The user's report template; `None` for the standard one.
+    pub report_template: Option<std::path::PathBuf>,
+    /// The report preview shows the pages (true) or the draft.
+    pub report_pages: bool,
     /// Issues about to be created, waiting for their fields in the dialog.
     pub issue_draft: Option<crate::issue_dialog::IssueDraft>,
     /// "Edit view": the working area being drawn in a top view.
@@ -194,7 +205,9 @@ impl OpenCheckApp {
             bcf: crate::bcf_live::BcfLive::default(),
             capture: None,
             viewport_rect: egui::Rect::NOTHING,
-            report_window: false,
+            reports: Default::default(),
+            check_docs: Default::default(),
+            exclusions: Default::default(),
             issue_draft: None,
             area_edit: None,
             frame_stats: false,
@@ -225,6 +238,10 @@ impl OpenCheckApp {
             welcome_never_again: false,
             settings_open: false,
             excel_template: crate::settings::saved_excel_template(),
+            report_template: crate::settings::saved_path(crate::report::TEMPLATE_SETTING),
+            report_pages: crate::settings::get(crate::report_ui::PAGES_SETTING)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
         };
         for file in files {
             app.open_path(file, &cc.egui_ctx);
@@ -321,6 +338,8 @@ impl OpenCheckApp {
         self.session = Session::default();
         self.checking = Checking::default();
         self.issues = Issues::default();
+        self.reports = Default::default();
+        self.check_docs = Default::default();
         self.visual = Default::default();
         self.focus_marker = None;
         self.scene_bounds = Aabb::EMPTY;
@@ -375,7 +394,7 @@ impl OpenCheckApp {
                 })
             })
             .collect();
-        let documents = ProjectDocuments {
+        let mut documents = ProjectDocuments {
             view: Some(session::capture_view(
                 &self.federation,
                 &self.view,
@@ -384,7 +403,10 @@ impl OpenCheckApp {
             )),
             checking: Some(self.checking.to_json(&ids)),
             issues: Some(self.issues.to_json()),
+            ..Default::default()
         };
+        self.reports.save_into(&mut documents);
+        self.check_docs.save_into(&mut documents);
         self.after_save = then;
         self.jobs.save_project(
             SaveRequest {
@@ -424,6 +446,13 @@ impl OpenCheckApp {
                     Ok(contents) => {
                         self.session.path = Some(path);
                         self.session.created = Some(contents.manifest.created);
+                        let (reports, errors) = crate::reports::Reports::load(&contents.documents);
+                        self.reports = reports;
+                        self.errors.extend(errors);
+                        let (docs, errors) =
+                            crate::check_docs::CheckDocs::load(&contents.documents);
+                        self.check_docs = docs;
+                        self.errors.extend(errors);
                         let errors = self.checking.load(
                             contents.rulesets,
                             contents.requirements,
@@ -810,7 +839,7 @@ impl OpenCheckApp {
         self.view.modes_dirty = true;
     }
 
-    fn visible_or_scene_bounds(&self) -> Aabb {
+    pub fn visible_or_scene_bounds(&self) -> Aabb {
         let bounds = self.view.visible_bounds();
         if bounds.is_empty() {
             self.scene_bounds
@@ -1692,6 +1721,7 @@ impl OpenCheckApp {
                         (Tab::Model, "Model"),
                         (Tab::Checking, "Check"),
                         (Tab::Visual, "Visual Check"),
+                        (Tab::Report, "Report"),
                     ] {
                         let selected = self.tab == tab;
                         let text = RichText::new(label).size(14.5);
@@ -1968,6 +1998,7 @@ impl eframe::App for OpenCheckApp {
         self.handle_picked_files(&ctx);
         self.handle_bcf(&ctx);
         self.step_capture(&ctx);
+        self.step_view_picture(&ctx);
         self.handle_dropped_files(&ctx);
         self.handle_shortcuts(&ctx);
         self.handle_close_request(&ctx);
@@ -1996,18 +2027,26 @@ impl eframe::App for OpenCheckApp {
                 crate::visual_ui::rules_panel(self, ui);
                 crate::visual_ui::results_panel(self, ui);
             }
+            Tab::Report => {}
         }
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new())
-            .show(ui, |ui| viewport::show(self, ui));
+        // The Report tab shows the report; while pictures are taken for it,
+        // the 3D view they are taken of.
+        if self.tab == Tab::Report && !self.is_capturing() {
+            crate::report_ui::show(self, ui);
+        } else {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::new())
+                .show(ui, |ui| viewport::show(self, ui));
+        }
 
         // Windows stay out of the pictures.
         if !self.is_capturing() {
             ruleset_manager::show(self, &ctx);
             crate::standard_editor::window(self, &ctx);
             crate::bcf_ui::window(self, &ctx);
-            crate::issues_ui::report_window(self, &ctx);
             crate::settings::window(self, &ctx);
+            crate::check_docs::window(self, &ctx);
+            crate::exclusions_ui::window(self, &ctx);
             crate::issue_dialog::window(self, &ctx);
             #[cfg(not(target_arch = "wasm32"))]
             crate::autorun_ui::window(self, &ctx);

@@ -241,8 +241,8 @@ pub fn run_check(
                     if rule.kind == RuleKind::Information {
                         return (Vec::new(), Vec::new());
                     }
-                    let a = select(models, &job.models, &rule.a);
-                    let b = match &rule.b {
+                    let mut a = select(models, &job.models, &rule.a);
+                    let mut b = match &rule.b {
                         Some(selector) => select(models, &job.models, selector),
                         // A zone must be free of everything; a script gets the
                         // whole model as its other group.
@@ -251,6 +251,15 @@ pub fn run_check(
                         }
                         None => a.clone(),
                     };
+                    // The rule's exclusions leave elements out on both sides.
+                    if !rule.exclude.is_empty() {
+                        let kept = |&(m, e): &(usize, usize)| {
+                            let model = &models[m].model;
+                            !rule.excludes(model, &model.elements[e])
+                        };
+                        a.retain(kept);
+                        b.retain(kept);
+                    }
                     (a, b)
                 })
                 .collect()

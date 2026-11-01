@@ -11,7 +11,9 @@
 
 mod alignment;
 mod dimension;
+mod levels;
 mod network;
+mod rooms;
 mod slope;
 mod storey;
 
@@ -23,6 +25,8 @@ pub use alignment::{
     AlignElement, AlignMode, Alignment, AlignmentRule, Member, align, member_kind,
 };
 pub use dimension::DimensionRule;
+pub use levels::LevelRule;
+pub use rooms::{ROOM, RoomRule};
 pub use slope::{DrainSystem, SlopeLimit, SlopeRule, drain_systems};
 pub use storey::StoreyRule;
 
@@ -64,6 +68,8 @@ pub enum VisualKind {
     Dimensions(DimensionRule),
     DrainSlope(SlopeRule),
     Storeys(StoreyRule),
+    Rooms(RoomRule),
+    Levels(LevelRule),
 }
 
 impl VisualRule {
@@ -104,6 +110,16 @@ impl VisualRule {
         Self::new("Storeys", VisualKind::Storeys(StoreyRule::default()))
     }
 
+    /// Rooms wherever walls enclose a place.
+    pub fn rooms() -> Self {
+        Self::new("Rooms", VisualKind::Rooms(RoomRule::default()))
+    }
+
+    /// Storey heights and names across the models.
+    pub fn levels() -> Self {
+        Self::new("Levels", VisualKind::Levels(LevelRule::default()))
+    }
+
     /// Every kind of rule, new, in the order the Add menu shows them.
     pub fn all_kinds() -> Vec<Self> {
         vec![
@@ -111,6 +127,8 @@ impl VisualRule {
             Self::dimensions(),
             Self::drain_slope(),
             Self::storeys(),
+            Self::rooms(),
+            Self::levels(),
         ]
     }
 }
@@ -123,6 +141,8 @@ impl VisualKind {
             VisualKind::Dimensions(_) => "dimension_jump",
             VisualKind::DrainSlope(_) => "drain_slope",
             VisualKind::Storeys(_) => "storey_mismatch",
+            VisualKind::Rooms(_) => "room_missing",
+            VisualKind::Levels(_) => "level_mismatch",
         }
     }
 
@@ -140,6 +160,12 @@ impl VisualKind {
             }
             VisualKind::Storeys(_) => {
                 "Colours elements by storey and marks those standing on another storey than they belong to"
+            }
+            VisualKind::Rooms(_) => {
+                "Colours rooms green and the walls red around places enclosed by walls without a room, with a plan per storey"
+            }
+            VisualKind::Levels(_) => {
+                "Lists the storeys of all models by height and marks levels whose names or heights disagree"
             }
         }
     }
@@ -173,6 +199,22 @@ impl VisualModel<'_> {
             model: self.id,
             express_id,
         }
+    }
+
+    /// One point per element with geometry, in the shared frame.
+    pub fn element_points(&self) -> Vec<DVec3> {
+        self.model
+            .elements
+            .iter()
+            .filter(|e| e.has_geometry() && self.includes(e.express_id))
+            .filter_map(|e| self.points(e).next())
+            .collect()
+    }
+
+    /// A height in the IFC world frame (a storey's), in the shared frame.
+    pub fn world_height(&self, z: f64) -> f64 {
+        let world_to_shared = self.transform * self.model.local_to_world.inverse();
+        world_to_shared.transform_point3(DVec3::new(0.0, 0.0, z)).z
     }
 
     /// The element's vertices in the shared frame.
@@ -239,6 +281,60 @@ pub struct VisualOutcome {
     pub skipped: usize,
     /// How the check went about it, e.g. which systems had no start point.
     pub notes: Vec<String>,
+    /// Plan views the result offers, one per storey.
+    pub plans: Vec<Plan>,
+    /// Levels drawn as lines in the 3D view.
+    pub levels: Vec<LevelLine>,
+    /// Where the building is in plan, a few far-off elements left out:
+    /// the levels are drawn around it.
+    pub extent: Option<([f64; 2], [f64; 2])>,
+    /// A table of the result, the first row its header.
+    pub table: Vec<Vec<String>>,
+    /// Names written on places in plan, e.g. the rooms.
+    pub labels: Vec<PlaceLabel>,
+}
+
+/// A plan view of a storey: cut above its floor, seen from above.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Plan {
+    pub name: String,
+    /// The storey's height as the model states it.
+    pub elevation: f64,
+    /// Floor and cut height in the shared frame, metres.
+    pub floor: f64,
+    pub cut: f64,
+    /// What there is to see in plan.
+    pub min: [f64; 2],
+    pub max: [f64; 2],
+}
+
+/// A name on a place in plan: a room's number and name in its middle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlaceLabel {
+    /// Where the label goes, in the shared frame.
+    pub at: [f64; 2],
+    /// The heights it is seen between, so a plan shows its storey's labels.
+    pub low: f64,
+    pub high: f64,
+    /// The place's extent in plan; a label wider than that is shortened.
+    pub min: [f64; 2],
+    pub max: [f64; 2],
+    /// E.g. the room's number, and its name.
+    pub number: String,
+    pub name: String,
+}
+
+/// A storey of one model as a level in the 3D view.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LevelLine {
+    /// Height in the 3D view.
+    pub z: f64,
+    /// Height as the model states it, for the label.
+    pub elevation: f64,
+    pub name: String,
+    pub model: String,
+    pub color: [u8; 3],
+    pub problem: bool,
 }
 
 impl VisualOutcome {
@@ -271,6 +367,8 @@ pub fn run(rule: &VisualRule, models: &[VisualModel]) -> VisualOutcome {
         VisualKind::Dimensions(r) => dimension::run(r, models),
         VisualKind::DrainSlope(r) => slope::run(r, models),
         VisualKind::Storeys(r) => storey::run(r, models),
+        VisualKind::Rooms(r) => rooms::run(r, models),
+        VisualKind::Levels(r) => levels::run(r, models),
     }
 }
 
@@ -345,5 +443,164 @@ mod tests {
             assert_ne!(palette(i), ERROR);
             assert_ne!(muted(i), ERROR);
         }
+    }
+}
+
+/// Runs the room and level checks on real models: `OPENCHECK_IFC` lists IFC
+/// files separated by `;`.
+#[cfg(test)]
+mod on_models {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn rooms_and_levels_on_models() {
+        let Ok(list) = std::env::var("OPENCHECK_IFC") else {
+            return;
+        };
+        let mut federation = crate::Federation::new();
+        for path in list.split(';') {
+            let started = std::time::Instant::now();
+            let model = crate::loader::load_ifc_file(path).expect("loads");
+            println!("loaded {path} in {:?}", started.elapsed());
+            federation.add(model);
+        }
+        // Leave rooms out to see the areas without one.
+        let drop: usize = std::env::var("OPENCHECK_DROP_ROOMS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let includes: Vec<FxHashSet<u32>> = federation
+            .iter()
+            .map(|(_, model)| {
+                let dropped: Vec<u32> = model
+                    .elements
+                    .iter()
+                    .filter(|e| e.ifc_class == "IfcSpace")
+                    .take(drop)
+                    .map(|e| e.express_id)
+                    .collect();
+                model
+                    .elements
+                    .iter()
+                    .map(|e| e.express_id)
+                    .filter(|x| !dropped.contains(x))
+                    .collect()
+            })
+            .collect();
+        let models: Vec<VisualModel> = federation
+            .iter()
+            .zip(&includes)
+            .map(|((id, model), include)| VisualModel {
+                id,
+                model,
+                transform: federation.model_transform(id).unwrap().as_dmat4(),
+                include: Some(include),
+            })
+            .collect();
+        let mut with_master = VisualRule::levels();
+        if let VisualKind::Levels(r) = &mut with_master.kind {
+            r.master = models
+                .iter()
+                .find(|m| m.model.discipline == crate::Discipline::Architectural)
+                .map(|m| m.model.short_name.clone())
+                .unwrap_or_default();
+        }
+        for rule in [VisualRule::rooms(), VisualRule::levels(), with_master] {
+            let started = std::time::Instant::now();
+            let outcome = run(&rule, &models);
+            println!(
+                "\n== {} in {:?}: {}",
+                rule.name,
+                started.elapsed(),
+                outcome.summary
+            );
+            for note in &outcome.notes {
+                println!("note: {note}");
+            }
+            for row in &outcome.table {
+                println!("  {}", row.join(" | "));
+            }
+            for p in outcome.problems.iter().take(15) {
+                println!("  ! {} ({} elements)", p.text, p.elements.len());
+            }
+            for l in outcome.labels.iter().take(4) {
+                println!(
+                    "  @ {} / {} at {:.1},{:.1}",
+                    l.number, l.name, l.at[0], l.at[1]
+                );
+            }
+            for c in &outcome.categories {
+                println!("  # {} {}", c.label, c.detail);
+            }
+        }
+    }
+}
+
+/// Runs the clash rulesets on real models with and without an exclusion:
+/// `OPENCHECK_IFC` lists IFC files separated by `;`.
+#[cfg(test)]
+mod exclusions_on_models {
+    use crate::check::{BUILTIN_RULESETS, CheckJob, CheckModel, Exclusion, Ruleset, run_check};
+
+    #[test]
+    #[ignore]
+    fn exclusions_leave_elements_out() {
+        let Ok(list) = std::env::var("OPENCHECK_IFC") else {
+            return;
+        };
+        let mut federation = crate::Federation::new();
+        for path in list.split(';') {
+            federation.add(crate::loader::load_ifc_file(path).expect("loads"));
+        }
+        let models: Vec<CheckModel> = federation
+            .iter()
+            .map(|(id, _)| CheckModel {
+                id,
+                model: federation.shared(id).unwrap(),
+                transform: federation.model_transform(id).unwrap(),
+                mask: None,
+            })
+            .collect();
+        let builtin = BUILTIN_RULESETS
+            .iter()
+            .find(|b| b.file_name == "clash-interdisciplinary.toml")
+            .unwrap();
+        let plain = Ruleset::from_toml(builtin.toml).unwrap();
+        let mut columns_out = plain.clone();
+        columns_out.rules[0].exclude.push(Exclusion {
+            discipline: Some(crate::Discipline::Structural),
+            category: "IfcColumn".into(),
+            ..Default::default()
+        });
+        let ids: Vec<_> = federation.ids();
+        let count = |ruleset: &Ruleset| {
+            let report = run_check(
+                &models,
+                &[CheckJob {
+                    ruleset: ruleset.clone(),
+                    models: ids.clone(),
+                    levels: Vec::new(),
+                    ids: Vec::new(),
+                    standards: Vec::new(),
+                }],
+                &|_| {},
+            );
+            let findings = &report.rulesets[0].rules[0].findings;
+            let columns = findings
+                .iter()
+                .filter(|f| {
+                    std::iter::once(&f.a)
+                        .chain(std::iter::once(&f.b))
+                        .any(|e| e.ifc_class.contains("Column"))
+                })
+                .count();
+            (findings.len(), columns)
+        };
+        let (all, with_columns) = count(&plain);
+        let (left, left_columns) = count(&columns_out);
+        println!("without exclusions: {all} findings, {with_columns} with a column");
+        println!("structural columns left out: {left} findings, {left_columns} with a column");
+        assert!(left <= all);
     }
 }

@@ -275,7 +275,7 @@ pub struct BcfProjectLink {
 
 /// The server's value for each of OpenCheck's values. Servers name things
 /// their own way (Dalux: "Aktiv", "Lukkede", "xyz@example.com | Role"), so the
-/// user pairs them once per project, as in Solibri. Empty entries fall back
+/// user pairs them once per project, as in other model checkers. Empty entries fall back
 /// to matching by name.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

@@ -17,6 +17,7 @@ pub mod bcf_file;
 pub mod check;
 mod dimensions;
 mod discipline;
+pub mod docx;
 mod federation;
 mod geometry;
 mod loader;

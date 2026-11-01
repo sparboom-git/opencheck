@@ -12,8 +12,8 @@ use eframe::egui::{self, Color32, RichText};
 use egui_phosphor::regular as icon;
 use opencheck_core::Discipline;
 use opencheck_core::visual::{
-    self, AlignMode, AlignmentRule, DimensionRule, ElementKey, SlopeLimit, SlopeRule, StoreyRule,
-    VisualKind, VisualModel, VisualOutcome, VisualRule,
+    self, AlignMode, AlignmentRule, DimensionRule, ElementKey, LevelRule, Plan, RoomRule,
+    SlopeLimit, SlopeRule, StoreyRule, VisualKind, VisualModel, VisualOutcome, VisualRule,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -35,6 +35,8 @@ pub struct VisualUi {
     pub show_rest: bool,
     /// Analyse only the selected elements.
     pub only_selection: bool,
+    /// The plan shown from a result's plan buttons.
+    pub plan: Option<Plan>,
 }
 
 /// What an analysis found.
@@ -47,7 +49,7 @@ pub struct VisualResult {
 
 impl VisualUi {
     /// The result shown: the selected rule's.
-    fn shown(&self) -> Option<&VisualResult> {
+    pub fn shown(&self) -> Option<&VisualResult> {
         self.results.get(&self.selected?)
     }
 }
@@ -85,6 +87,8 @@ fn kind_icon(kind: &VisualKind) -> &'static str {
         VisualKind::Dimensions(_) => icon::ARROWS_OUT_LINE_HORIZONTAL,
         VisualKind::DrainSlope(_) => icon::DROP,
         VisualKind::Storeys(_) => icon::STACK,
+        VisualKind::Rooms(_) => icon::SQUARES_FOUR,
+        VisualKind::Levels(_) => icon::RULER,
     }
 }
 
@@ -125,7 +129,12 @@ pub fn rules_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             ui.separator();
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .show(ui, |ui| settings(app, ui));
+                .show(ui, |ui| {
+                    settings(app, ui);
+                    ui.add_space(10.0);
+                    ui.separator();
+                    crate::check_docs::list(app, ui);
+                });
         });
 }
 
@@ -254,6 +263,8 @@ fn settings(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         VisualKind::Dimensions(r) => dimension_settings(ui, r, &models),
         VisualKind::DrainSlope(r) => slope_settings(ui, r, &models, &systems),
         VisualKind::Storeys(r) => storey_settings(ui, r, &models),
+        VisualKind::Rooms(r) => room_settings(ui, r, &models),
+        VisualKind::Levels(r) => level_settings(ui, r, &models),
     }
 
     ui.add_space(10.0);
@@ -350,7 +361,16 @@ fn hint(ui: &mut egui::Ui, text: &str) {
 
 /// Checkboxes per discipline, and the models they take in.
 fn disciplines(ui: &mut egui::Ui, chosen: &mut Vec<Discipline>, models: &[(Discipline, String)]) {
-    heading(ui, "Models");
+    disciplines_titled(ui, "Models", chosen, models);
+}
+
+fn disciplines_titled(
+    ui: &mut egui::Ui,
+    title: &str,
+    chosen: &mut Vec<Discipline>,
+    models: &[(Discipline, String)],
+) {
+    heading(ui, title);
     ui.horizontal_wrapped(|ui| {
         for d in Discipline::ALL {
             let mut on = chosen.contains(&d);
@@ -626,6 +646,307 @@ fn storey_settings(ui: &mut egui::Ui, rule: &mut StoreyRule, models: &[(Discipli
     word_list(ui, &mut rule.exempt, "storey_exempt");
 }
 
+fn room_settings(ui: &mut egui::Ui, rule: &mut RoomRule, models: &[(Discipline, String)]) {
+    ui.push_id("room_models", |ui| {
+        disciplines_titled(
+            ui,
+            "Models with the rooms",
+            &mut rule.room_disciplines,
+            models,
+        );
+    });
+    ui.push_id("wall_models", |ui| {
+        disciplines_titled(
+            ui,
+            "Models with the walls",
+            &mut rule.wall_disciplines,
+            models,
+        );
+    });
+    hint(
+        ui,
+        "Usually the architect's model for the rooms and the architect's and structural models \
+         for the walls. Installations are not needed.",
+    );
+    heading(ui, "Cut");
+    number(
+        ui,
+        &mut rule.cut_height_mm,
+        100.0..=5000.0,
+        " mm",
+        "above each storey's floor, where the walls are cut",
+    );
+    heading(ui, "Areas without a room");
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::DragValue::new(&mut rule.min_area_m2)
+                .range(0.1..=100.0)
+                .speed(0.1)
+                .max_decimals(1)
+                .suffix(" m²"),
+        );
+        hint(
+            ui,
+            "smallest area reported; smaller ones are shafts and cavities",
+        );
+    });
+    number(
+        ui,
+        &mut rule.gap_mm,
+        0.0..=5000.0,
+        " mm",
+        "openings narrower than this close the walls",
+    );
+    hint(
+        ui,
+        "Doors and windows close the walls; the gap closes openings without them, so the \
+         rooms are told from the outside.",
+    );
+}
+
+fn level_settings(ui: &mut egui::Ui, rule: &mut LevelRule, models: &[(Discipline, String)]) {
+    disciplines(ui, &mut rule.disciplines, models);
+    heading(ui, "Master model");
+    let shown = if rule.master.is_empty() {
+        "None: the models are compared with each other".to_owned()
+    } else {
+        rule.master.clone()
+    };
+    egui::ComboBox::from_id_salt("level_master")
+        .selected_text(shown)
+        .width(ui.available_width().min(320.0))
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut rule.master, String::new(), "None");
+            for (d, name) in models.iter().filter(|(d, _)| rule.disciplines.contains(d)) {
+                ui.selectable_value(
+                    &mut rule.master,
+                    name.clone(),
+                    format!("{}  {name}", d.code()),
+                );
+            }
+        });
+    hint(
+        ui,
+        "With a master, the other models' storeys are held against its storeys: a storey is \
+         red when the master has its name at another height, another name at its height, or \
+         neither.",
+    );
+    heading(ui, "Tolerance");
+    number(
+        ui,
+        &mut rule.tolerance_mm,
+        0.0..=1000.0,
+        " mm",
+        "storeys this close are one level",
+    );
+    hint(
+        ui,
+        "A level should have one name and one height in every model. The levels are drawn \
+         in the 3D view, a colour per model, red where they disagree.",
+    );
+}
+
+/// Shows a storey in plan: cut above its floor, seen from straight above.
+pub fn show_plan(app: &mut OpenCheckApp, plan: &Plan) {
+    app.visual.plan = Some(plan.clone());
+    let centre = glam::Vec3::new(
+        ((plan.min[0] + plan.max[0]) / 2.0) as f32,
+        ((plan.min[1] + plan.max[1]) / 2.0) as f32,
+        plan.floor as f32,
+    );
+    app.view.section = Some(crate::scene::SectionPlane::horizontal(
+        plan.cut as f32,
+        centre,
+    ));
+    app.view.modes_dirty = true;
+    let bounds = opencheck_core::Aabb {
+        min: glam::Vec3::new(plan.min[0] as f32, plan.min[1] as f32, plan.floor as f32),
+        max: glam::Vec3::new(plan.max[0] as f32, plan.max[1] as f32, plan.cut as f32),
+    };
+    app.camera.yaw = 0.0;
+    app.camera.pitch = -89.0_f32.to_radians();
+    app.camera.fit(&bounds, app.nav.aspect);
+}
+
+/// The levels of a level check, as rectangles around the model at their
+/// heights, a colour per model, named at a corner.
+pub fn draw_levels(app: &OpenCheckApp, ui: &egui::Ui, rect: egui::Rect, aspect: f32) {
+    let state = &app.visual;
+    let Some(result) = state.shown() else {
+        return;
+    };
+    if result.outcome.levels.is_empty() || !(app.tab == Tab::Visual || state.keep) {
+        return;
+    }
+    let (min, max) = match result.outcome.extent {
+        Some((min, max)) => (
+            glam::Vec2::new(min[0] as f32, min[1] as f32),
+            glam::Vec2::new(max[0] as f32, max[1] as f32),
+        ),
+        None => {
+            let bounds = app.visible_or_scene_bounds();
+            if bounds.is_empty() {
+                return;
+            }
+            (bounds.min.truncate(), bounds.max.truncate())
+        }
+    };
+    let margin = 2.0;
+    let (x0, y0) = (min.x - margin, min.y - margin);
+    let (x1, y1) = (max.x + margin, max.y + margin);
+    let painter = ui.painter_at(rect);
+    // Models in a level share its height: their names go to other corners.
+    let mut models: Vec<&str> = Vec::new();
+    for line in &result.outcome.levels {
+        if !models.contains(&line.model.as_str()) {
+            models.push(&line.model);
+        }
+    }
+    for line in &result.outcome.levels {
+        let z = line.z as f32;
+        let corners = [
+            glam::Vec3::new(x0, y0, z),
+            glam::Vec3::new(x1, y0, z),
+            glam::Vec3::new(x1, y1, z),
+            glam::Vec3::new(x0, y1, z),
+        ];
+        let points: Vec<Option<egui::Pos2>> = corners
+            .iter()
+            .map(|c| crate::viewport::project(app, rect, aspect, *c))
+            .collect();
+        let color = color32(line.color);
+        let width = if line.problem { 2.5 } else { 1.5 };
+        for i in 0..4 {
+            if let (Some(a), Some(b)) = (points[i], points[(i + 1) % 4]) {
+                painter.line_segment([a, b], egui::Stroke::new(width, color));
+            }
+        }
+        let corner = models.iter().position(|m| *m == line.model).unwrap_or(0) % 4;
+        if let Some(at) = points[corner] {
+            let text = format!("{}  {:+.3}  ({})", line.name, line.elevation, line.model);
+            let galley =
+                painter.layout_no_wrap(text, egui::FontId::proportional(12.0), Color32::WHITE);
+            let label = egui::Align2::LEFT_BOTTOM
+                .anchor_size(at + egui::vec2(4.0, -4.0), galley.size())
+                .expand2(egui::vec2(5.0, 2.0));
+            painter.rect_filled(label, 4.0, color);
+            painter.galley(label.min + egui::vec2(5.0, 2.0), galley, Color32::WHITE);
+        }
+    }
+}
+
+/// The plan shown, while the view still is that plan: its section in place
+/// and seen from above.
+fn plan_shown(app: &OpenCheckApp) -> Option<&Plan> {
+    let plan = app.visual.plan.as_ref()?;
+    let section = app.view.section?;
+    let same_cut = section.is_horizontal() && (f64::from(section.point.z) - plan.cut).abs() < 0.01;
+    let from_above = app.camera.pitch < -80.0_f32.to_radians();
+    (same_cut && from_above && (app.tab == Tab::Visual || app.visual.keep)).then_some(plan)
+}
+
+/// On a plan: which plan it is, at the top of the view, and the rooms'
+/// numbers and names, small, where they fit.
+pub fn draw_plan(app: &OpenCheckApp, ui: &egui::Ui, rect: egui::Rect, aspect: f32) {
+    let Some(plan) = plan_shown(app) else {
+        return;
+    };
+    let painter = ui.painter_at(rect);
+    let ink = Color32::from_rgb(0x20, 0x25, 0x2e);
+    if let Some(result) = app.visual.shown() {
+        let z = plan.cut as f32;
+        for label in result
+            .outcome
+            .labels
+            .iter()
+            .filter(|l| l.low <= plan.cut && l.high >= plan.cut)
+        {
+            let corners = [
+                glam::Vec3::new(label.min[0] as f32, label.min[1] as f32, z),
+                glam::Vec3::new(label.max[0] as f32, label.max[1] as f32, z),
+            ];
+            let (Some(a), Some(b), Some(at)) = (
+                crate::viewport::project(app, rect, aspect, corners[0]),
+                crate::viewport::project(app, rect, aspect, corners[1]),
+                crate::viewport::project(
+                    app,
+                    rect,
+                    aspect,
+                    glam::Vec3::new(label.at[0] as f32, label.at[1] as f32, z),
+                ),
+            ) else {
+                continue;
+            };
+            if !rect.contains(at) {
+                continue;
+            }
+            // Only what fits inside the room.
+            let (room_w, room_h) = ((a.x - b.x).abs() - 6.0, (a.y - b.y).abs() - 4.0);
+            let font = egui::FontId::proportional(10.0);
+            let mut lines = Vec::new();
+            for text in [&label.number, &label.name] {
+                if text.is_empty() {
+                    continue;
+                }
+                let galley = painter.layout_no_wrap(text.clone(), font.clone(), ink);
+                if galley.size().x <= room_w {
+                    lines.push(galley);
+                }
+            }
+            while !lines.is_empty()
+                && lines.iter().map(|g| g.size().y).sum::<f32>() > room_h.max(0.0)
+            {
+                lines.pop();
+            }
+            if lines.is_empty() {
+                continue;
+            }
+            let height: f32 = lines.iter().map(|g| g.size().y).sum();
+            let width = lines.iter().map(|g| g.size().x).fold(0.0, f32::max);
+            let mut y = at.y - height / 2.0;
+            painter.rect_filled(
+                egui::Rect::from_center_size(at, egui::vec2(width + 4.0, height + 2.0)),
+                2.0,
+                Color32::from_white_alpha(150),
+            );
+            for galley in lines {
+                let size = galley.size();
+                painter.galley(egui::pos2(at.x - size.x / 2.0, y), galley, ink);
+                y += size.y;
+            }
+        }
+    }
+    // Which plan this is.
+    let text = format!(
+        "Plan  {}  ·  kote {:+.3}  ·  snit {:+.2} m over gulv",
+        plan.name,
+        plan.elevation,
+        plan.cut - plan.floor
+    );
+    let galley = painter.layout_no_wrap(text, egui::FontId::proportional(14.0), ink);
+    let label = egui::Rect::from_center_size(
+        egui::pos2(rect.center().x, rect.top() + 24.0),
+        galley.size() + egui::vec2(20.0, 10.0),
+    );
+    painter.rect_filled(label, 6.0, Color32::from_white_alpha(235));
+    painter.rect_stroke(
+        label,
+        6.0,
+        egui::Stroke::new(1.0, Color32::from_gray(200)),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(label.min + egui::vec2(10.0, 5.0), galley, ink);
+}
+
+/// Back from a plan to the whole model.
+fn show_3d(app: &mut OpenCheckApp) {
+    app.visual.plan = None;
+    app.view.section = None;
+    app.view.modes_dirty = true;
+    let bounds = app.visible_or_scene_bounds();
+    app.camera.home(&bounds, app.nav.aspect);
+}
+
 /// The models as the checks see them: visible ones, without hidden
 /// elements and elements outside the working area, and with only the
 /// selection when asked. Element sets are owned here; see [`models_of`].
@@ -713,6 +1034,9 @@ const ROW: f32 = 22.0;
 const PROBLEM_ROW: f32 = 36.0;
 
 pub fn results_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
+    let mut document = false;
+    // A plan chosen: Some(None) for the 3D view.
+    let mut plan: Option<Option<Plan>> = None;
     egui::Panel::right("visual_results")
         .resizable(true)
         .default_size(380.0)
@@ -730,7 +1054,17 @@ pub fn results_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 return;
             };
             let outcome = &result.outcome;
-            ui.label(RichText::new(&outcome.summary).strong());
+            ui.horizontal(|ui| {
+                ui.add(egui::Label::new(RichText::new(&outcome.summary).strong()).truncate());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    document = ui
+                        .button(format!("{}  Document check…", icon::CLIPBOARD_TEXT))
+                        .on_hover_text(
+                            "Write down that this check was done, how and with what result,                              with pictures of the view",
+                        )
+                        .clicked();
+                });
+            });
             if outcome.skipped > 0 {
                 hint(
                     ui,
@@ -742,6 +1076,55 @@ pub fn results_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     .on_hover_text(note);
             }
             ui.add_space(6.0);
+            if !outcome.plans.is_empty() {
+                ui.label(RichText::new("Plans").strong());
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .button(format!("{}  3D", icon::CUBE))
+                        .on_hover_text("The whole model again")
+                        .clicked()
+                    {
+                        plan = Some(None);
+                    }
+                    for p in &outcome.plans {
+                        if ui
+                            .button(&p.name)
+                            .on_hover_text("This storey in plan: cut above its floor, from above")
+                            .clicked()
+                        {
+                            plan = Some(Some(p.clone()));
+                        }
+                    }
+                });
+                ui.add_space(6.0);
+            }
+            if outcome.table.len() > 1 {
+                egui::CollapsingHeader::new(RichText::new("Table").strong())
+                    .id_salt("visual_table")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::both()
+                            .id_salt("visual_table_scroll")
+                            .max_height(220.0)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                                egui::Grid::new("visual_table_grid")
+                                    .striped(true)
+                                    .spacing([12.0, 3.0])
+                                    .show(ui, |ui| {
+                                        for (i, row) in outcome.table.iter().enumerate() {
+                                            for cell in row {
+                                                let text = RichText::new(cell).small();
+                                                ui.label(if i == 0 { text.strong() } else { text });
+                                            }
+                                            ui.end_row();
+                                        }
+                                    });
+                            });
+                    });
+                ui.add_space(6.0);
+            }
 
             let selection: FxHashSet<ElementRef> = app.view.selection.iter().copied().collect();
             let mut pick: Option<Vec<ElementRef>> = None;
@@ -815,9 +1198,17 @@ pub fn results_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                         |ui, rows| {
                             for p in &outcome.problems[rows] {
                                 let Some(first) = p.elements.first() else {
+                                    // About no element, e.g. a level: the text only.
+                                    ui.horizontal(|ui| {
+                                        ui.set_height(PROBLEM_ROW);
+                                        swatch(ui, p.color);
+                                        ui.add(egui::Label::new(&p.text).truncate())
+                                            .on_hover_text(&p.text);
+                                    });
                                     continue;
                                 };
-                                let refs = vec![element_ref(first)];
+                                let refs: Vec<ElementRef> =
+                                    p.elements.iter().map(element_ref).collect();
                                 let on = refs.iter().all(|e| selection.contains(e));
                                 // What is wrong first, the element under it.
                                 let response = ui
@@ -894,4 +1285,12 @@ pub fn results_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 app.fit_selection();
             }
         });
+    if document {
+        app.document_visual_check(ui.ctx());
+    }
+    match plan {
+        Some(Some(p)) => show_plan(app, &p),
+        Some(None) => show_3d(app),
+        None => {}
+    }
 }

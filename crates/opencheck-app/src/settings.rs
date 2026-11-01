@@ -1,6 +1,6 @@
 //! The user's choices for the app itself, kept in
-//! `%APPDATA%/OpenCheck/settings.json` (the theme, the Excel template), and
-//! the Settings dialog (File → Settings).
+//! `%APPDATA%/OpenCheck/settings.json` (the theme, the Excel and report
+//! templates), and the Settings dialog (File → Settings).
 
 use std::path::PathBuf;
 
@@ -53,7 +53,12 @@ pub fn set(key: &str, value: Value) {
 
 /// The Excel template chosen last time.
 pub fn saved_excel_template() -> Option<PathBuf> {
-    get(excel::TEMPLATE_SETTING)
+    saved_path(excel::TEMPLATE_SETTING)
+}
+
+/// A file chosen last time, e.g. a template.
+pub fn saved_path(key: &str) -> Option<PathBuf> {
+    get(key)
         .and_then(|v| v.as_str().map(PathBuf::from))
         .filter(|p| !p.as_os_str().is_empty())
 }
@@ -67,6 +72,36 @@ impl OpenCheckApp {
             }),
         );
         self.excel_template = path;
+    }
+
+    fn set_report_template(&mut self, path: Option<PathBuf>) {
+        set(
+            crate::report::TEMPLATE_SETTING,
+            path.as_ref().map_or(Value::Null, |p| {
+                Value::String(p.to_string_lossy().into_owned())
+            }),
+        );
+        self.report_template = path;
+    }
+
+    /// Writes OpenCheck's standard report template, for the user to change.
+    fn export_standard_report_template(&mut self) {
+        let Some(path) = crate::platform::save_file(
+            "Save the standard report template",
+            ("Word document", &["docx"]),
+            "OpenCheck report template.docx",
+        ) else {
+            return;
+        };
+        match crate::platform::write(&path, crate::report::STANDARD_TEMPLATE) {
+            Ok(()) => self.notify(format!(
+                "Standard template saved: {}",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            )),
+            Err(e) => self
+                .errors
+                .push(format!("Could not save the template: {e}")),
+        }
     }
 
     /// Writes OpenCheck's standard Excel template, for the user to change.
@@ -207,6 +242,121 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
                         }
                     });
             });
+
+        ui.add_space(12.0);
+        ui.separator();
+        ui.add_space(4.0);
+        report_section(app, ui);
     });
     app.settings_open = open;
+}
+
+/// The report template: what reports look like in PDF and in the preview.
+fn report_section(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
+    ui.label(RichText::new(format!("{}  Reports", icon::FILE_PDF)).strong());
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(
+            "Reports are made from a Word template. To use your own: save the standard \
+             template, change it in Word and choose it here. Word exports are the template \
+             filled in; the PDF and the preview follow its page size and margins, header and \
+             footer (logo, page numbers), the text around the report and the styles Normal, \
+             Heading 1 and Heading 2 (font, size, colour, bold, spacing).",
+        )
+        .small()
+        .color(theme::text_muted()),
+    );
+    ui.add_space(8.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("Template").color(theme::text_muted()));
+        match &app.report_template {
+            Some(path) => {
+                let missing = !crate::platform::IS_WEB && !path.is_file();
+                let text = RichText::new(path.display().to_string()).monospace();
+                ui.label(if missing {
+                    text.color(theme::danger())
+                } else {
+                    text
+                })
+                .on_hover_text(if missing {
+                    "The file is not there; reports cannot be set until you choose another"
+                } else {
+                    "Reports use this file"
+                });
+            }
+            None => {
+                ui.label("Standard (built in)");
+            }
+        }
+    });
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        if !crate::platform::IS_WEB
+            && ui
+                .button(format!("{}  Choose template…", icon::FOLDER_OPEN))
+                .clicked()
+            && let Some(path) = crate::platform::pick_file(
+                "Choose the report template",
+                ("Word document or template", &["docx", "dotx"]),
+            )
+        {
+            app.set_report_template(Some(path));
+        }
+        if app.report_template.is_some()
+            && ui
+                .button(format!(
+                    "{}  Use the standard template",
+                    icon::ARROW_COUNTER_CLOCKWISE
+                ))
+                .clicked()
+        {
+            app.set_report_template(None);
+        }
+        if ui
+            .button(format!(
+                "{}  Save standard template…",
+                icon::DOWNLOAD_SIMPLE
+            ))
+            .on_hover_text("The template OpenCheck uses, to change in Word")
+            .clicked()
+        {
+            app.export_standard_report_template();
+        }
+    });
+    if crate::platform::IS_WEB {
+        ui.label(
+            RichText::new(
+                "In the browser reports use the standard template; your own works in the desktop app.",
+            )
+            .small()
+            .color(theme::text_muted()),
+        );
+    }
+    ui.add_space(8.0);
+    egui::CollapsingHeader::new("Fields a template can use")
+        .id_salt("report_fields")
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(
+                    "Write a field in the template as {{name}}, in the text, header or footer; \
+                     it is replaced by the report's value. {{revisions}} and {{content}} stand \
+                     alone in a paragraph. Pictures must be PNG, JPEG or SVG to show in the PDF. \
+                     The preview follows the template file as it is saved.",
+                )
+                .small()
+                .color(theme::text_muted()),
+            );
+            ui.add_space(4.0);
+            egui::Grid::new("report_field_list")
+                .num_columns(2)
+                .spacing([12.0, 3.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    for (name, what) in crate::report::FIELDS {
+                        ui.label(RichText::new(format!("{{{{{name}}}}}")).monospace().small());
+                        ui.label(RichText::new(*what).small());
+                        ui.end_row();
+                    }
+                });
+        });
 }

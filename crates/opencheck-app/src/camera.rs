@@ -17,6 +17,11 @@ pub struct Camera {
     /// Elevation of the view direction, radians. Negative looks down.
     pub pitch: f32,
     pub fov_y: f32,
+    /// A parallel view (no perspective), as an elevation or a plan.
+    pub ortho: bool,
+    /// In a parallel view: the distance whose view the screen shows, so the
+    /// scale is that of the perspective view from there.
+    pub ortho_distance: f32,
     near: f32,
     far: f32,
 }
@@ -45,6 +50,8 @@ impl Default for Camera {
             yaw: HOME_YAW,
             pitch: HOME_PITCH,
             fov_y: 45.0_f32.to_radians(),
+            ortho: false,
+            ortho_distance: 30.0,
             near: 0.05,
             far: 2000.0,
         }
@@ -73,7 +80,44 @@ impl Camera {
     }
 
     pub fn projection(&self, aspect: f32) -> Mat4 {
+        if self.ortho {
+            let h = self.ortho_distance * (self.fov_y * 0.5).tan();
+            let w = h * aspect.max(1e-3);
+            return Mat4::orthographic_rh(-w, w, -h, h, self.near, self.far);
+        }
         Mat4::perspective_rh(self.fov_y, aspect.max(1e-3), self.near, self.far)
+    }
+
+    /// How far one pixel reaches at `depth` in front of the camera.
+    pub fn world_per_pixel(&self, depth: f32, viewport_height: f32) -> f32 {
+        let depth = if self.ortho {
+            self.ortho_distance
+        } else {
+            depth
+        };
+        2.0 * depth * (self.fov_y * 0.5).tan() / viewport_height.max(1.0)
+    }
+
+    /// Switches between the perspective and the parallel view, keeping the
+    /// scale of what is at `depth`. In the parallel view the camera steps
+    /// back so all of `scene` stays in front of it.
+    pub fn set_ortho(&mut self, on: bool, depth: f32, scene: &Aabb) {
+        if on == self.ortho {
+            return;
+        }
+        let back = if scene.is_empty() {
+            0.0
+        } else {
+            scene.size().length()
+        };
+        if on {
+            self.ortho_distance = depth.max(0.5);
+            self.eye -= self.forward() * back;
+        } else {
+            self.eye += self.forward() * (back - self.ortho_distance).max(0.0);
+        }
+        self.ortho = on;
+        self.update_clip_planes(scene);
     }
 
     pub fn view_proj(&self, aspect: f32) -> Mat4 {
@@ -102,7 +146,8 @@ impl Camera {
         let near = inv.project_point3(ndc.extend(0.0));
         let far = inv.project_point3(ndc.extend(1.0));
         Ray {
-            origin: self.eye,
+            // Parallel rays start on the near plane, not at the eye.
+            origin: if self.ortho { near } else { self.eye },
             dir: (far - near).normalize(),
         }
     }
@@ -125,12 +170,20 @@ impl Camera {
     /// `depth` the distance to the point being dragged, so that point follows
     /// the cursor exactly.
     pub fn pan(&mut self, pixels: Vec2, depth: f32, viewport_height: f32) {
-        let world_per_pixel = 2.0 * depth * (self.fov_y * 0.5).tan() / viewport_height.max(1.0);
+        let world_per_pixel = self.world_per_pixel(depth, viewport_height);
         self.eye += (-self.right() * pixels.x + self.up() * pixels.y) * world_per_pixel;
     }
 
     /// Moves towards `target` by `factor` of the distance (0.8 = 20 % closer).
     pub fn zoom_towards(&mut self, target: Vec3, factor: f32) {
+        if self.ortho {
+            // The scale changes; the target stays under the cursor.
+            let offset = target - self.eye;
+            let across = offset - self.forward() * offset.dot(self.forward());
+            self.eye += across * (1.0 - factor);
+            self.ortho_distance = (self.ortho_distance * factor).max(0.05);
+            return;
+        }
         let new_eye = target + (self.eye - target) * factor;
         // Never step onto the target itself: keep a sliver of distance.
         if new_eye.distance(target) > 0.05 || factor > 1.0 {
@@ -148,6 +201,10 @@ impl Camera {
             (self.fov_y * 0.5).min((self.fov_y * 0.5).tan().atan2(1.0 / aspect.max(0.2)));
         let distance = radius / half_fov.sin() * 1.05;
         self.eye = bounds.center() - self.forward() * distance;
+        if self.ortho {
+            self.ortho_distance = distance;
+            self.eye = bounds.center() - self.forward() * (distance + radius * 2.0);
+        }
         self.update_clip_planes(bounds);
     }
 

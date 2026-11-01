@@ -354,7 +354,7 @@ impl OpenCheckApp {
             self.bcf.extensions_for = project.clone();
             self.bcf.load_extensions(&project, ctx);
         }
-        // As in Solibri: once the project's values are known, ask the user
+        // As in other model checkers: once the project's values are known, ask the user
         // to pair them with OpenCheck's, the first time.
         if let Some(link) = &self.issues.bcf
             && !link.mapping.confirmed

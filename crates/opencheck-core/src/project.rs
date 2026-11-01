@@ -35,6 +35,12 @@ const MANIFEST: &str = "manifest.json";
 const VIEW: &str = "view.json";
 const CHECKING: &str = "checking.json";
 const ISSUES: &str = "issues.json";
+const REPORTS: &str = "reports.json";
+/// Folder of the reports' pictures, each named by its content hash.
+pub const REPORT_PICTURES: &str = "reports/pictures/";
+const DOCUMENTATION: &str = "documentation.json";
+/// Folder of the pictures of documented checks.
+pub const DOCUMENTATION_PICTURES: &str = "documentation/pictures/";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -124,6 +130,14 @@ pub struct ProjectDocuments {
     pub checking: Option<serde_json::Value>,
     /// `issues.json`: the selected issues, modelled on BCF topics.
     pub issues: Option<serde_json::Value>,
+    /// `reports.json`: the reports and their revisions.
+    pub reports: Option<serde_json::Value>,
+    /// `documentation.json`: documented checks.
+    pub documentation: Option<serde_json::Value>,
+    /// Pictures of the reports' revisions (`reports/pictures/<hash>.png`)
+    /// and the documented checks (`documentation/pictures/<hash>.png`):
+    /// archive path and PNG bytes.
+    pub pictures: Vec<(String, Vec<u8>)>,
 }
 
 /// Where the bytes of a model come from when the project is saved.
@@ -205,10 +219,23 @@ fn read_contents<R: Read + Seek>(
     };
     let rulesets = read_text(&manifest.rulesets)?;
     let requirements = read_text(&manifest.requirements)?;
+    let mut pictures = Vec::new();
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let name = file.name()?.into_owned();
+        if name.starts_with(REPORT_PICTURES) || name.starts_with(DOCUMENTATION_PICTURES) {
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)?;
+            pictures.push((name, bytes));
+        }
+    }
     let documents = ProjectDocuments {
         view: read_json(&mut archive, VIEW)?,
         checking: read_json(&mut archive, CHECKING)?,
         issues: read_json(&mut archive, ISSUES)?,
+        reports: read_json(&mut archive, REPORTS)?,
+        documentation: read_json(&mut archive, DOCUMENTATION)?,
+        pictures,
     };
     Ok(ProjectContents {
         manifest,
@@ -370,11 +397,19 @@ fn write_archive<W: Write + Seek>(
         (VIEW, &documents.view),
         (CHECKING, &documents.checking),
         (ISSUES, &documents.issues),
+        (REPORTS, &documents.reports),
+        (DOCUMENTATION, &documents.documentation),
     ] {
         if let Some(value) = document {
             zip.start_file(name, text_options)?;
             serde_json::to_writer_pretty(&mut zip, value)?;
         }
+    }
+    // PNGs are compressed already.
+    let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    for (name, bytes) in &documents.pictures {
+        zip.start_file(name, stored)?;
+        zip.write_all(bytes)?;
     }
 
     let manifest = Manifest {
@@ -460,6 +495,7 @@ mod tests {
             view: Some(serde_json::json!({ "xray": true })),
             checking: Some(serde_json::json!({ "decisions": [] })),
             issues: Some(serde_json::json!({ "issues": [] })),
+            ..Default::default()
         };
 
         let models = vec![

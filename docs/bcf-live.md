@@ -50,8 +50,8 @@ with the redirect address `http://localhost:51789/callback`.
 
 Servers name their values their own way. Dalux, for example, offers the
 statuses "Aktiv", "Løst", "Lukkede" and "Afventer", priorities "Høj", "Mellem",
-"Lav" and "C1"–"C3", and people as "name@company.dk | Role". As in Solibri,
-the BCF Live window opens a **value mapping** the first time a project's
+"Lav" and "C1"–"C3", and people as "name@company.dk | Role". As in other
+model checkers, the BCF Live window opens a **value mapping** the first time a project's
 values are loaded: pair each OpenCheck status, criticality (C1–C3), the topic
 type, the phase (BCF stage) and each person used in the issues (initials) with
 the server's value, and press **Save mapping**. *Automatic* matches by name;

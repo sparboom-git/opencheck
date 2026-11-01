@@ -478,7 +478,7 @@ fn spatial_node(
     actions: &mut TreeActions,
 ) {
     // Skip single-child levels without own elements (project -> site -> building)
-    // only when they add nothing; otherwise show them like Solibri does.
+    // only when they add nothing; otherwise show them, as other model checkers do.
     let glyph = match node.ifc_class.as_str() {
         "IfcProject" => icon::BUILDINGS,
         "IfcBuildingStorey" => icon::STACK,
@@ -920,6 +920,7 @@ fn empty_properties(ui: &mut egui::Ui) {
             ("F / Home", "Zoom to selection / everything"),
             ("H / I / X", "Hide / isolate / X-ray"),
             ("C", "Section just above the selection"),
+            ("P", "Parallel view: no perspective"),
             ("M", "Measure with the laser"),
         ] {
             ui.label(RichText::new(keys).small().strong());

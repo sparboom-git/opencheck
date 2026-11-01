@@ -81,7 +81,7 @@ pub struct ManagerState {
     /// Matching element counts per selector, so they are not recounted every frame.
     counts: FxHashMap<String, (usize, usize)>,
     /// Classes and properties of the loaded models, for the pickers.
-    catalogue: Catalogue,
+    pub(crate) catalogue: Catalogue,
     /// Filter text of the open picker menu.
     picker_filter: String,
     /// Script rules: the language model's answer, pasted to be used.
@@ -372,6 +372,7 @@ fn new_rule(n: usize) -> Rule {
         script: String::new(),
         params: Default::default(),
         presort: Default::default(),
+        exclude: Vec::new(),
     }
 }
 
@@ -1145,6 +1146,26 @@ fn rule_form(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, r: usize) 
             changed |= selector_editor(&mut columns[1], ("b", index, r), b, manager, 1, mode_b);
         }
     });
+
+    if crate::exclusions_ui::takes_exclusions(rule.kind) {
+        ui.add_space(10.0);
+        ui.label(RichText::new(format!("{}  Leave out", icon::FUNNEL)).strong());
+        ui.label(
+            RichText::new(
+                "Elements left out of both groups: the discipline's models, then the category,                  then a property.",
+            )
+            .small()
+            .color(theme::text_muted()),
+        );
+        changed |= crate::exclusions_ui::table(
+            ui,
+            &format!("manager_{index}_{r}"),
+            &mut rule.exclude,
+            &manager.catalogue,
+            &app.federation,
+            &mut app.exclusions,
+        );
+    }
 
     if rule.kind == RuleKind::Script {
         ui.add_space(10.0);

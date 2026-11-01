@@ -19,9 +19,14 @@ requirements/<id>.toml   optional; the project's changes to a built-in informati
 view.json              optional; camera, hidden elements, section, measurements
 checking.json          optional; ruleset settings and decisions on findings
 issues.json            optional; selected issues (BCF-style topics)
+reports.json           optional; the reports and their revisions
+reports/pictures/<sha256>.png  pictures of the reports' revisions
+documentation.json     optional; documented visual checks
+documentation/pictures/<sha256>.png  pictures of the documented checks
 ```
 
-Entries are compressed with Deflate. Readers must not depend on the order of
+Entries are compressed with Deflate, except the pictures (PNG is compressed
+already). Readers must not depend on the order of
 entries; writers put `manifest.json` last, so its presence means the archive
 was written completely.
 
@@ -251,7 +256,9 @@ the issue has one component (role `a`).
 `priority` is shown as the C402 criticality: `low` = C1 (not critical),
 `moderate` = C2 (critical), `critical` = C3 (very critical). `people` lists
 assignees used before (initials or e-mail), offered again in other issues;
-`report` holds the header fields of the issue report.
+`report` holds project-wide header fields (project name, author, company,
+discipline, phase); a new report takes its introduction from them, and Excel
+exports their project name.
 
 Responsibility: `responsible` lists the disciplines that must solve the
 issue; new issues get the disciplines of the models their findings come
@@ -271,6 +278,80 @@ date and the newer model versions. When every finding of an issue is solved
 this way, the issue gets `"solved_by_update": true` and status `resolved`. A
 finding that shows up again loses the mark and its issue is reopened. Files
 without these fields are read as if every model was at revision 1.
+
+## reports.json
+
+The reports made on the Report tab:
+
+```json
+{
+  "reports": [
+    {
+      "id": "…", "name": "K&K-rapport",
+      "intro": { "prepared_by": "ABC", "checked_by": "", "company": "…", "disciplines": "KON", "phase": "Projektforslag" },
+      "revisions": [
+        {
+          "label": "A", "created": "2026-10-31T08:40:00Z",
+          "issued": { "date": "2026-10-31T09:00:00Z", "by": "ABC", "note": "Første udgave" },
+          "blocks": [
+            { "kind": "intro", "level": 1, "heading": "Indledning", "body": "…" },
+            { "kind": "clashes", "level": 2, "heading": "Kollisioner", "body": "…",
+              "filter": { "categories": ["C3"], "statuses": [], "rulesets": [], "disciplines": [], "excluded": [] },
+              "notes": { "<issue guid>": "Comment in the report" } }
+          ],
+          "snapshot": {
+            "taken": "2026-10-31T08:40:00Z", "project": "…", "opencheck": "0.2.0",
+            "models": [ { "file": "K09.ifc", "model": "K09", "discipline": "Konstruktion", "revision": 1,
+                          "date": "2025-06-02 12:40", "imported": "2026-10-31", "company": "…" } ],
+            "rulesets": [ "Clash: between disciplines" ],
+            "issues": [ … issues as in issues.json, Revit ids and assignees filled in … ],
+            "pictures": { "<issue guid>": "<sha256 of the PNG>" },
+            "checks": [ … documented checks as in documentation.json … ]
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+A revision's `snapshot` is the data it shows, frozen when it was made; an
+`issued` revision is never changed again. Block `kind` is `intro`, `text`,
+`models`, `software`, `properties`, `geometry`, `clashes`, `issues` or
+`visual` (documented checks; `filter.excluded` holds the ids left out);
+`level` 1 is a chapter, 2 a section in it. A filter's empty list lets
+everything through. Pictures are stored once under `reports/pictures/`, named
+by the SHA-256 of their bytes, and shared by the revisions that show them.
+Reports or fields a reader does not understand are left out with a message
+and written back unchanged.
+
+## documentation.json
+
+Visual checks documented as done, without elements:
+
+```json
+{
+  "checks": [
+    {
+      "id": "…", "title": "Søjler over hinanden", "check": "Storeys", "kind": "storey_mismatch",
+      "about": "Kontrollen farver elementerne efter den etage, …",
+      "method": "Elements coloured by storey and seen from the side.",
+      "verdict": "remarks", "by": "ABC",
+      "created": "2026-10-31T12:00:00Z", "modified": "2026-10-31T12:05:00Z",
+      "summary": "8 storeys (724 elements)", "problems": 151,
+      "legend": [ { "label": "E1", "detail": "", "color": [46, 160, 67], "count": 8 } ],
+      "hide_colours": false,
+      "models": [ "K09_ZKON.ifc (rev. 1)" ],
+      "pictures": [ "<sha256 of the PNG>" ]
+    }
+  ]
+}
+```
+
+`verdict` is `approved`, `remarks` (approved with remarks) or `rejected` (not
+approved). Pictures are stored under `documentation/pictures/`, named by the
+SHA-256 of their bytes; a report revision that shows a check keeps its own
+copy under `reports/pictures/`.
 
 ## Rulesets
 

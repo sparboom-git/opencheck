@@ -180,3 +180,46 @@ Colours: a muted colour per storey (by name across the models), **red** for
 elements standing on another storey (the text says which, and the value is
 the offset from the storey's floor), **purple** for elements that belong to
 no storey.
+
+## Rooms
+
+Checks that there is a room wherever walls enclose a place, e.g. that every
+room of the architect's model has its `IfcSpace`.
+
+- **Models.** The rooms and the storeys come from the models with the rooms
+  (usually the architect's); the walls from the models with the walls
+  (usually the architect's and the structural). Installations are not
+  needed.
+- **Per storey.** The walls, curtain walls, doors, windows, columns, plates
+  and members are cut at a height above the storey's floor (1200 mm by
+  default) and laid on a grid (100 mm cells) with the footprints of the
+  rooms on that storey. Doors and windows close the walls, so rooms do not
+  join through their openings; openings narrower than the gap (1200 mm)
+  are closed as well, for doors and windows without geometry.
+- **Inside and outside.** What the grid's edge reaches between the walls is
+  outside the building. What is enclosed, at least the smallest area (1 m²)
+  and wide enough to stand in (0.8 m, so wall cavities are left alone), and
+  not covered by a room, is an *area without a room*.
+- **Plans.** A button per storey shows it in plan: the model cut at the same
+  height above the floor and seen from straight above. *3D* goes back.
+
+Colours: **green** rooms, **grey** walls, doors, windows and columns,
+**red** the walls around an area without a room. A problem per area gives
+its size and storey; a click selects its walls. A table gives the rooms and
+the areas without a room per storey.
+
+## Levels
+
+Checks that the models agree on the levels: one name and one height per
+level in every model.
+
+- **Levels.** The storeys of all chosen models, by the height they state
+  (their placement in the IFC world frame, or their *Elevation*). Storeys
+  within the tolerance (10 mm) are one level.
+- **Problems.** A level whose storeys have different names (case, spaces,
+  dots and dashes do not count), and a name used at different heights.
+- **Table.** A row per level with its height, a column per model with the
+  storey's name there, or – when the model has none.
+- **3D view.** No element is coloured; each storey is drawn as a rectangle
+  around the building at its height, named at a corner, a colour per model,
+  red where something is wrong.

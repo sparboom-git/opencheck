@@ -467,6 +467,7 @@ impl Checking {
                     script: String::new(),
                     params: Default::default(),
                     presort: Default::default(),
+                    exclude: Vec::new(),
                 }],
             };
             self.add_ruleset(&ruleset.to_toml(), Some(&format!("ids-{stem}")))?;

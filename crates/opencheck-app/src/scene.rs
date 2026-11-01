@@ -203,7 +203,12 @@ impl ViewState {
         }
         let hidden = self.hidden.contains(&element)
             || self.outside.contains(&element)
-            || (model.slot_is_space[local_slot] && !self.show_spaces)
+            || (model.slot_is_space[local_slot]
+                && !self.show_spaces
+                && !self
+                    .paint
+                    .as_ref()
+                    .is_some_and(|p| p.contains_key(&element)))
             || self
                 .isolated
                 .as_ref()

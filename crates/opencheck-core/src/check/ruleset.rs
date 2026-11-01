@@ -9,8 +9,8 @@ use super::ids::ids_path;
 use super::information::{builtin_standard, matches_pattern};
 use crate::{Discipline, Element, IfcModel, PropertyValue};
 
-/// How serious a finding is. Matches the three levels used by Solibri and BCF
-/// priority conventions.
+/// How serious a finding is. Matches the three levels of common BCF priority
+/// conventions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
@@ -147,6 +147,186 @@ impl Default for Zone {
             max_blocked_mm: 0.0,
             min_free_mm: 0.0,
             direction: RunDirection::Any,
+        }
+    }
+}
+
+/// How a row of a rule's exclusions compares a property with its value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExcludeOperator {
+    #[default]
+    Contains,
+    Is,
+    IsNot,
+    StartsWith,
+    /// A number below the value, e.g. pipes under 50 mm.
+    Below,
+    /// A number above the value.
+    Above,
+    /// The property is there, whatever its value.
+    Exists,
+}
+
+impl ExcludeOperator {
+    pub const ALL: [ExcludeOperator; 7] = [
+        ExcludeOperator::Contains,
+        ExcludeOperator::Is,
+        ExcludeOperator::IsNot,
+        ExcludeOperator::StartsWith,
+        ExcludeOperator::Below,
+        ExcludeOperator::Above,
+        ExcludeOperator::Exists,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ExcludeOperator::Contains => "contains",
+            ExcludeOperator::Is => "is",
+            ExcludeOperator::IsNot => "is not",
+            ExcludeOperator::StartsWith => "starts with",
+            ExcludeOperator::Below => "is under",
+            ExcludeOperator::Above => "is over",
+            ExcludeOperator::Exists => "exists",
+        }
+    }
+}
+
+/// Attributes an exclusion can look at besides properties.
+pub const EXCLUDE_ATTRIBUTES: [&str; 7] = [
+    "Name",
+    "Type",
+    "Material",
+    "System",
+    "Tag",
+    "Description",
+    "GlobalId",
+];
+
+/// A row of a rule's exclusions: elements of that discipline's models, of
+/// that category and with that property are left out of the rule. Empty
+/// fields match anything; a row with nothing set leaves out nothing.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Exclusion {
+    /// Switched off: kept, but leaves out nothing.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub off: bool,
+    /// The models of this discipline; none for any model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discipline: Option<Discipline>,
+    /// An IFC class, subtypes included, e.g. `IfcCovering`; empty for any.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub category: String,
+    /// One of [`EXCLUDE_ATTRIBUTES`], or a property as `Set.Name` or `Name`
+    /// (in any set); empty for none.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub property: String,
+    pub operator: ExcludeOperator,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub value: String,
+}
+
+impl Exclusion {
+    /// Whether the row says anything at all.
+    pub fn is_set(&self) -> bool {
+        self.discipline.is_some()
+            || !self.category.trim().is_empty()
+            || !self.property.trim().is_empty()
+    }
+
+    /// Whether the row leaves the element out.
+    pub fn matches(&self, model: &IfcModel, element: &Element) -> bool {
+        if self.off || !self.is_set() {
+            return false;
+        }
+        if self.discipline.is_some_and(|d| d != model.discipline) {
+            return false;
+        }
+        let category = self.category.trim();
+        if !category.is_empty() && !is_a(model, element, category) {
+            return false;
+        }
+        let property = self.property.trim();
+        if property.is_empty() {
+            return true;
+        }
+        let values = values_of(model, element, property);
+        let wanted = self.value.trim().to_lowercase();
+        let limit = first_number(&wanted);
+        let test = |v: &String| {
+            let v = v.trim().to_lowercase();
+            match self.operator {
+                ExcludeOperator::Below => {
+                    matches!((first_number(&v), limit), (Some(n), Some(l)) if n < l)
+                }
+                ExcludeOperator::Above => {
+                    matches!((first_number(&v), limit), (Some(n), Some(l)) if n > l)
+                }
+                ExcludeOperator::Contains => v.contains(&wanted),
+                ExcludeOperator::Is => v == wanted,
+                ExcludeOperator::IsNot => v != wanted,
+                ExcludeOperator::StartsWith => v.starts_with(&wanted),
+                ExcludeOperator::Exists => true,
+            }
+        };
+        match self.operator {
+            // "Is not": no value of the element is the one given.
+            ExcludeOperator::IsNot => values.iter().all(test),
+            _ => values.iter().any(test),
+        }
+    }
+}
+
+/// The first number in a text, e.g. 50 in "Ø50 mm" or 0.5 in "0,5";
+/// none when it has no number.
+fn first_number(text: &str) -> Option<f64> {
+    let start = text.find(|c: char| c.is_ascii_digit())?;
+    let negative = text[..start].ends_with('-');
+    let digits: String = text[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == ',')
+        .map(|c| if c == ',' { '.' } else { c })
+        .collect();
+    let digits = digits.trim_end_matches('.');
+    let n: f64 = digits.parse().ok()?;
+    Some(if negative { -n } else { n })
+}
+
+/// The element is of the class, or a subtype, also by the class its type
+/// gives it (IFC2x3).
+pub fn is_a(model: &IfcModel, element: &Element, class: &str) -> bool {
+    let occurrence = element.occurrence_class();
+    is_subtype(&model.schema, &element.ifc_class, class)
+        || (occurrence != element.ifc_class && is_subtype(&model.schema, occurrence, class))
+}
+
+/// The element's values of an attribute or a property, as text.
+fn values_of(model: &IfcModel, element: &Element, property: &str) -> Vec<String> {
+    let one = |v: &str| vec![v.to_owned()];
+    match property {
+        "Name" => one(&element.name),
+        "Type" => element
+            .type_object
+            .iter()
+            .map(|(_, n)| n.clone())
+            .chain(element.object_type.clone())
+            .collect(),
+        "Material" => element.materials.clone(),
+        "System" => element.systems.clone(),
+        "Tag" => element.tag.iter().cloned().collect(),
+        "Description" => element.description.iter().cloned().collect(),
+        "GlobalId" => one(&element.global_id),
+        _ => {
+            let (set, name) = match property.split_once('.') {
+                Some((set, name)) => (set.trim(), name.trim()),
+                None => ("", property),
+            };
+            model
+                .property_sets_of(element)
+                .filter(|pset| set.is_empty() || pset.name.eq_ignore_ascii_case(set))
+                .filter_map(|pset| pset.get(name).map(|p| p.value.to_string()))
+                .collect()
         }
     }
 }
@@ -319,6 +499,16 @@ pub struct Rule {
     /// Clash: which findings OpenCheck marks as noise by fixed rules.
     #[serde(default, skip_serializing_if = "crate::triage::Presort::is_default")]
     pub presort: crate::triage::Presort,
+    /// Elements left out of the rule, on both sides.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<Exclusion>,
+}
+
+impl Rule {
+    /// Whether one of the rule's exclusions leaves the element out.
+    pub fn excludes(&self, model: &IfcModel, element: &Element) -> bool {
+        self.exclude.iter().any(|x| x.matches(model, element))
+    }
 }
 
 fn is_zero(v: &f32) -> bool {
@@ -510,6 +700,53 @@ pub const BUILTIN_RULESETS: &[BuiltinRuleset] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exclusions_round_trip_in_rule_files() {
+        let text = r#"
+[ruleset]
+id = "t"
+name = "T"
+
+[[rule]]
+id = "r"
+name = "R"
+type = "clash"
+severity = "critical"
+
+[[rule.exclude]]
+discipline = "structural"
+category = "IfcColumn"
+
+[[rule.exclude]]
+off = true
+property = "Pset_X.Fire"
+operator = "is"
+value = "EI60"
+"#;
+        let ruleset = Ruleset::from_toml(text).unwrap();
+        let exclude = &ruleset.rules[0].exclude;
+        assert_eq!(exclude.len(), 2);
+        assert_eq!(exclude[0].discipline, Some(Discipline::Structural));
+        assert_eq!(exclude[0].operator, ExcludeOperator::Contains);
+        assert!(exclude[1].off);
+        assert_eq!(exclude[1].operator, ExcludeOperator::Is);
+        let again = Ruleset::from_toml(&ruleset.to_toml()).unwrap();
+        assert_eq!(again.rules[0].exclude, *exclude);
+        assert!(!Exclusion::default().is_set());
+        assert_eq!(first_number("Ø50 mm"), Some(50.0));
+        assert_eq!(first_number("0,5"), Some(0.5));
+        assert_eq!(first_number("-12.5"), Some(-12.5));
+        assert_eq!(first_number("DN 110-75"), Some(110.0));
+        assert_eq!(first_number("none"), None);
+        let below: Exclusion = toml::from_str(
+            "property = \"Size\"
+operator = \"below\"
+value = \"50\"",
+        )
+        .unwrap();
+        assert_eq!(below.operator, ExcludeOperator::Below);
+    }
 
     #[test]
     fn rulesets_in_progress_are_known_by_id() {

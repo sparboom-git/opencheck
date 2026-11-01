@@ -26,8 +26,8 @@ pub use information::{
     validate_sources,
 };
 pub use ruleset::{
-    BUILTIN_RULESETS, Between, BuiltinRuleset, PropertyFilter, Rule, RuleKind, Ruleset,
-    RulesetError, RulesetInfo, RunDirection, Selector, Severity, Zone, ZoneSide,
-    is_work_in_progress,
+    BUILTIN_RULESETS, Between, BuiltinRuleset, EXCLUDE_ATTRIBUTES, ExcludeOperator, Exclusion,
+    PropertyFilter, Rule, RuleKind, Ruleset, RulesetError, RulesetInfo, RunDirection, Selector,
+    Severity, Zone, ZoneSide, is_work_in_progress,
 };
 pub use script::{SCRIPT_API, compile as compile_script};

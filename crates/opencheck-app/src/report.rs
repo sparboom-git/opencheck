@@ -1,27 +1,56 @@
-//! The issue report: one self-contained HTML file (pictures embedded) that
-//! anyone can open and print to PDF. It documents a consistency and clash
-//! check the way Danish practice expects: introduction, basis (models and
-//! software), then the issues by properties, geometry and clashes, each with
-//! a picture, its data and the GlobalIds of its objects.
+//! A report revision as a Typst document: the descriptive documentation of
+//! a consistency and clash check after C402, made of the revision's blocks
+//! in order, with the data frozen in it. [`crate::typeset`] turns it into
+//! PDF and page pictures.
+//!
+//! The document is made from a Word template (the standard one or the
+//! user's): its page, header and footer, styles and text, with fields such
+//! as `{{project}}` filled in. Next to it are the files it includes:
+//! `opencheck.typ` (the values and the shapes of the report's parts),
+//! `revisions.typ`, `content.typ` and the pictures.
 //!
 //! The report is written in Danish, the language of that practice.
 
-use opencheck_core::bcf::base64;
-use rustc_hash::FxHashMap;
+use opencheck_core::docx::{self, Layout, ParaFormat, RunFormat};
 
-use crate::app::OpenCheckApp;
 use crate::c402;
 use crate::issues::{ComponentRole, Issue, IssueStatus};
+use crate::reports::{Block, BlockKind, Report, Revision};
 
-fn esc(text: &str) -> String {
-    opencheck_core::bcf_file::xml_escape(text)
-}
+/// The template OpenCheck uses unless the user chose their own: a Word
+/// document (made by `scripts/report-template.py`).
+pub const STANDARD_TEMPLATE: &[u8] = include_bytes!("../assets/report-template.docx");
+
+/// The setting that holds the path of the user's report template.
+pub const TEMPLATE_SETTING: &str = "report_template";
+
+/// The fields a template can use, with what they hold.
+pub const FIELDS: &[(&str, &str)] = &[
+    ("project", "Project name"),
+    ("report", "Report name"),
+    ("revision", "Revision label, e.g. A"),
+    (
+        "date",
+        "Date of the revision (issued, or created while a draft)",
+    ),
+    ("status", "Udsendt or Kladde"),
+    ("prepared_by", "Prepared by"),
+    ("checked_by", "Checked by"),
+    ("company", "Company"),
+    ("disciplines", "Disciplines"),
+    ("phase", "Phase"),
+    ("data_date", "Date the data was taken from the check"),
+    ("today", "Date of the export"),
+    ("opencheck", "OpenCheck version"),
+    ("revisions", "The revision table"),
+    ("content", "The report's chapters"),
+];
 
 fn date(text: &str) -> String {
     text.get(..10).unwrap_or(text).to_owned()
 }
 
-fn status_da(status: IssueStatus) -> &'static str {
+pub fn status_da(status: IssueStatus) -> &'static str {
     match status {
         IssueStatus::Open => "Åben",
         IssueStatus::InProgress => "I gang",
@@ -30,369 +59,879 @@ fn status_da(status: IssueStatus) -> &'static str {
     }
 }
 
-/// The report section an issue belongs to, from the kind of its findings.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Section {
-    Properties,
-    Geometry,
-    Clashes,
+/// The numbers of the blocks' headings: "1", "2", "2.1", …; empty for a
+/// block without a heading.
+pub fn numbering(blocks: &[Block]) -> Vec<String> {
+    let (mut chapter, mut section) = (0, 0);
+    blocks
+        .iter()
+        .map(|b| {
+            if b.heading.trim().is_empty() {
+                return String::new();
+            }
+            if b.level <= 1 {
+                chapter += 1;
+                section = 0;
+                chapter.to_string()
+            } else {
+                section += 1;
+                format!("{}.{section}", chapter.max(1))
+            }
+        })
+        .collect()
 }
 
-impl Section {
-    const ALL: [Section; 3] = [Section::Properties, Section::Geometry, Section::Clashes];
-
-    fn of(issue: &Issue) -> Self {
-        let kinds: Vec<&str> = issue.findings.iter().map(|f| f.kind.as_str()).collect();
-        if kinds.iter().any(|k| *k == "Clash" || *k == "Inside") {
-            Section::Clashes
-        } else if kinds.iter().any(|k| *k == "Duplicate" || *k == "Clearance") {
-            Section::Geometry
-        } else if kinds.contains(&"Missing information") {
-            Section::Properties
-        } else {
-            Section::Clashes
+/// A Typst string literal of a text.
+fn s(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => {}
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
         }
     }
+    out.push('"');
+    out
+}
 
-    fn title(self) -> &'static str {
-        match self {
-            Section::Properties => "Egenskaber",
-            Section::Geometry => "Geometri",
-            Section::Clashes => "Kollisioner",
+/// A text as a Typst string; a dash when empty.
+fn or_dash(text: &str) -> String {
+    s(if text.trim().is_empty() {
+        "–"
+    } else {
+        text.trim()
+    })
+}
+
+/// The label marking where block `i` starts.
+pub fn anchor(i: usize) -> String {
+    format!("opencheck-block-{i}")
+}
+
+/// The path of a picture inside the document.
+pub fn picture_path(hash: &str) -> String {
+    format!("/pictures/{hash}.png")
+}
+
+/// The shapes of the report's parts, in `opencheck.typ`. Templates style
+/// them through set and show rules (text, table, heading, …).
+const SHAPES: &str = r##"
+#let muted = luma(110)
+#let accent = rgb("#2b7ff6")
+#let mono(t) = text(font: "IBM Plex Mono", size: 0.88em, t)
+#let badge(code) = box(
+  fill: (C3: rgb("#d64541"), C2: rgb("#e08a1e"), C1: rgb("#7a8594")).at(code, default: gray),
+  inset: (x: 5pt, y: 1.5pt), outset: (y: 1pt), radius: 6pt,
+  text(fill: white, weight: "semibold", size: 0.85em, code),
+)
+#let facts(rows) = table(
+  columns: (auto, 1fr), stroke: none, inset: (x: 0pt, y: 2.5pt), column-gutter: 12pt,
+  ..rows.map(((k, v)) => (text(fill: muted, k), v)).flatten(),
+)
+#let paragraphs(t) = for p in t { par(p) }
+#let light(hex, label) = box(
+  fill: rgb(hex), inset: (x: 5pt, y: 1.5pt), outset: (y: 1pt), radius: 6pt,
+  text(fill: white, weight: "bold", size: 0.85em, label),
+)
+#let check-card(title, verdict, hex, rows, about, method, legend, more, tbl, pictures) = block(
+  width: 100%, stroke: (left: 3pt + rgb(hex), rest: 0.5pt + luma(205)), radius: 4pt,
+  inset: 9pt, above: 10pt, {
+  block(breakable: false, below: 8pt, {
+    text(weight: "bold", size: 1.05em, title)
+    h(6pt)
+    light(hex, verdict)
+  })
+  facts(rows)
+  if about.len() > 0 { paragraphs(about) }
+  if method.len() > 0 { paragraphs(method) }
+  if legend.len() > 0 {
+    block(above: 8pt, {
+      set text(size: 0.8em)
+      for (label, color, count) in legend {
+        box(inset: (right: 9pt), [#box(width: 7pt, height: 7pt, radius: 1pt, fill: rgb(color)) #label #text(fill: muted)[#count]])
+      }
+      if more != none { text(fill: muted, more) }
+    })
+  }
+  if tbl.len() > 1 {
+    block(above: 8pt, {
+      set text(size: 0.85em)
+      table(columns: tbl.at(0).len(), table.header(..tbl.at(0)), ..tbl.slice(1).flatten())
+    })
+  }
+  // Two pictures a row, each kept low, so a check takes little room.
+  if pictures.len() > 0 {
+    block(above: 8pt, grid(columns: (1fr, 1fr), column-gutter: 8pt, row-gutter: 8pt,
+      ..pictures.map(p => block(breakable: false,
+        image(p, width: 100%, height: 6.5cm, fit: "contain")))))
+  }
+})
+#let none-text = text(fill: muted, style: "italic", "Ingen emner.")
+#let issue-card(number, title, code, note, picture, rows, description, components) = block(
+  width: 100%, stroke: 0.5pt + luma(205), radius: 4pt, inset: 9pt, above: 10pt, {
+  block(breakable: false, below: 8pt, {
+    text(weight: "semibold", size: 1.05em)[\##number #title]
+    h(6pt)
+    badge(code)
+    if note != none {
+      block(width: 100%, fill: luma(244), inset: 6pt, stroke: (left: 2pt + accent), note)
+    }
+    grid(columns: (42%, 1fr), column-gutter: 12pt,
+      if picture != none {
+        image(picture, width: 100%)
+      } else {
+        rect(width: 100%, height: 3.5cm, radius: 3pt, stroke: (paint: luma(200), dash: "dashed"),
+          align(center + horizon, text(fill: muted, style: "italic", "Intet billede")))
+      },
+      facts(rows),
+    )
+  })
+  if description != none { par(description) }
+  if components.len() > 0 {
+    set text(size: 0.82em)
+    table(columns: (auto, auto, 1fr, auto, auto, auto),
+      table.header[][Revit ID][Objekt][IFC-klasse][Model][IFC GlobalId],
+      ..components.map(((role, tag, name, class, model, id)) =>
+        (role, text(weight: "semibold", mono(tag)), name, class, model, mono(id))).flatten())
+  }
+})
+"##;
+
+/// The Typst document of a Word template: its page, header and footer,
+/// styles and text, with fields filled in and `{{revisions}}` and
+/// `{{content}}` including those parts.
+pub fn main(layout: &Layout, report: &Report, index: usize) -> String {
+    let fields = values(report, index);
+    let styles = &layout.styles;
+    let normal = styles.para_style(None);
+    let page = &layout.page;
+    let mut t = String::from("#import \"/opencheck.typ\": *\n");
+    t.push_str(&format!(
+        "#set document(title: {})\n",
+        s(&format!(
+            "{} – {}",
+            field(&fields, "project"),
+            report.name.trim()
+        ))
+    ));
+
+    // Page, header and footer.
+    let header = |blocks: &[docx::Block]| -> String {
+        let mut h = String::new();
+        for b in blocks {
+            block_of(&mut h, b, layout, &fields);
         }
+        h
+    };
+    // As in Word: the header starts its distance from the top edge and the
+    // footer ends its distance from the bottom; text starts below a header
+    // taller than the margin.
+    let height = |blocks: &[docx::Block]| blocks_height(blocks, layout);
+    let first_header = layout
+        .header_first
+        .as_ref()
+        .filter(|_| layout.title_page)
+        .unwrap_or(&layout.header);
+    let top = page.top.max(page.header + height(&layout.header) + 6.0);
+    let first_extra = (page.header + height(first_header) + 6.0 - top).max(0.0);
+    let bottom = page.bottom.max(page.footer + height(&layout.footer) + 6.0);
+    let head = |blocks: &[docx::Block]| {
+        format!(
+            "place(top + left, dy: {}pt, block(width: 100%)[{}])",
+            page.header,
+            header(blocks)
+        )
+    };
+    let foot = |blocks: &[docx::Block]| {
+        format!(
+            "place(bottom + left, dy: -{}pt, block(width: 100%)[{}])",
+            page.footer,
+            header(blocks)
+        )
+    };
+    let pick = |first: &Option<Vec<docx::Block>>,
+                default: &[docx::Block],
+                shape: &dyn Fn(&[docx::Block]) -> String|
+     -> String {
+        match first.as_ref().filter(|_| layout.title_page) {
+            Some(first) => format!(
+                "context if here().page() == 1 {{ {} }} else {{ {} }}",
+                shape(first),
+                shape(default)
+            ),
+            None => shape(default),
+        }
+    };
+    t.push_str(&format!(
+        "#set page(width: {}pt, height: {}pt, margin: (top: {top}pt, bottom: {bottom}pt, left: {}pt, right: {}pt),
+           header-ascent: 0pt, footer-descent: 0pt,
+  header: {},
+  footer: {})
+",
+        page.width,
+        page.height,
+        page.left,
+        page.right,
+        pick(&layout.header_first, &layout.header, &head),
+        pick(&layout.footer_first, &layout.footer, &foot),
+    ));
+    if first_extra > 0.0 {
+        t.push_str(&format!(
+            "#v({first_extra}pt)
+"
+        ));
     }
 
-    fn intro(self) -> &'static str {
-        match self {
-            Section::Properties => {
-                "Objekter, der mangler de egenskaber, som er aftalt for projektets informationsniveau."
+    // The text and the report's headings in the template's styles.
+    t.push_str(&format!(
+        "#set text({}, lang: \"da\")\n#set par(spacing: {}pt, leading: 0.55em)\n",
+        text_args(&normal.run),
+        normal.para.after.unwrap_or(6.0)
+    ));
+    for (level, name) in [(1, "heading 1"), (2, "heading 2")] {
+        let style = styles.named(name).unwrap_or_else(|| {
+            let mut s = normal.clone();
+            s.run.bold = Some(true);
+            s.run.size =
+                Some(normal.run.size.unwrap_or(10.0) * if level == 1 { 1.4 } else { 1.15 });
+            s
+        });
+        t.push_str(&format!(
+            "#show heading.where(level: {level}): it => {}[#text({})[#it.body]]\n",
+            block_open(&style.para, true),
+            text_args(&style.run)
+        ));
+    }
+    t.push_str(
+        "#set table(stroke: (x: none, y: 0.4pt + luma(215)), inset: (x: 5pt, y: 4pt))\n\
+         #show table.cell.where(y: 0): set text(fill: luma(100), weight: \"bold\")\n",
+    );
+
+    // The template's own text around the report.
+    for b in &layout.body {
+        block_of(&mut t, b, layout, &fields);
+        t.push('\n');
+    }
+    t
+}
+
+/// About how tall blocks are, in points: a line per paragraph or its
+/// tallest picture, with the spacing after.
+fn blocks_height(blocks: &[docx::Block], layout: &Layout) -> f32 {
+    blocks
+        .iter()
+        .map(|b| match b {
+            docx::Block::Para(p) => {
+                let style = layout.styles.para_style(p.style.as_deref());
+                let line = style.run.size.unwrap_or(10.0) * 1.25;
+                let pictures = p
+                    .runs
+                    .iter()
+                    .filter_map(|r| match r {
+                        docx::Run::Picture { height, .. } => Some(*height),
+                        _ => None,
+                    })
+                    .fold(0.0, f32::max);
+                let rule = style.para.over(&p.format).rule_below.map_or(0.0, |_| 4.0);
+                line.max(pictures) + rule
             }
-            Section::Geometry => {
-                "Geometriske forhold som dubletter af objekter og manglende respektafstande."
+            docx::Block::Table(t) => t
+                .rows
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|cell| blocks_height(cell, layout))
+                        .fold(0.0, f32::max)
+                })
+                .sum(),
+        })
+        .sum()
+}
+
+fn field<'a>(fields: &'a [(&str, String)], name: &str) -> &'a str {
+    fields
+        .iter()
+        .find(|(k, _)| *k == name)
+        .map_or("", |(_, v)| v.as_str())
+}
+
+/// Typst `text` arguments of a Word character format.
+fn text_args(f: &RunFormat) -> String {
+    let mut args = Vec::new();
+    let font = f.font.as_deref().unwrap_or("Arial");
+    args.push(format!("font: ({}, \"IBM Plex Sans\")", s(font)));
+    if let Some(size) = f.size {
+        args.push(format!("size: {size}pt"));
+    }
+    if let Some(bold) = f.bold {
+        args.push(format!(
+            "weight: {}",
+            if bold { "\"bold\"" } else { "\"regular\"" }
+        ));
+    }
+    if let Some(italic) = f.italic {
+        args.push(format!(
+            "style: {}",
+            if italic { "\"italic\"" } else { "\"normal\"" }
+        ));
+    }
+    if let Some(color) = &f.color {
+        args.push(format!("fill: rgb(\"#{color}\")"));
+    }
+    args.join(", ")
+}
+
+/// The opening of a block with a paragraph's spacing and rule; `[` follows.
+fn block_open(p: &ParaFormat, sticky: bool) -> String {
+    let mut args = vec!["width: 100%".to_owned()];
+    if let Some(before) = p.before {
+        args.push(format!("above: {before}pt"));
+    }
+    if let Some(after) = p.after {
+        args.push(format!("below: {after}pt"));
+    }
+    if let Some((width, color)) = &p.rule_below {
+        args.push(format!(
+            "stroke: (bottom: {width}pt + rgb(\"#{color}\")), inset: (bottom: 3pt)"
+        ));
+    }
+    if sticky {
+        args.push("sticky: true".to_owned());
+    }
+    format!("block({})", args.join(", "))
+}
+
+/// Picture formats Typst can show.
+fn shows_picture(part: &str) -> bool {
+    let lower = part.to_ascii_lowercase();
+    [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"]
+        .iter()
+        .any(|x| lower.ends_with(x))
+}
+
+fn block_of(t: &mut String, b: &docx::Block, layout: &Layout, fields: &[(&str, String)]) {
+    match b {
+        docx::Block::Para(p) => para_of(t, p, layout, fields),
+        docx::Block::Table(table) => {
+            let columns: Vec<String> =
+                if table.widths.iter().all(|w| *w > 0.0) && !table.widths.is_empty() {
+                    table.widths.iter().map(|w| format!("{w}pt")).collect()
+                } else {
+                    let n = table.rows.iter().map(Vec::len).max().unwrap_or(1);
+                    vec!["1fr".to_owned(); n]
+                };
+            t.push_str(&format!(
+                "#table(columns: ({},), stroke: none, inset: (x: 0pt, y: 2pt), column-gutter: 8pt,\n",
+                columns.join(", ")
+            ));
+            for row in &table.rows {
+                for cell in row {
+                    let mut c = String::new();
+                    for b in cell {
+                        block_of(&mut c, b, layout, fields);
+                    }
+                    t.push_str(&format!("  [{c}],\n"));
+                }
+                for _ in row.len()..columns.len() {
+                    t.push_str("  [],\n");
+                }
             }
-            Section::Clashes => {
-                "Utilsigtede kollisioner mellem objekter i og på tværs af fagmodellerne."
+            t.push_str(")\n");
+        }
+    }
+}
+
+fn para_of(t: &mut String, p: &docx::Para, layout: &Layout, fields: &[(&str, String)]) {
+    let marker = p.text();
+    match marker.trim() {
+        "{{content}}" => {
+            t.push_str("#include \"/content.typ\"\n");
+            return;
+        }
+        "{{revisions}}" => {
+            t.push_str("#include \"/revisions.typ\"\n");
+            return;
+        }
+        _ => {}
+    }
+    let style = layout.styles.para_style(p.style.as_deref());
+    let format = style.para.over(&p.format);
+    if format.page_break_before == Some(true) {
+        t.push_str("#pagebreak(weak: true)");
+    }
+    let mut inner = String::new();
+    for run in &p.runs {
+        match run {
+            docx::Run::Text(text, f) => {
+                let f = style.run.over(f);
+                let mut text = docx::substitute(text, fields);
+                if f.caps == Some(true) {
+                    text = text.to_uppercase();
+                }
+                let piece = format!("#text({})[#{}]", text_args(&f), s(&text));
+                if f.underline == Some(true) {
+                    inner.push_str(&format!("#underline[{piece}]"));
+                } else {
+                    inner.push_str(&piece);
+                }
+            }
+            docx::Run::Tab => inner.push_str("#h(1fr)"),
+            docx::Run::Break => inner.push_str("#linebreak()"),
+            docx::Run::PageBreak => inner.push_str("#pagebreak(weak: true)"),
+            docx::Run::Page(f) => inner.push_str(&format!(
+                "#text({})[#context counter(page).display()]",
+                text_args(&style.run.over(f))
+            )),
+            docx::Run::Pages(f) => inner.push_str(&format!(
+                "#text({})[#context counter(page).final().first()]",
+                text_args(&style.run.over(f))
+            )),
+            docx::Run::Picture {
+                part,
+                width,
+                height,
+            } => {
+                if shows_picture(part) {
+                    inner.push_str(&format!(
+                        "#box(image({}, width: {width}pt, height: {height}pt))",
+                        s(&format!("/{part}"))
+                    ));
+                }
+            }
+        }
+    }
+    let align = match format.align.unwrap_or_default() {
+        docx::Align::Left => "left",
+        docx::Align::Center => "center",
+        docx::Align::Right => "right",
+        docx::Align::Justify => "left",
+    };
+    let justify = format.align == Some(docx::Align::Justify);
+    if inner.is_empty() {
+        // An empty paragraph still takes a line.
+        inner = format!("#v({}pt)", style.run.size.unwrap_or(10.0) * 1.2);
+    }
+    t.push_str(&format!(
+        "#{}[#set par(justify: {justify}); #align({align})[{inner}]]",
+        block_open(&format, false)
+    ));
+}
+
+/// The fonts a template names, to load from the computer when it has them.
+pub fn fonts(layout: &Layout) -> Vec<String> {
+    let mut list = layout.styles.fonts();
+    let mut add = |blocks: &[docx::Block]| {
+        for b in blocks {
+            if let docx::Block::Para(p) = b {
+                for r in &p.runs {
+                    if let docx::Run::Text(_, f) = r
+                        && let Some(font) = &f.font
+                    {
+                        list.push(font.clone());
+                    }
+                }
+            }
+        }
+    };
+    add(&layout.body);
+    add(&layout.header);
+    add(&layout.footer);
+    list.push("Arial".to_owned());
+    list.sort();
+    list.dedup();
+    list
+}
+
+/// The text fields' values.
+pub fn values(report: &Report, index: usize) -> Vec<(&'static str, String)> {
+    let Some(rev) = report.revisions.get(index) else {
+        return Vec::new();
+    };
+    let intro = &report.intro;
+    let project = if rev.snapshot.project.trim().is_empty() {
+        "Projekt".to_owned()
+    } else {
+        rev.snapshot.project.trim().to_owned()
+    };
+    vec![
+        ("project", project),
+        ("report", report.name.trim().to_owned()),
+        ("revision", rev.label.clone()),
+        (
+            "date",
+            rev.issued
+                .as_ref()
+                .map_or_else(|| date(&rev.created), |i| date(&i.date)),
+        ),
+        (
+            "status",
+            if rev.issued.is_some() {
+                "Udsendt"
+            } else {
+                "Kladde"
+            }
+            .to_owned(),
+        ),
+        ("prepared_by", intro.prepared_by.trim().to_owned()),
+        ("checked_by", intro.checked_by.trim().to_owned()),
+        ("company", intro.company.trim().to_owned()),
+        ("disciplines", intro.disciplines.trim().to_owned()),
+        ("phase", intro.phase.trim().to_owned()),
+        ("data_date", date(&rev.snapshot.taken)),
+        ("today", date(&opencheck_core::project::now_rfc3339())),
+        ("opencheck", rev.snapshot.opencheck.clone()),
+    ]
+}
+
+/// The files next to the filled-in template (`opencheck.typ`,
+/// `revisions.typ` and `content.typ`) and the hashes of the pictures used.
+pub fn parts(report: &Report, index: usize) -> (Vec<(&'static str, String)>, Vec<String>) {
+    let Some(rev) = report.revisions.get(index) else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut shared = String::from("#let info = (");
+    for (k, v) in values(report, index) {
+        shared.push_str(&format!("{k}: {}, ", s(&v)));
+    }
+    shared.push_str(")\n");
+    shared.push_str(SHAPES);
+
+    let mut revisions = String::from("#import \"/opencheck.typ\": *\n");
+    revision_table(&mut revisions, &report.revisions[..=index]);
+
+    let mut content = String::from("#import \"/opencheck.typ\": *\n");
+    let mut pictures = Vec::new();
+    let numbers = numbering(&rev.blocks);
+    for (i, (block, number)) in rev.blocks.iter().zip(&numbers).enumerate() {
+        if block.new_page {
+            content.push_str(
+                "#pagebreak(weak: true)
+",
+            );
+        }
+        // Where the block starts, for the preview to find it in the pages.
+        content.push_str(&format!(
+            "#metadata({i}) <{}>
+",
+            anchor(i)
+        ));
+        if !block.heading.trim().is_empty() {
+            content.push_str(&format!(
+                "#heading(level: {}, {})\n",
+                block.level.clamp(1, 2),
+                s(&format!("{number} {}", block.heading.trim()))
+            ));
+        }
+        block_typst(&mut content, report, rev, block, &mut pictures);
+    }
+    pictures.sort();
+    pictures.dedup();
+    (
+        vec![
+            ("opencheck.typ", shared),
+            ("revisions.typ", revisions),
+            ("content.typ", content),
+        ],
+        pictures,
+    )
+}
+
+/// The revisions up to the one shown, newest first: label, date, issued by,
+/// change.
+fn revision_table(t: &mut String, revisions: &[Revision]) {
+    t.push_str(
+        "#table(columns: (auto, auto, auto, 1fr),\n  table.header[Revision][Dato][Udsendt af][Ændring],\n",
+    );
+    for r in revisions.iter().rev() {
+        let (when, by, note) = match &r.issued {
+            Some(i) => (date(&i.date), s(&i.by), s(&i.note)),
+            None => (
+                date(&r.created),
+                "text(fill: muted, \"kladde\")".to_owned(),
+                "[]".to_owned(),
+            ),
+        };
+        t.push_str(&format!("  {}, {}, {by}, {note},\n", s(&r.label), s(&when)));
+    }
+    t.push_str(")\n");
+}
+
+/// Paragraphs of a typed text: blank lines part them.
+fn paragraphs(t: &mut String, text: &str) {
+    let list: Vec<String> = text
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(s)
+        .collect();
+    if !list.is_empty() {
+        t.push_str(&format!("#paragraphs(({},))\n", list.join(", ")));
+    }
+}
+
+fn block_typst(
+    t: &mut String,
+    report: &Report,
+    rev: &Revision,
+    block: &Block,
+    pictures: &mut Vec<String>,
+) {
+    let snapshot = &rev.snapshot;
+    match block.kind {
+        BlockKind::Intro => {
+            let intro = &report.intro;
+            let date_text = rev
+                .issued
+                .as_ref()
+                .map_or_else(|| date(&rev.created), |i| date(&i.date));
+            let mut rows = vec![("Udarbejdet af", or_dash(&intro.prepared_by))];
+            if !intro.checked_by.trim().is_empty() {
+                rows.push(("Kontrolleret af", s(intro.checked_by.trim())));
+            }
+            rows.extend([
+                ("Firma", or_dash(&intro.company)),
+                ("Dato", s(&date_text)),
+                ("Revision", s(&rev.label)),
+                ("Fag", or_dash(&intro.disciplines)),
+                ("Fase", or_dash(&intro.phase)),
+            ]);
+            facts(t, &rows);
+            paragraphs(t, &block.body);
+        }
+        BlockKind::Text => paragraphs(t, &block.body),
+        BlockKind::Models => {
+            paragraphs(t, &block.body);
+            t.push_str(
+                "#table(columns: (1fr, auto, auto, auto),\n  table.header[Bygningsmodel (filnavn)][Fag][Version][Virksomhed],\n",
+            );
+            for m in &snapshot.models {
+                let version = if m.date.is_empty() {
+                    format!("rev. {} ({})", m.revision, m.imported)
+                } else {
+                    m.date.clone()
+                };
+                t.push_str(&format!(
+                    "  {}, {}, {}, {},\n",
+                    s(&m.file),
+                    s(&m.discipline),
+                    s(&version),
+                    or_dash(&m.company)
+                ));
+            }
+            t.push_str(")\n");
+        }
+        BlockKind::Software => {
+            let rulesets = if snapshot.rulesets.is_empty() {
+                "–".to_owned()
+            } else {
+                snapshot.rulesets.join(", ")
+            };
+            t.push_str(&format!(
+                "#par({})\n",
+                s(&format!(
+                    "Kontrollen er foretaget i OpenCheck {} med følgende regelsæt: {rulesets}.",
+                    snapshot.opencheck
+                ))
+            ));
+            paragraphs(t, &block.body);
+        }
+        BlockKind::Visual => {
+            paragraphs(t, &block.body);
+            let checks = block.checks(snapshot);
+            if checks.is_empty() {
+                t.push_str(
+                    "#text(fill: muted, style: \"italic\", \"Ingen dokumenterede kontroller.\")
+",
+                );
+            }
+            for c in checks {
+                pictures.extend(c.pictures.iter().cloned());
+                check_card(t, c);
+            }
+        }
+        BlockKind::Properties | BlockKind::Geometry | BlockKind::Clashes | BlockKind::Issues => {
+            paragraphs(t, &block.body);
+            let issues = block.issues(snapshot);
+            if issues.is_empty() {
+                t.push_str("#none-text\n");
+                return;
+            }
+            counts(t, &issues);
+            for issue in issues {
+                let number = snapshot
+                    .issues
+                    .iter()
+                    .position(|i| i.guid == issue.guid)
+                    .map_or(0, |n| n + 1);
+                let picture = snapshot.pictures.get(&issue.guid).cloned();
+                if let Some(hash) = &picture {
+                    pictures.push(hash.clone());
+                }
+                issue_card(
+                    t,
+                    number,
+                    issue,
+                    picture.as_deref(),
+                    block.notes.get(&issue.guid),
+                );
             }
         }
     }
 }
 
-const STYLE: &str = r#"
-:root { --ink:#20252e; --muted:#6b7380; --line:#dfe3ea; --accent:#2b7ff6;
-        --c3:#d64541; --c2:#e08a1e; --c1:#7a8594; }
-* { box-sizing: border-box; }
-body { font-family: "Segoe UI", Arial, sans-serif; color: var(--ink); margin: 0;
-       background: #f4f6f9; line-height: 1.45; font-size: 14px; }
-main { max-width: 980px; margin: 0 auto; background: #fff; padding: 40px 48px; }
-h1 { font-size: 26px; margin: 0 0 4px; }
-h2 { font-size: 19px; margin: 32px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--ink); }
-h3 { font-size: 16px; margin: 22px 0 8px; }
-.sub { color: var(--muted); margin: 0 0 24px; font-size: 16px; }
-table { border-collapse: collapse; width: 100%; margin: 6px 0 12px; }
-th, td { text-align: left; vertical-align: top; padding: 5px 8px; border-bottom: 1px solid var(--line); }
-th { color: var(--muted); font-weight: 600; white-space: nowrap; }
-table.facts th { width: 160px; }
-.mono { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
-.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-weight: 700;
-         font-size: 12px; color: #fff; }
-.C3 { background: var(--c3); } .C2 { background: var(--c2); } .C1 { background: var(--c1); }
-.issue { border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; margin: 14px 0;
-         page-break-inside: avoid; break-inside: avoid; }
-.issue h4 { margin: 0 0 10px; font-size: 15px; }
-.issue .top { display: flex; gap: 16px; align-items: flex-start; }
-.issue .top .facts { flex: 1; margin-top: 0; }
-.issue .shot { flex: none; width: 300px; }
-.issue .shot img { width: 300px; border-radius: 6px; border: 1px solid var(--line); display: block; }
-.noimg { flex: none; width: 300px; height: 170px; border: 1px dashed var(--line); border-radius: 6px;
-         color: var(--muted); font-style: italic; display: flex; align-items: center; justify-content: center; }
-.revit { font-weight: 700; }
-@media (max-width: 720px) { .issue .top { flex-direction: column; } }
-.desc { white-space: pre-wrap; margin: 6px 0 10px; }
-.counts td, .counts th { text-align: center; } .counts th:first-child, .counts td:first-child { text-align: left; }
-.muted { color: var(--muted); }
-footer { margin-top: 36px; color: var(--muted); font-size: 12px; }
-@media print { body { background: #fff; } main { padding: 0; max-width: none; }
-               h2 { page-break-after: avoid; } }
-"#;
-
-/// Builds the report for the given issues (in list order) with their pictures.
-pub fn build(app: &OpenCheckApp, guids: &[String], images: &FxHashMap<String, Vec<u8>>) -> String {
-    let settings = &app.issues.report;
-    let link = app.issues.bcf.as_ref();
-    let today = opencheck_core::project::now_rfc3339();
-    let issues: Vec<(usize, &Issue)> = app
-        .issues
-        .list
+/// A documented check: result, how it was done, colours and pictures.
+fn check_card(t: &mut String, c: &crate::check_docs::CheckDoc) {
+    let rows = [
+        ("Kontrol", s(&c.check)),
+        ("Resultat", s(c.verdict.label_da())),
+        ("Udført af", or_dash(&c.by)),
+        ("Dato", s(&date(&c.modified))),
+        ("Fundet", or_dash(&c.summary)),
+    ];
+    let rows: Vec<String> = rows
         .iter()
-        .enumerate()
-        .filter(|(_, i)| guids.contains(&i.guid))
-        .map(|(n, i)| (n + 1, i))
+        .map(|(k, v)| format!("({}, {v})", s(k)))
         .collect();
-    let or_dash = |s: &str| {
-        if s.trim().is_empty() {
-            "–".to_owned()
+    let texts = |text: &str| -> Vec<String> {
+        text.split("\n\n")
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(s)
+            .collect()
+    };
+    let (shown, more) = crate::check_docs::legend_shown(c);
+    let legend: Vec<String> = shown
+        .iter()
+        .map(|l| {
+            let [r, g, b] = l.color;
+            format!(
+                "({}, \"#{r:02x}{g:02x}{b:02x}\", {})",
+                s(&crate::check_docs::swatch_text(l)),
+                l.count
+            )
+        })
+        .collect();
+    let more = more.map_or_else(|| "none".to_owned(), |m| s(&m));
+    let pictures: Vec<String> = c.pictures.iter().map(|h| s(&picture_path(h))).collect();
+    // Rows of the same length, so the table fills up.
+    let columns = c.table.first().map_or(0, Vec::len);
+    let table: Vec<String> = c
+        .table
+        .iter()
+        .map(|row| {
+            let cells: Vec<String> = (0..columns)
+                .map(|i| s(row.get(i).map_or("", String::as_str)))
+                .collect();
+            format!("({},)", cells.join(", "))
+        })
+        .collect();
+    let list = |items: &[String]| {
+        if items.is_empty() {
+            "()".to_owned()
         } else {
-            esc(s.trim())
+            format!("({},)", items.join(", "))
         }
     };
-    let project_name = if settings.project.trim().is_empty() {
-        app.session
-            .path
-            .as_ref()
-            .and_then(|p| p.file_stem())
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Projekt".to_owned())
-    } else {
-        settings.project.trim().to_owned()
-    };
-
-    let mut h = String::new();
-    h.push_str(&format!(
-        "<!doctype html><html lang=\"da\"><head><meta charset=\"utf-8\">\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-         <title>{} – konsistens- og kollisionskontrol</title><style>{STYLE}</style></head><body><main>",
-        esc(&project_name)
+    t.push_str(&format!(
+        "#check-card({}, {}, \"#{}\", {}, {}, {}, {}, {more}, {}, {})\n",
+        s(&c.title),
+        s(c.verdict.label_da()),
+        c.verdict.hex(),
+        list(&rows),
+        list(&texts(&c.about)),
+        list(&texts(&c.method)),
+        list(&legend),
+        list(&table),
+        list(&pictures),
     ));
-    h.push_str(&format!(
-        "<h1>{}</h1><p class=\"sub\">Dokumentation for konsistens- og kollisionskontrol</p>",
-        esc(&project_name)
+}
+
+fn facts(t: &mut String, rows: &[(&str, String)]) {
+    t.push_str("#facts((");
+    for (k, v) in rows {
+        t.push_str(&format!("({}, {v}), ", s(k)));
+    }
+    t.push_str("))\n");
+}
+
+/// Issues by criticality against status.
+fn counts(t: &mut String, issues: &[&Issue]) {
+    t.push_str(&format!(
+        "#table(columns: (1fr,{} auto),\n  align: (left,{} center),\n  table.header[Kritikalitet]",
+        " auto,".repeat(IssueStatus::ALL.len()),
+        " center,".repeat(IssueStatus::ALL.len()),
     ));
-
-    // 1 Indledning
-    h.push_str("<h2>1 Indledning</h2><table class=\"facts\">");
-    for (label, value) in [
-        ("Udarbejdet af", or_dash(&settings.author)),
-        ("Firma", or_dash(&settings.company)),
-        ("Dato", date(&today)),
-        ("Revision", or_dash(&settings.revision)),
-        ("Fag", or_dash(&settings.disciplines)),
-        ("Fase", or_dash(&settings.phase)),
-    ] {
-        h.push_str(&format!("<tr><th>{label}</th><td>{value}</td></tr>"));
+    for st in IssueStatus::ALL {
+        t.push_str(&format!("[{}]", status_da(st)));
     }
-    h.push_str("</table>");
-    h.push_str(
-        "<p>Rapporten dokumenterer en konsistens- og kollisionskontrol af projektets digitale \
-         bygningsmodeller og de emner, der er udvalgt til opfølgning. Hvert emne er vist med \
-         billede, kritikalitet (C1–C3), ansvarlige fag og de berørte objekter med deres IFC \
-         GlobalId, så objekterne kan genfindes i modellerne. Emnerne udveksles desuden \
-         digitalt som BCF.</p>",
-    );
-
-    // 2 Grundlag
-    h.push_str("<h2>2 Grundlag</h2><h3>2.1 Bygningsmodeller</h3>");
-    h.push_str(
-        "<table><tr><th>Bygningsmodel (filnavn)</th><th>Fag</th><th>Revision</th>\
-         <th>Opdateret</th><th>Kontrolsum (SHA-256)</th></tr>",
-    );
-    for (id, model) in app.federation.iter() {
-        let record = app.session.records.get(&id);
-        let file = model
-            .source_path
-            .as_ref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .or_else(|| record.and_then(|r| r.entry.source_path.clone()))
-            .unwrap_or_else(|| model.short_name.clone());
-        let (revision, updated, hash) = record
-            .map(|r| {
-                (
-                    r.entry.revision.to_string(),
-                    date(&r.entry.updated),
-                    r.entry.sha256.get(..12).unwrap_or("").to_owned(),
-                )
-            })
-            .unwrap_or_default();
-        h.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{revision}</td><td>{updated}</td><td class=\"mono\">{hash}…</td></tr>",
-            esc(&file),
-            esc(model.discipline.label())
-        ));
-    }
-    h.push_str("</table><h3>2.2 Software</h3>");
-    let rulesets: Vec<String> = app
-        .checking
-        .rulesets
-        .iter()
-        .filter(|r| r.enabled)
-        .map(|r| esc(&r.ruleset.ruleset.name))
-        .collect();
-    h.push_str(&format!(
-        "<p>Kontrollen er foretaget i OpenCheck {} med følgende regelsæt: {}.</p>",
-        env!("CARGO_PKG_VERSION"),
-        if rulesets.is_empty() {
-            "–".to_owned()
-        } else {
-            rulesets.join(", ")
-        }
-    ));
-    if !settings.method.trim().is_empty() {
-        h.push_str(&format!(
-            "<p class=\"desc\">{}</p>",
-            esc(settings.method.trim())
-        ));
-    }
-
-    // 3 Kontrollen
-    h.push_str("<h2>3 Konsistens- og kollisionskontrollen</h2><h3>3.1 Generelle bemærkninger</h3>");
-    if settings.remarks.trim().is_empty() {
-        h.push_str("<p class=\"muted\">Ingen generelle bemærkninger.</p>");
-    } else {
-        h.push_str(&format!(
-            "<p class=\"desc\">{}</p>",
-            esc(settings.remarks.trim())
-        ));
-    }
-
-    // Overview: criticality against status.
-    h.push_str("<h3>Overblik</h3><table class=\"counts\"><tr><th>Kritikalitet</th>");
-    for s in IssueStatus::ALL {
-        h.push_str(&format!("<th>{}</th>", status_da(s)));
-    }
-    h.push_str("<th>I alt</th></tr>");
+    t.push_str("[I alt],\n");
     for p in c402::LEVELS {
         let row: Vec<usize> = IssueStatus::ALL
             .iter()
-            .map(|s| {
+            .map(|st| {
                 issues
                     .iter()
-                    .filter(|(_, i)| i.priority == p && i.status == *s)
+                    .filter(|i| i.priority == p && i.status == *st)
                     .count()
             })
             .collect();
-        h.push_str(&format!(
-            "<tr><td><span class=\"badge {}\">{}</span> {}</td>",
-            c402::code(p),
-            c402::code(p),
-            esc(c402::label(p).split('–').nth(1).unwrap_or("").trim())
-        ));
-        for n in &row {
-            h.push_str(&format!("<td>{n}</td>"));
-        }
-        h.push_str(&format!(
-            "<td><b>{}</b></td></tr>",
-            row.iter().sum::<usize>()
-        ));
-    }
-    h.push_str("</table>");
-    // Per responsible discipline.
-    let mut per_discipline: Vec<(String, usize)> = Vec::new();
-    for (_, issue) in &issues {
-        for d in &issue.responsible {
-            let name = c402::discipline_label(*d).unwrap_or(d.label()).to_owned();
-            match per_discipline.iter_mut().find(|(n, _)| *n == name) {
-                Some((_, count)) => *count += 1,
-                None => per_discipline.push((name, 1)),
-            }
-        }
-    }
-    if !per_discipline.is_empty() {
-        h.push_str("<table class=\"counts\"><tr><th>Ansvarligt fag</th><th>Emner</th></tr>");
-        for (name, n) in &per_discipline {
-            h.push_str(&format!("<tr><td>{}</td><td>{n}</td></tr>", esc(name)));
-        }
-        h.push_str("</table>");
-    }
-
-    let revit_id = |c: &crate::issues::IssueComponent| app.revit_id(c);
-
-    // The issues per section.
-    for (number, section) in Section::ALL.into_iter().enumerate() {
-        let mut in_section: Vec<&(usize, &Issue)> = issues
-            .iter()
-            .filter(|(_, i)| Section::of(i) == section)
-            .collect();
-        h.push_str(&format!("<h3>3.{} {}</h3>", number + 2, section.title()));
-        if in_section.is_empty() {
-            h.push_str("<p class=\"muted\">Ingen udvalgte emner.</p>");
+        let total: usize = row.iter().sum();
+        if total == 0 {
             continue;
         }
-        h.push_str(&format!("<p>{}</p>", section.intro()));
-        // Most critical first, then in list order.
-        in_section.sort_by_key(|(n, i)| (i.priority, *n));
-        for (n, issue) in in_section {
-            issue_card(&mut h, *n, issue, images.get(&issue.guid), link, &revit_id);
+        t.push_str(&format!(
+            "  [#badge({}) #{}],",
+            s(c402::code(p)),
+            s(c402::label(p).split('–').nth(1).unwrap_or("").trim())
+        ));
+        for n in &row {
+            t.push_str(&format!(" [{n}],"));
         }
+        t.push_str(&format!(" strong[{total}],\n"));
     }
-
-    h.push_str(&format!(
-        "<footer>Genereret af OpenCheck {} den {}. Objekter kan genfindes i Revit via deres Revit ID \
-         (Element ID, fx med Select by ID) og i andre programmer via deres IFC GlobalId; \
-         emnernes ID svarer til BCF-emnernes GUID.</footer></main></body></html>",
-        env!("CARGO_PKG_VERSION"),
-        date(&today)
-    ));
-    h
+    t.push_str(")\n");
 }
 
 fn issue_card(
-    h: &mut String,
+    t: &mut String,
     number: usize,
     issue: &Issue,
-    image: Option<&Vec<u8>>,
-    link: Option<&crate::issues::BcfProjectLink>,
-    revit_id: &dyn Fn(&crate::issues::IssueComponent) -> String,
+    picture: Option<&str>,
+    note: Option<&String>,
 ) {
-    let code = c402::code(issue.priority);
-    h.push_str(&format!(
-        "<div class=\"issue\"><h4>#{number} {} <span class=\"badge {code}\">{code}</span></h4>",
-        esc(&issue.title)
-    ));
-    // A small orientation picture next to the facts; a click shows it full size.
-    h.push_str("<div class=\"top\">");
-    match image {
-        Some(png) => {
-            let data = format!("data:image/png;base64,{}", base64(png));
-            h.push_str(&format!(
-                "<div class=\"shot\"><a href=\"{data}\" target=\"_blank\" title=\"Vis i fuld størrelse\"><img alt=\"Emne {number}\" src=\"{data}\"></a></div>"
-            ));
-        }
-        None => h.push_str("<div class=\"noimg\">Intet billede</div>"),
-    }
     let responsible: Vec<String> = issue
         .responsible
         .iter()
         .map(|d| c402::discipline_label(*d).unwrap_or(d.label()).to_owned())
         .collect();
-    let assigned = issue.effective_assignee(link).unwrap_or("");
     let rules: Vec<String> = {
         let mut list: Vec<String> = issue.findings.iter().map(|f| f.rule.clone()).collect();
         list.sort();
         list.dedup();
         list
     };
-    h.push_str("<table class=\"facts\">");
-    let mut row = |label: &str, value: String| {
-        h.push_str(&format!("<tr><th>{label}</th><td>{value}</td></tr>"));
-    };
-    row(
-        "ID",
-        format!("<span class=\"mono\">{}</span>", esc(&issue.guid)),
-    );
-    row("Kritikalitet", esc(c402::label(issue.priority)));
-    row("Status", status_da(issue.status).to_owned());
-    row(
-        "Ansvarlige fag",
-        if responsible.is_empty() {
-            "–".to_owned()
-        } else {
-            esc(&responsible.join(", "))
-        },
-    );
-    row(
-        "Tildelt",
-        if assigned.is_empty() {
-            "–".to_owned()
-        } else {
-            esc(assigned)
-        },
-    );
-    row(
-        "Oprettet / ændret",
-        format!("{} / {}", date(&issue.created), date(&issue.modified)),
-    );
+    let mut rows = vec![
+        ("ID", format!("mono({})", s(&issue.guid))),
+        ("Kritikalitet", s(c402::label(issue.priority))),
+        ("Status", s(status_da(issue.status))),
+        ("Ansvarlige fag", or_dash(&responsible.join(", "))),
+        ("Tildelt", or_dash(&issue.assigned_to)),
+        (
+            "Oprettet / ændret",
+            s(&format!(
+                "{} / {}",
+                date(&issue.created),
+                date(&issue.modified)
+            )),
+        ),
+    ];
     if !rules.is_empty() {
-        row("Regel", esc(&rules.join("; ")));
+        rows.push(("Regel", s(&rules.join("; "))));
     }
     let measures: Vec<String> = issue
         .findings
@@ -408,66 +947,75 @@ fn issue_card(
         })
         .collect();
     if !measures.is_empty() {
-        row("Mål", esc(&measures.join(", ")));
+        rows.push(("Mål", s(&measures.join(", "))));
     }
-    let missing: Vec<String> = issue
+    let mut missing: Vec<String> = issue
         .findings
         .iter()
         .flat_map(|f| f.details.clone())
         .collect();
     if !missing.is_empty() {
-        let mut missing = missing;
         missing.sort();
         missing.dedup();
-        row("Manglende egenskaber", esc(&missing.join(", ")));
+        rows.push(("Manglende egenskaber", s(&missing.join(", "))));
     }
     if issue.solved_by_update {
-        row("Løst", "Løst ved modelopdatering".to_owned());
+        rows.push(("Løst", s("Løst ved modelopdatering")));
     }
-    if let Some(bcf) = &issue.bcf {
-        row(
-            "BCF-server",
-            format!(
-                "Status: {} (synkroniseret {})",
-                esc(&bcf.remote_status),
-                date(&bcf.synced)
-            ),
-        );
-    }
-    h.push_str("</table></div>");
-    if !issue.description.trim().is_empty() {
-        h.push_str(&format!(
-            "<p class=\"desc\">{}</p>",
-            esc(issue.description.trim())
-        ));
-    }
-    if !issue.components.is_empty() {
-        h.push_str(
-            "<table><tr><th></th><th>Revit ID</th><th>Objekt</th><th>IFC-klasse</th><th>Model</th><th>IFC GlobalId</th></tr>",
-        );
-        for c in &issue.components {
+    let rows: Vec<String> = rows
+        .iter()
+        .map(|(k, v)| format!("({}, {v})", s(k)))
+        .collect();
+    let note = note
+        .map(|n| n.trim())
+        .filter(|n| !n.is_empty())
+        .map_or_else(|| "none".to_owned(), s);
+    let description = if issue.description.trim().is_empty() {
+        "none".to_owned()
+    } else {
+        s(issue.description.trim())
+    };
+    let components: Vec<String> = issue
+        .components
+        .iter()
+        .map(|c| {
             let role = match c.role {
                 ComponentRole::A => "A",
                 ComponentRole::B => "B",
             };
-            let element_id = revit_id(c);
-            h.push_str(&format!(
-                "<tr><td>{role}</td><td class=\"mono revit\">{}</td><td>{}</td><td>{}</td><td>{}</td><td class=\"mono\">{}</td></tr>",
-                if element_id.is_empty() { "–".to_owned() } else { esc(&element_id) },
-                esc(if c.name.is_empty() { &c.ifc_class } else { &c.name }),
-                esc(&c.ifc_class),
-                esc(&c.model),
-                esc(&c.global_id)
-            ));
+            format!(
+                "({}, {}, {}, {}, {}, {})",
+                s(role),
+                or_dash(&c.tag),
+                s(if c.name.is_empty() {
+                    &c.ifc_class
+                } else {
+                    &c.name
+                }),
+                s(&c.ifc_class),
+                s(&c.model),
+                s(&c.global_id)
+            )
+        })
+        .collect();
+    t.push_str(&format!(
+        "#issue-card({number}, {}, {}, {note}, {}, ({},), {description}, ({}))\n",
+        s(&issue.title),
+        s(c402::code(issue.priority)),
+        picture.map_or_else(|| "none".to_owned(), |h| s(&picture_path(h))),
+        rows.join(", "),
+        if components.is_empty() {
+            String::new()
+        } else {
+            format!("{},", components.join(", "))
         }
-        h.push_str("</table>");
-    }
-    h.push_str("</div>");
+    ));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reports::{Report, Revision, default_blocks};
     use opencheck_core::check::Severity;
 
     #[test]
@@ -481,8 +1029,96 @@ mod tests {
     }
 
     #[test]
-    fn escapes_markup_in_issue_text() {
-        assert_eq!(esc("<b>&\"x\""), "&lt;b&gt;&amp;&quot;x&quot;");
+    fn texts_become_typst_strings() {
+        assert_eq!(s("a \"b\" \\ #c\nd"), r#""a \"b\" \\ #c\nd""#);
         assert_eq!(date("2026-10-20T10:00:00Z"), "2026-10-20");
+    }
+
+    #[test]
+    fn chapters_and_sections_are_numbered() {
+        let numbers = numbering(&default_blocks());
+        assert_eq!(numbers[0], "1");
+        assert_eq!(numbers[1], "2");
+        assert_eq!(numbers[2], "2.1");
+        assert_eq!(numbers[3], "2.2");
+        assert_eq!(numbers.last().map(String::as_str), Some("4"));
+    }
+
+    pub fn report() -> Report {
+        Report {
+            name: "K&K-rapport".into(),
+            revisions: vec![Revision {
+                label: "A".into(),
+                blocks: default_blocks(),
+                ..Revision::default()
+            }],
+            ..Report::default()
+        }
+    }
+
+    #[test]
+    fn the_standard_template_becomes_typst() {
+        let layout = docx::Docx::open(STANDARD_TEMPLATE)
+            .and_then(|d| d.layout())
+            .unwrap();
+        assert!((layout.page.width - 595.3).abs() < 0.1);
+        assert!(layout.title_page);
+        let main = main(&layout, &report(), 0);
+        assert!(main.contains("#include \"/content.typ\""));
+        assert!(main.contains("#include \"/revisions.typ\""));
+        assert!(
+            main.contains("[#\"Projekt\"]"),
+            "the project field is filled"
+        );
+        assert!(main.contains("counter(page).final()"));
+        assert!(main.contains("show heading.where(level: 1)"));
+        assert!(fonts(&layout).contains(&"Arial".to_owned()));
+    }
+
+    #[test]
+    fn writes_the_parts_of_a_revision() {
+        let (files, pictures) = parts(&report(), 0);
+        let content = &files.iter().find(|(n, _)| *n == "content.typ").unwrap().1;
+        assert!(content.contains("#heading(level: 1, \"1 Indledning\")"));
+        assert!(content.contains("#heading(level: 2, \"2.1 Bygningsmodeller\")"));
+        assert!(content.contains("#none-text"));
+        assert!(pictures.is_empty());
+        assert!(!content.contains("pagebreak"));
+        let mut with_check = report();
+        with_check.revisions[0]
+            .snapshot
+            .checks
+            .push(crate::check_docs::CheckDoc {
+                id: "c1".into(),
+                title: "Søjler over hinanden".into(),
+                verdict: crate::check_docs::Verdict::Approved,
+                method: "Farvet pr. etage.
+
+Set fra siden."
+                    .into(),
+                legend: vec![crate::check_docs::Swatch {
+                    label: "E1".into(),
+                    color: [10, 200, 30],
+                    count: 12,
+                    ..Default::default()
+                }],
+                pictures: vec!["h1".into()],
+                ..Default::default()
+            });
+        let (files, pictures) = parts(&with_check, 0);
+        let content = &files.iter().find(|(n, _)| *n == "content.typ").unwrap().1;
+        assert!(
+            content.contains("#check-card(\"Søjler over hinanden\", \"Godkendt\", \"#2E9E4A\"")
+        );
+        assert!(content.contains("(\"E1\", \"#0ac81e\", 12)"));
+        assert_eq!(pictures, vec!["h1".to_owned()]);
+        let mut report = report();
+        report.revisions[0].blocks[3].new_page = true;
+        let (files, _) = parts(&report, 0);
+        let content = &files.iter().find(|(n, _)| *n == "content.typ").unwrap().1;
+        assert!(content.contains(
+            "#pagebreak(weak: true)
+#metadata(3)"
+        ));
     }
 }

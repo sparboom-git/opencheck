@@ -246,7 +246,8 @@ pub fn issues(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     }
 }
 
-/// BCF file, Excel and report export of the ticked issues, or all.
+/// BCF file and Excel export of the ticked issues, or all. Reports are
+/// made on the Report tab.
 fn export_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let count = app.export_scope().len();
@@ -260,10 +261,16 @@ fn export_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         ui.add_enabled_ui(!busy, |ui| {
             ui.menu_button(format!("{}  Export", icon::EXPORT), |ui| {
                 ui.set_min_width(240.0);
-                ui.label(RichText::new(format!("Exports {scope}")).small().color(theme::text_muted()));
+                ui.label(
+                    RichText::new(format!("Exports {scope}"))
+                        .small()
+                        .color(theme::text_muted()),
+                );
                 if ui
                     .button(format!("{}  BCF file (.bcfzip)…", icon::FILE_ZIP))
-                    .on_hover_text("For Solibri, BIMcollab, Dalux and other BCF tools; with pictures and viewpoints")
+                    .on_hover_text(
+                        "For BCF tools such as BIMcollab and Dalux; with pictures and viewpoints",
+                    )
                     .clicked()
                 {
                     ui.close();
@@ -280,115 +287,19 @@ fn export_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     ui.close();
                     app.export_excel_dialog(&ctx);
                 }
-                if ui
-                    .button(format!("{}  Report…", icon::FILE_TEXT))
-                    .on_hover_text("An illustrated report (HTML, printable to PDF)")
-                    .clicked()
-                {
-                    ui.close();
-                    app.report_window = true;
-                }
             });
         });
         if busy {
             ui.spinner();
-            ui.label(RichText::new("Taking pictures…").small().color(theme::text_muted()));
+            ui.label(
+                RichText::new("Taking pictures…")
+                    .small()
+                    .color(theme::text_muted()),
+            );
         } else {
             ui.label(RichText::new(scope).small().color(theme::text_muted()));
         }
     });
-}
-
-/// Header fields of the report and the button that writes it.
-pub fn report_window(app: &mut OpenCheckApp, ctx: &egui::Context) {
-    if !app.report_window {
-        return;
-    }
-    let mut open = true;
-    let mut export = false;
-    let count = app.export_scope().len();
-    let dialog = crate::dialog::Dialog {
-        id: "issue_report",
-        icon: icon::FILE_TEXT,
-        title: "Issue report",
-        size: egui::vec2(480.0, 640.0),
-        min: egui::vec2(340.0, 260.0),
-        scroll: crate::dialog::Scroll::Both,
-    };
-    crate::dialog::show(ctx, &dialog, &mut open, |ui| {
-        ui.label(
-                RichText::new(
-                    "Documentation of the consistency and clash check: introduction, models and software, then each issue with picture, criticality (C1–C3), responsible disciplines and the GlobalIds of its objects. The report is in Danish.",
-                )
-                .small()
-                .color(theme::text_muted()),
-            );
-        ui.add_space(6.0);
-        let r = &mut app.issues.report;
-        let before = r.clone();
-        egui::Grid::new("report_fields")
-            .num_columns(2)
-            .spacing([10.0, 6.0])
-            .show(ui, |ui| {
-                for (label, value, hint) in [
-                    ("Project", &mut r.project, "Projektnavn"),
-                    ("Prepared by", &mut r.author, "Name or initials"),
-                    ("Company", &mut r.company, "Firmanavn"),
-                    ("Revision", &mut r.revision, "e.g. A, 01"),
-                    ("Disciplines", &mut r.disciplines, "Own discipline(s)"),
-                    ("Phase", &mut r.phase, "e.g. Projektforslag"),
-                ] {
-                    ui.label(label);
-                    ui.add(
-                        egui::TextEdit::singleline(value)
-                            .hint_text(hint)
-                            .desired_width(280.0),
-                    );
-                    ui.end_row();
-                }
-            });
-        ui.label("How the check was done (besides OpenCheck)");
-        ui.add(
-            egui::TextEdit::multiline(&mut r.method)
-                .desired_rows(2)
-                .desired_width(f32::INFINITY)
-                .hint_text("e.g. visual review of the combined model"),
-        );
-        ui.label("General remarks");
-        ui.add(
-            egui::TextEdit::multiline(&mut r.remarks)
-                .desired_rows(3)
-                .desired_width(f32::INFINITY)
-                .hint_text("Project conditions, tolerances, areas left out …"),
-        );
-        if *r != before {
-            app.session.dirty = true;
-        }
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            let scope = if app.issues.marked.is_empty() {
-                format!("All {count} issues")
-            } else {
-                format!("{count} ticked issues")
-            };
-            ui.label(RichText::new(scope).color(theme::text_muted()));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let button = egui::Button::new(
-                    RichText::new(format!("{}  Export report…", icon::EXPORT))
-                        .strong()
-                        .color(theme::on_accent()),
-                )
-                .fill(theme::accent());
-                if ui.add_enabled(count > 0, button).clicked() {
-                    export = true;
-                }
-            });
-        });
-    });
-    app.report_window = open && !export;
-    if export {
-        app.export_report_dialog(ctx);
-    }
 }
 
 /// Connection state and the send / fetch buttons for the BCF server.
