@@ -93,6 +93,14 @@ built.
 
 ## Next
 
+- **Claude pictures, next steps**: options on `finding_pictures` so a report
+  Claude writes gets clear pictures: framing (`tight`, `normal`, `wide`;
+  tight lets the two elements fill the picture), context (`ghost` as now,
+  `hide` to show only the finding's elements, `show` for everything in
+  colour), more directions (the four sides, and from below for ceiling
+  voids), and a larger default width (about 1200 px). Later, if asked for:
+  the same options on `create_issues` and a `set_issue_view` tool, so issue
+  viewpoints (and so Excel, BCF and Dalux) can be set by Claude too.
 - **BCF, next steps**: import BCF files and open topics from the server in
   the viewer (camera, section, selection); a coordinate offset per project if
   Revit or other tools place cameras elsewhere; more servers than Dalux;
