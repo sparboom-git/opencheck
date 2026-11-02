@@ -80,9 +80,13 @@ the user how far you got if you stop early.
 
 When the user asks for a report, or a finding is hard to judge from the data
 alone, call `finding_pictures` with the finding ids (up to 12 per call). Each
-picture shows the finding framed with some context: each element in its
-model's colour (`project_info` lists them), the rest faint. Use `view: "top"` for a plan or a
-side (`south`, `north`, `west`, `east`) for an elevation. The pictures are
+picture shows only the finding's elements, each in its model's colour
+(`project_info` lists them), with the clash filling the picture: good for a
+report. To see where a clash is, ask for `context: "ghost"` (the rest faint)
+or `"show"`, and `framing: "normal"` or `"wide"`. Use `view: "top"` for a plan,
+a side (`south`, `north`, `west`, `east`) for an elevation, or `"below"` for a
+ceiling void. If a picture is unclear, take it again from another view or
+framing rather than describing it as unclear. The pictures are
 also saved as PNG files; their paths are in the answer, so a report can
 include them. Give coordinates from `get_finding` (`location.ifc_point_m`,
 metres) when the user needs to find a finding in another program.

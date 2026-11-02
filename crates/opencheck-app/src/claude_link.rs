@@ -49,7 +49,7 @@ const NEARBY: f32 = 0.5;
 /// Most pictures in one call.
 const MAX_PICTURES: usize = 12;
 /// Width of a picture unless Claude asks for another, pixels.
-const PICTURE_WIDTH: usize = 800;
+const PICTURE_WIDTH: usize = 1200;
 
 /// State of the connection.
 pub struct Link {
@@ -115,8 +115,32 @@ enum Direction {
     Top,
     /// From the south, north, west or east, as a parallel elevation.
     Side(f32),
+    /// Straight from below, e.g. into a ceiling void.
+    Below,
     /// The direction the reviewer has the view turned to now.
     Current,
+}
+
+/// How close a picture is taken around the finding.
+#[derive(Clone, Copy, PartialEq)]
+enum Framing {
+    /// The clash fills the picture.
+    Tight,
+    /// As when the reviewer opens the finding.
+    Normal,
+    /// With the surroundings.
+    Wide,
+}
+
+/// What a picture shows of the rest of the model.
+#[derive(Clone, Copy, PartialEq)]
+enum Context {
+    /// Only the finding's elements.
+    Hide,
+    /// The rest faint and grey.
+    Ghost,
+    /// The rest as it is.
+    Show,
 }
 
 /// Pictures for one call: each finding is shown, the view settles, the
@@ -125,6 +149,11 @@ pub struct Pictures {
     /// Finding ids; `None` is the view as it is.
     targets: Vec<Option<String>>,
     direction: Direction,
+    framing: Framing,
+    context: Context,
+    /// The reviewer's ticked findings, put back afterwards: a picture shows
+    /// its own finding only.
+    marked: Vec<String>,
     width: usize,
     next: usize,
     stage: Stage,
@@ -327,8 +356,21 @@ fn start_pictures(app: &mut OpenCheckApp, request: &Request) -> Result<(), Strin
         "north" => Direction::Side(std::f32::consts::PI),
         "west" => Direction::Side(std::f32::consts::FRAC_PI_2),
         "east" => Direction::Side(-std::f32::consts::FRAC_PI_2),
+        "below" => Direction::Below,
         "current" => Direction::Current,
         other => return Err(format!("unknown view {other}")),
+    };
+    let framing = match args["framing"].as_str().unwrap_or("tight") {
+        "tight" => Framing::Tight,
+        "normal" => Framing::Normal,
+        "wide" => Framing::Wide,
+        other => return Err(format!("unknown framing {other}: tight, normal or wide")),
+    };
+    let context = match args["context"].as_str().unwrap_or("hide") {
+        "hide" => Context::Hide,
+        "ghost" => Context::Ghost,
+        "show" => Context::Show,
+        other => return Err(format!("unknown context {other}: hide, ghost or show")),
     };
     let width = args["width"]
         .as_u64()
@@ -339,6 +381,9 @@ fn start_pictures(app: &mut OpenCheckApp, request: &Request) -> Result<(), Strin
     app.claude.pictures = Some(Pictures {
         targets,
         direction,
+        framing,
+        context,
+        marked: Vec::new(),
         width,
         next: 0,
         stage: Stage::Show,
@@ -393,6 +438,7 @@ pub fn step_pictures(app: &mut OpenCheckApp, ctx: &egui::Context) {
             if ctx.input(|i| i.viewport().minimized) == Some(true) {
                 let job = app.claude.pictures.take().expect("checked above");
                 if let Some(saved) = job.saved {
+                    app.checking.marked = job.marked;
                     app.restore_view(saved);
                 }
                 let _ = job.reply.send(Err(
@@ -403,17 +449,21 @@ pub fn step_pictures(app: &mut OpenCheckApp, ctx: &egui::Context) {
             }
             job.stage = Stage::Settle(0);
             let target = job.targets[job.next].clone();
-            let direction = job.direction;
+            let (direction, framing, context) = (job.direction, job.framing, job.context);
             if job.saved.is_none() {
                 let saved = app.save_view();
-                app.view.hide_context = false;
+                let marked = std::mem::take(&mut app.checking.marked);
                 if let Some(job) = &mut app.claude.pictures {
                     job.saved = Some(saved);
+                    job.marked = marked;
                 }
             }
             if let Some(id) = target {
+                app.view.show_context = context == Context::Show;
+                app.view.hide_context = context == Context::Hide;
                 turn(app, direction);
-                app.show_finding(&id, true);
+                app.show_finding(&id, false);
+                frame(app, &id, framing);
             }
         }
         Stage::Settle(n) if n < SETTLE_FRAMES => job.stage = Stage::Settle(n + 1),
@@ -480,10 +530,30 @@ fn turn(app: &mut OpenCheckApp, direction: Direction) {
         Direction::Angle => (home.yaw, home.pitch, false),
         Direction::Top => (0.0, -89.9_f32.to_radians(), true),
         Direction::Side(yaw) => (yaw, 0.0, true),
+        Direction::Below => (0.0, 89.9_f32.to_radians(), true),
     };
     app.camera.yaw = yaw;
     app.camera.pitch = pitch;
     app.camera.ortho = ortho;
+}
+
+/// Frames the finding for a picture, closer or wider than when it is opened.
+fn frame(app: &mut OpenCheckApp, id: &str, framing: Framing) {
+    let Some((_, _, f)) = app.checking.find(id) else {
+        return;
+    };
+    let region = f.region;
+    let size = region.size().length();
+    let pad = match framing {
+        Framing::Tight => (size * 0.25).clamp(0.25, 1.0),
+        Framing::Normal => (size * 0.75).clamp(1.0, 4.0),
+        Framing::Wide => (size * 2.0).clamp(3.0, 12.0),
+    };
+    let frame = opencheck_core::Aabb {
+        min: region.min - glam::Vec3::splat(pad),
+        max: region.max + glam::Vec3::splat(pad),
+    };
+    app.camera.fit(&frame, app.nav.aspect);
 }
 
 fn finish_pictures(app: &mut OpenCheckApp) {
@@ -491,6 +561,7 @@ fn finish_pictures(app: &mut OpenCheckApp) {
         return;
     };
     if let Some(saved) = job.saved {
+        app.checking.marked = job.marked;
         app.restore_view(saved);
     }
     let count = job.taken.len();
@@ -498,7 +569,7 @@ fn finish_pictures(app: &mut OpenCheckApp) {
         "pictures": job.taken,
         "missing": job.missing,
         "folder": job.folder.display().to_string(),
-        "colours": "Each element of a finding is drawn in its model's colour (see models[].colour in project_info); the point of the finding has a marker. Other elements are drawn faint.",
+        "colours": "Each element of a finding is drawn in its model's colour (see models[].colour in project_info); the point of the finding has a marker. The rest of the model is left out, faint or shown, as asked for (context).",
     })));
     log(app, format!("pictures: {count} taken"));
 }

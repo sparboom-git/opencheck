@@ -89,18 +89,20 @@ fn tools() -> Value {
         },
         {
             "name": "finding_pictures",
-            "description": "Pictures of findings from OpenCheck's 3D view: each finding framed with some context around it, each element in its model's colour (project_info lists them), the rest faint. Each picture is also saved as a PNG file (paths in the answer) for use in reports. The reviewer's view is put back afterwards. OpenCheck's window must not be minimized.",
+            "description": "Pictures of findings from OpenCheck's 3D view, each element in its model's colour (project_info lists them). By default only the finding's elements are drawn and the clash fills the picture, which suits reports; ask for context ghost or show, and framing normal or wide, to see where the clash is. Each picture is also saved as a PNG file (paths in the answer) for use in reports. The reviewer's view is put back afterwards. OpenCheck's window must not be minimized.",
             "inputSchema": { "type": "object", "properties": {
                 "ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 12, "description": "Finding ids, at most 12 per call." },
-                "view": { "type": "string", "enum": ["angle", "top", "south", "north", "west", "east", "current"], "description": "From above at an angle (default), a plan from the top, an elevation from one side, or the direction the reviewer has the view turned to." },
-                "width": { "type": "integer", "minimum": 320, "maximum": 1600, "description": "Widest picture in pixels (default 800)." },
+                "view": { "type": "string", "enum": ["angle", "top", "south", "north", "west", "east", "below", "current"], "description": "From above at an angle (default), a plan from the top, an elevation from one side, from below (e.g. into a ceiling void), or the direction the reviewer has the view turned to." },
+                "framing": { "type": "string", "enum": ["tight", "normal", "wide"], "description": "tight (default): the clash fills the picture. normal: as the reviewer sees it when opening the finding. wide: with the surroundings." },
+                "context": { "type": "string", "enum": ["hide", "ghost", "show"], "description": "The rest of the model: hide (default, only the finding's elements), ghost (faint and grey) or show." },
+                "width": { "type": "integer", "minimum": 320, "maximum": 1600, "description": "Widest picture in pixels (default 1200)." },
             }, "required": ["ids"] },
         },
         {
             "name": "view_picture",
             "description": "A picture of OpenCheck's 3D view exactly as the reviewer sees it now, also saved as a PNG file.",
             "inputSchema": { "type": "object", "properties": {
-                "width": { "type": "integer", "minimum": 320, "maximum": 1600, "description": "Widest picture in pixels (default 800)." },
+                "width": { "type": "integer", "minimum": 320, "maximum": 1600, "description": "Widest picture in pixels (default 1200)." },
             } },
         },
         {

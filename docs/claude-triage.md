@@ -149,9 +149,22 @@ it and puts your view back afterwards. Each element of the finding is
 in its model's colour. Claude sees the pictures, and each is also saved
 as a PNG file in a folder next to the project file (*<project> pictures*;
 the temporary folder while the project is not saved), so a report Claude
-writes can use them. A picture can be taken at an angle (default), as a
-plan from the top, or as an elevation from one side. The window must not be
-minimized while the pictures are taken.
+writes can use them. The window must not be minimized while the pictures
+are taken.
+
+By default a picture shows only the finding's elements, with the clash
+filling the picture, 1200 px wide: clear pictures for a report. Claude can
+ask for more:
+
+| Option | Choices |
+|---|---|
+| `view` | `angle` (default), `top` (plan), `south`, `north`, `west`, `east` (elevations), `below` (e.g. into a ceiling void), `current` (your direction) |
+| `framing` | `tight` (default), `normal` (as when you open the finding), `wide` (with the surroundings) |
+| `context` | `hide` (default, only the finding's elements), `ghost` (the rest faint and grey), `show` |
+| `width` | 320–1600 px, default 1200 |
+
+Only the finding asked for is drawn, also when you have other findings
+ticked; your ticks and view are put back afterwards.
 
 `get_finding` gives where a finding is: `ifc_point_m` in the models' IFC
 coordinates and `point_m` from the origin OpenCheck shows the models around.
