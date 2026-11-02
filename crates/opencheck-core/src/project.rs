@@ -92,6 +92,10 @@ pub struct ModelEntry {
     pub revision: u32,
     pub added: String,
     pub updated: String,
+    /// The model's colour in the app (sRGB), for its chip and its elements
+    /// in clashes. None in projects from before colours were kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 3]>,
 }
 
 fn default_true() -> bool {
@@ -478,6 +482,7 @@ mod tests {
             revision: 1,
             added: now_rfc3339(),
             updated: now_rfc3339(),
+            color: None,
         }
     }
 

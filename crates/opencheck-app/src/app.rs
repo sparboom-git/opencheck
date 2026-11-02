@@ -77,8 +77,7 @@ pub enum IssueTarget {
     /// One issue holding all of them.
     Bundle,
     /// One issue holding all of them, framed on them rather than on what is
-    /// on screen: for issues Claude makes.
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    /// on screen: for issues Claude makes and for clashes picked in 3D.
     BundleFramed,
     /// One issue per finding. A single finding takes what is on screen:
     /// the reviewer is looking at it.
@@ -564,9 +563,25 @@ impl OpenCheckApp {
                     revision: 1,
                     added: now.clone(),
                     updated: now,
+                    color: None,
                 }
             }
         };
+        let mut entry = entry;
+        // A colour of its own, kept with the model: the first one of the
+        // palette no other model has.
+        if entry.color.is_none() {
+            let taken: Vec<[u8; 3]> = self
+                .session
+                .records
+                .values()
+                .filter_map(|r| r.entry.color)
+                .collect();
+            let palette = theme::MODEL_COLORS.map(|c| [c.r(), c.g(), c.b()]);
+            let free = palette.iter().find(|c| !taken.contains(c));
+            entry.color = Some(*free.unwrap_or(&palette[self.federation.len() % palette.len()]));
+        }
+        let color = entry.color.unwrap_or([128, 128, 128]);
         let visible = entry.visible;
         let first = self.federation.is_empty();
         self.checking.stale = true;
@@ -577,6 +592,9 @@ impl OpenCheckApp {
             .expect("model was just added");
         let model = self.federation.get(id).expect("model was just added");
         let chunks = self.view.add_model(id, model, transform);
+        if let Some(m) = self.view.model_mut(id) {
+            m.color = color;
+        }
         if let Some(rs) = &self.render_state {
             SceneGpu::upload_model(rs, id, &chunks);
         }
@@ -593,6 +611,46 @@ impl OpenCheckApp {
         if first {
             self.camera.home(&self.scene_bounds, self.nav.aspect);
         }
+    }
+
+    /// The colour of a model: its chip, its name in the tree and its
+    /// elements in a finding under review.
+    pub fn model_color(&self, id: ModelId) -> egui::Color32 {
+        match self.session.records.get(&id).and_then(|r| r.entry.color) {
+            Some([r, g, b]) => egui::Color32::from_rgb(r, g, b),
+            None => {
+                let index = self
+                    .federation
+                    .ids()
+                    .iter()
+                    .position(|m| *m == id)
+                    .unwrap_or(0);
+                theme::MODEL_COLORS[index % theme::MODEL_COLORS.len()]
+            }
+        }
+    }
+
+    /// The colour of a discipline: that of its first model, so the results
+    /// read in the same colours as the models.
+    pub fn discipline_color(&self, d: opencheck_core::Discipline) -> egui::Color32 {
+        self.federation
+            .iter()
+            .find(|(_, m)| m.discipline == d)
+            .map_or_else(
+                || theme::discipline_color(d),
+                |(id, _)| self.model_color(id),
+            )
+    }
+
+    pub fn set_model_color(&mut self, id: ModelId, color: [u8; 3]) {
+        if let Some(record) = self.session.records.get_mut(&id) {
+            record.entry.color = Some(color);
+        }
+        if let Some(m) = self.view.model_mut(id) {
+            m.color = color;
+        }
+        self.view.modes_dirty = true;
+        self.session.dirty = true;
     }
 
     pub fn notify(&mut self, message: String) {
@@ -682,6 +740,10 @@ impl OpenCheckApp {
             .expect("model was just replaced");
         let model = self.federation.get(id).expect("model was just replaced");
         let chunks = self.view.add_model(id, model, transform);
+        let color = self.model_color(id);
+        if let Some(m) = self.view.model_mut(id) {
+            m.color = [color.r(), color.g(), color.b()];
+        }
         if let Some(rs) = &self.render_state {
             SceneGpu::upload_model(rs, id, &chunks);
         }
@@ -1072,15 +1134,13 @@ impl OpenCheckApp {
         }
     }
 
-    /// Lets go of the finding under review, on any tab: no highlight, no
-    /// marker, nothing selected in the results.
+    /// Lets go of the finding under review and the findings picked in 3D,
+    /// on any tab. The ticked findings stay highlighted.
     pub fn release_finding(&mut self) {
-        if self.view.focus.take().is_some() {
-            self.view.modes_dirty = true;
-        }
-        self.focus_marker = None;
+        self.checking.picked.clear();
         self.checking.selected = None;
         self.issues.selected = None;
+        self.refresh_finding_focus();
     }
 
     pub fn clear_finding_focus(&mut self) {
@@ -1343,8 +1403,11 @@ impl OpenCheckApp {
                 guid
             }
         };
-        // The ticked findings are dealt with now.
-        self.checking.marked.clear();
+        // Made of the ticked findings: they are dealt with now. Made of some
+        // of them (clashes picked in 3D), the ticks stay to sort the rest.
+        if self.checking.marked.iter().all(|m| finding_ids.contains(m)) {
+            self.checking.marked.clear();
+        }
         self.refresh_finding_focus();
         Some(guid)
     }

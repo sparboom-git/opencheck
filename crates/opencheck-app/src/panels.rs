@@ -12,13 +12,76 @@ use crate::theme;
 const MAX_SEARCH_RESULTS: usize = 400;
 
 fn model_color(app: &OpenCheckApp, id: ModelId) -> Color32 {
-    let index = app
-        .federation
-        .ids()
-        .iter()
-        .position(|m| *m == id)
-        .unwrap_or(0);
-    theme::MODEL_COLORS[index % theme::MODEL_COLORS.len()]
+    app.model_color(id)
+}
+
+/// The model's colour dot; a click chooses another colour.
+fn color_dot(ui: &mut egui::Ui, color: Color32) -> Option<[u8; 3]> {
+    let (dot, response) = ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::click());
+    ui.painter().circle_filled(dot.center(), 5.0, color);
+    if response.hovered() {
+        ui.painter().circle_stroke(
+            dot.center(),
+            7.0,
+            egui::Stroke::new(1.0, theme::text_muted()),
+        );
+    }
+    let response = response
+        .on_hover_text("The model's colour, also of its elements in clashes. Click to change it");
+    let mut chosen = None;
+    egui::Popup::menu(&response).show(|ui| {
+        ui.label(
+            RichText::new("Model colour")
+                .small()
+                .color(theme::text_muted()),
+        );
+        ui.horizontal(|ui| {
+            for c in theme::MODEL_COLORS {
+                let (rect, swatch) =
+                    ui.allocate_exact_size(egui::Vec2::splat(20.0), egui::Sense::click());
+                ui.painter().rect_filled(rect, 4.0, c);
+                if c == color {
+                    ui.painter().rect_stroke(
+                        rect.expand(2.0),
+                        5.0,
+                        egui::Stroke::new(2.0, theme::text()),
+                        egui::StrokeKind::Outside,
+                    );
+                }
+                if swatch.clicked() {
+                    chosen = Some([c.r(), c.g(), c.b()]);
+                    ui.close();
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            let mut rgb = [color.r(), color.g(), color.b()];
+            if ui.color_edit_button_srgb(&mut rgb).changed() {
+                // Bright green is kept for selected elements.
+                if theme::near_selection(rgb) {
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(egui::Id::new("too_green"), true));
+                } else {
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(egui::Id::new("too_green"), false));
+                    chosen = Some(rgb);
+                }
+            }
+            ui.label(RichText::new("Other colour").small());
+        });
+        if ui
+            .ctx()
+            .data(|d| d.get_temp::<bool>(egui::Id::new("too_green")))
+            .unwrap_or(false)
+        {
+            ui.label(
+                RichText::new("Too close to the green of selected elements")
+                    .small()
+                    .color(theme::text_muted()),
+            );
+        }
+    });
+    chosen
 }
 
 fn section_title(ui: &mut egui::Ui, text: &str) {
@@ -88,6 +151,7 @@ fn models_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     let mut remove = None;
     let mut visibility_change = None;
     let mut discipline_change = None;
+    let mut color_change = None;
     let mut update = None;
     let mut level_change = None;
     let project_level = app.checking.project_level();
@@ -132,9 +196,9 @@ fn models_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     {
                         visibility_change = Some((id, !visible));
                     }
-                    let (dot, _) =
-                        ui.allocate_exact_size(egui::Vec2::splat(10.0), egui::Sense::hover());
-                    ui.painter().circle_filled(dot.center(), 5.0, color);
+                    if let Some(rgb) = color_dot(ui, color) {
+                        color_change = Some((id, rgb));
+                    }
                     ui.vertical(|ui| {
                         let name = RichText::new(&model.short_name).strong();
                         let name = if visible {
@@ -259,6 +323,9 @@ fn models_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         if discipline != model.discipline {
             discipline_change = Some((id, discipline));
         }
+    }
+    if let Some((id, rgb)) = color_change {
+        app.set_model_color(id, rgb);
     }
     if let Some((id, visible)) = visibility_change {
         app.set_model_visible(id, visible);

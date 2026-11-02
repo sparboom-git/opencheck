@@ -61,9 +61,12 @@ impl OpenCheckApp {
     /// Creates the issues of the draft with its fields.
     fn create_from_draft(&mut self, draft: IssueDraft) {
         let before: Vec<String> = self.issues.list.iter().map(|i| i.guid.clone()).collect();
-        let Some(last) = self.add_issues(&draft.findings, draft.target.clone()) else {
+        if self
+            .add_issues(&draft.findings, draft.target.clone())
+            .is_none()
+        {
             return;
-        };
+        }
         let created: Vec<String> = self
             .issues
             .list
@@ -91,7 +94,14 @@ impl OpenCheckApp {
         }
         remember_person(&mut self.issues.people, &draft.assigned_to);
         self.session.dirty = true;
-        self.show_issue(&last);
+        // The view stays as it is, so the sorting can go on.
+        let n = created.len();
+        self.notify(if n == 1 {
+            "Issue created".to_owned()
+        } else {
+            format!("{n} issues created")
+        });
+        self.refresh_finding_focus();
     }
 }
 
@@ -114,7 +124,9 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
     let count = draft.findings.len();
     let heading = match (&draft.target, count) {
         (IssueTarget::Separate, n) if n > 1 => format!("New issues ({n})"),
-        (IssueTarget::Bundle, n) if n > 1 => format!("New issue with {n} findings"),
+        (IssueTarget::Bundle | IssueTarget::BundleFramed, n) if n > 1 => {
+            format!("New issue with {n} findings")
+        }
         _ => "New issue".to_owned(),
     };
 
@@ -193,7 +205,7 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
                     for d in &disciplines {
                         let on = draft.responsible.contains(d);
                         let text = RichText::new(d.code()).color(if on {
-                            theme::discipline_color(*d)
+                            app.discipline_color(*d)
                         } else {
                             theme::text_muted()
                         });

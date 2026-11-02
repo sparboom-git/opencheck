@@ -280,6 +280,9 @@ pub struct Checking {
     pub reveal_pair: Option<(String, PairKey)>,
     /// Findings picked in the results list, in pick order.
     pub marked: Vec<String>,
+    /// Findings picked in the 3D view with Ctrl+click on their markers, to
+    /// act on together; the ticks in the list stay as they are.
+    pub picked: Vec<String>,
     /// Where a Shift+click range starts.
     pub anchor: Option<String>,
     pub tab: ResultsTab,

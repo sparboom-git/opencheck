@@ -80,8 +80,8 @@ the user how far you got if you stop early.
 
 When the user asks for a report, or a finding is hard to judge from the data
 alone, call `finding_pictures` with the finding ids (up to 12 per call). Each
-picture shows the finding framed with some context: its first element
-orange, the second blue, the rest faint. Use `view: "top"` for a plan or a
+picture shows the finding framed with some context: each element in its
+model's colour (`project_info` lists them), the rest faint. Use `view: "top"` for a plan or a
 side (`south`, `north`, `west`, `east`) for an elevation. The pictures are
 also saved as PNG files; their paths are in the answer, so a report can
 include them. Give coordinates from `get_finding` (`location.ifc_point_m`,

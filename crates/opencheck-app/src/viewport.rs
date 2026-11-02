@@ -459,11 +459,16 @@ fn handle_selection(
 ) {
     let additive = ui.input(|i| i.modifiers.command || i.modifiers.shift);
     if response.clicked()
-        && !additive
         && let Some(pos) = response.interact_pointer_pos()
         && let Some(id) = app.markers.hit(pos)
     {
-        crate::markers::open(app, &id);
+        if additive {
+            crate::markers::pick(app, &id);
+        } else {
+            // A plain click looks at one clash: the picks start over.
+            app.checking.picked.clear();
+            crate::markers::open(app, &id);
+        }
         response.context_menu(|ui| {
             context_menu(app, ui);
         });
@@ -479,7 +484,8 @@ fn handle_selection(
     } else if response.clicked()
         && let Some(pos) = response.interact_pointer_pos()
     {
-        // With the markers on, a click beside them lets go of the finding.
+        // With the markers on, a click beside them lets go of the clash
+        // under review and the picks; the ticked clashes stay in view.
         if app.markers.on && !additive {
             app.release_finding();
         }
@@ -1443,15 +1449,42 @@ fn tool_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
             }
             ui.separator();
             let reviewing = app.view.focus.is_some();
-            let (xray_on, xray_tip) = if reviewing {
-                (
+            if reviewing {
+                // The rest of the model around the findings: shown, ghosted or left out.
+                let button = icon_button(
+                    ui,
+                    icon::CUBE_TRANSPARENT,
                     !app.view.show_context,
-                    "Ghost the rest of the model around the clash (X)",
-                )
-            } else {
-                (app.view.xray, "X-ray (X)")
-            };
-            if icon_button(ui, icon::CUBE_TRANSPARENT, xray_on, xray_tip).clicked() {
+                    "The rest of the model around the findings: shown, ghosted or hidden \
+                     (X switches ghosting)",
+                );
+                egui::Popup::menu(&button).show(|ui| {
+                    ui.set_min_width(220.0);
+                    ui.label(
+                        RichText::new("The rest of the model")
+                            .small()
+                            .color(theme::text_muted()),
+                    );
+                    let current = match (app.view.show_context, app.view.hide_context) {
+                        (true, _) => 0,
+                        (false, false) => 1,
+                        (false, true) => 2,
+                    };
+                    for (choice, label) in [
+                        (0, "Shown"),
+                        (1, "Ghosted: faint and grey (X)"),
+                        (2, "Hidden: only the findings' elements"),
+                    ] {
+                        if ui.radio(current == choice, label).clicked() {
+                            app.view.show_context = choice == 0;
+                            app.view.hide_context = choice == 2;
+                            app.view.modes_dirty = true;
+                            ui.close();
+                        }
+                    }
+                });
+            } else if icon_button(ui, icon::CUBE_TRANSPARENT, app.view.xray, "X-ray (X)").clicked()
+            {
                 app.toggle_xray();
             }
             let sectioned = app.view.section.is_some();

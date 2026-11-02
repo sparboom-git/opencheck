@@ -19,7 +19,6 @@ use crate::checking::{
     pair_key, rule_key,
 };
 use crate::checking_ui::{FOCUS_A, FOCUS_B, accepted, dot, panel_frame, severity_color};
-use crate::theme::discipline_color;
 use crate::{issues_ui, theme};
 use opencheck_core::triage::{Category, Rating};
 
@@ -286,6 +285,8 @@ struct Actions {
     approve: Option<(Vec<String>, Option<Category>)>,
     dismiss: Option<Vec<String>>,
     presort: bool,
+    /// Let go of the findings picked in the 3D view.
+    clear_picked: bool,
     /// Open the project's triage rules.
     triage: bool,
     /// Mark clashes like this one as noise in its rule's pre-sorting.
@@ -942,7 +943,7 @@ fn matrix(
     let counts: FxHashMap<PairKey, usize> = pairs.iter().map(|p| (p.key, p.count)).collect();
     let heading = |ui: &mut egui::Ui, d: Discipline| {
         ui.horizontal(|ui| {
-            swatch(ui, discipline_color(d));
+            swatch(ui, app.discipline_color(d));
             ui.label(RichText::new(d.code()).small().strong())
                 .on_hover_text(d.label());
         });
@@ -1232,13 +1233,13 @@ fn pair_section(app: &OpenCheckApp, ui: &mut egui::Ui, pair: &Pair, actions: &mu
             ui.set_width(ui.available_width());
             state
                 .show_header(ui, |ui| {
-                    swatch(ui, discipline_color(d1));
+                    swatch(ui, app.discipline_color(d1));
                     let header = ui.label(RichText::new(d1.code()).strong());
                     if pair.information {
                         ui.label(RichText::new(d1.label()).color(theme::text_muted()));
                     } else {
                         ui.label(RichText::new("vs").color(theme::text_muted()));
-                        swatch(ui, discipline_color(d2));
+                        swatch(ui, app.discipline_color(d2));
                         ui.label(RichText::new(d2.code()).strong());
                     }
                     count_badge(ui, pair.count);
@@ -1259,7 +1260,7 @@ fn pair_section(app: &OpenCheckApp, ui: &mut egui::Ui, pair: &Pair, actions: &mu
                                 let selected = pair.group_by == d;
                                 let text =
                                     RichText::new(format!("• {}", d.code())).color(if selected {
-                                        discipline_color(d)
+                                        app.discipline_color(d)
                                     } else {
                                         theme::text_muted()
                                     });
@@ -1305,7 +1306,7 @@ fn group_section(
             {
                 actions.toggle_group = Some((ids.clone(), all));
             }
-            swatch(ui, discipline_color(pair.group_by));
+            swatch(ui, app.discipline_color(pair.group_by));
             let kind = component_kind(group.class);
             let raw = class_label(group.class);
             let response = ui
@@ -1616,10 +1617,73 @@ fn selection_bar(app: &OpenCheckApp, ui: &mut egui::Ui, actions: &mut Actions) {
     });
 }
 
+/// The findings picked in the 3D view with Ctrl+click on their markers,
+/// with what can be done to them all at once. Doing it lets go of them.
+fn picked_bar(app: &OpenCheckApp, ui: &mut egui::Ui, actions: &mut Actions) {
+    let picked: Vec<String> = app
+        .checking
+        .picked
+        .iter()
+        .filter(|id| app.checking.find(id).is_some())
+        .cloned()
+        .collect();
+    if picked.is_empty() {
+        return;
+    }
+    egui::Frame::new()
+        .fill(theme::accent_soft())
+        .corner_radius(8)
+        .inner_margin(egui::Margin::symmetric(8, 6))
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(icon::CROSSHAIR).color(theme::accent()));
+                ui.label(RichText::new(format!("{} picked in 3D", picked.len())).strong())
+                    .on_hover_text(
+                        "Ctrl+click markers to pick clashes; the ticks in the list stay as \
+                         they are",
+                    );
+                let new: Vec<String> = picked
+                    .iter()
+                    .filter(|id| app.issues.for_finding(id).is_none())
+                    .cloned()
+                    .collect();
+                let label = if new.len() > 1 {
+                    format!("{}  Add as one issue ({})", icon::FLAG, new.len())
+                } else {
+                    format!("{}  Add to issues", icon::FLAG)
+                };
+                if ui
+                    .add_enabled(!new.is_empty(), egui::Button::new(label))
+                    .clicked()
+                {
+                    // The issue's viewpoint frames its clashes, not the whole view.
+                    actions.add_issues = Some((new, IssueTarget::BundleFramed));
+                    actions.clear_picked = true;
+                }
+                if ui
+                    .button(RichText::new(format!("{}  Accept", icon::CHECK)).color(accepted()))
+                    .clicked()
+                {
+                    actions.decide = Some((picked.clone(), Some(Decision::Accepted)));
+                    actions.clear_picked = true;
+                }
+                if ui.button(format!("{}  Reject", icon::X)).clicked() {
+                    actions.decide = Some((picked.clone(), Some(Decision::Rejected)));
+                    actions.clear_picked = true;
+                }
+                if ui.button("Clear").clicked() {
+                    actions.clear_picked = true;
+                }
+            });
+        });
+    ui.add_space(4.0);
+}
+
 fn finding_detail(app: &OpenCheckApp, ui: &mut egui::Ui, id: &str, actions: &mut Actions) {
     let Some((ruleset, rule, f)) = app.checking.find(id) else {
         return;
     };
+    picked_bar(app, ui, actions);
     let decision = app.checking.decisions.get(id).copied();
     ui.horizontal(|ui| {
         dot(ui, severity_color(rule.rule.severity));
@@ -1685,7 +1749,8 @@ fn finding_detail(app: &OpenCheckApp, ui: &mut egui::Ui, id: &str, actions: &mut
             ui.label(magnitude_text(f));
             &[(&f.a, FOCUS_A), (&f.b, FOCUS_B)]
         };
-    for &(element, color) in sides {
+    for &(element, _) in sides {
+        let color = app.model_color(element.model);
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(12.0), egui::Sense::hover());
             ui.painter().rect_filled(rect, 3.0, color);
@@ -1835,6 +1900,7 @@ fn apply(app: &mut OpenCheckApp, actions: Actions, order: &[String], advance: bo
         app.session.dirty = true;
         // Reviewing one at a time: move on to the next undecided finding.
         if advance
+            && !actions.clear_picked
             && decision.is_some()
             && ids.len() == 1
             && let Some(current) = current
@@ -1856,6 +1922,9 @@ fn apply(app: &mut OpenCheckApp, actions: Actions, order: &[String], advance: bo
     }
     if actions.triage {
         app.checking.triage_open = true;
+    }
+    if actions.clear_picked {
+        app.checking.picked.clear();
     }
     if actions.presort {
         let n = app.presort(true);
@@ -2289,9 +2358,9 @@ pub fn marker_card(app: &OpenCheckApp, ui: &mut egui::Ui, id: &str) {
             .unwrap_or_default();
         format!("{} [{}]{system}\n{model}", element_label(e), e.ifc_class)
     };
-    for (e, color) in [(&f.a, FOCUS_A), (&f.b, FOCUS_B)] {
+    for e in [&f.a, &f.b] {
         ui.horizontal(|ui| {
-            swatch(ui, color);
+            swatch(ui, app.model_color(e.model));
             ui.label(RichText::new(element(e)).small());
         });
     }
@@ -2386,6 +2455,12 @@ pub fn marker_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     if ui.checkbox(&mut on, "Show clash markers (K)").changed() {
         app.markers.toggle();
     }
+    let ticked = app.checking.marked.len();
+    ui.checkbox(
+        &mut app.markers.ticked_only,
+        format!("Only the ticked findings ({ticked})"),
+    )
+    .on_hover_text("Markers only for the findings ticked in the Check tab's list, at any distance");
     ui.horizontal(|ui| {
         ui.label("Within");
         ui.add(

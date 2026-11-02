@@ -24,6 +24,8 @@ pub fn is_space_class(class: &str) -> bool {
 pub struct ViewModel {
     pub id: ModelId,
     pub visible: bool,
+    /// The model's colour (sRGB): its elements in a finding under review.
+    pub color: [u8; 3],
     /// Federation-frame transform used when the geometry was uploaded.
     pub transform: Mat4,
     slot_base: u32,
@@ -71,6 +73,8 @@ pub struct ViewState {
     pub focus: Option<Focus>,
     /// While reviewing a finding: show the rest of the model normally instead of ghosted.
     pub show_context: bool,
+    /// While reviewing a finding with the rest ghosted: leave the rest out instead.
+    pub hide_context: bool,
     /// Colours from a visual check, drawn instead of the model's own.
     pub paint: Option<FxHashMap<ElementRef, [u8; 3]>>,
     /// With `paint`: ghost the elements it does not colour.
@@ -148,6 +152,7 @@ impl ViewState {
         self.models.push(ViewModel {
             id,
             visible: true,
+            color: [128, 128, 128],
             transform,
             slot_base,
             slot_elements,
@@ -194,6 +199,12 @@ impl ViewState {
         };
         // A finding under review: its two elements in colour, everything else ghosted.
         if let Some(focus) = &self.focus {
+            // A picked element of a finding shows as selected, in green.
+            if self.selection.contains(&element)
+                && (focus.a.contains(&element) || focus.b.contains(&element))
+            {
+                return DisplayMode::Selected;
+            }
             if focus.a.contains(&element) {
                 return DisplayMode::FocusA;
             }
@@ -217,6 +228,8 @@ impl ViewState {
                 .storey_filter
                 .as_ref()
                 .is_some_and(|s| model.slot_storey[local_slot].as_deref() != Some(s.as_str()));
+        // Reviewing findings with the rest hidden rather than ghosted.
+        let hidden = hidden || (self.focus.is_some() && !self.show_context && self.hide_context);
         if hidden {
             DisplayMode::Hidden
         } else if self.ghosted.contains(&element) || (self.focus.is_some() && !self.show_context) {
@@ -243,6 +256,12 @@ impl ViewState {
     /// (see [`PAINTED`]) where a visual check colours the element.
     fn mode_word(&self, model: &ViewModel, local: usize) -> u32 {
         let mode = self.mode_of(model, local);
+        // The elements of a finding under review in their model's colour, so
+        // it is clear which model each comes from.
+        if matches!(mode, DisplayMode::FocusA | DisplayMode::FocusB) {
+            let [r, g, b] = model.color;
+            return PAINTED | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
+        }
         let Some(paint) = &self.paint else {
             return mode as u32;
         };

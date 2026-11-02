@@ -32,6 +32,8 @@ pub struct MarkerLayer {
     pub on: bool,
     /// Only markers this close are shown, metres.
     pub distance: f32,
+    /// Only the findings ticked in the Check tab, at any distance.
+    pub ticked_only: bool,
     /// Whether each finding was in sight, and for which camera position.
     sight: FxHashMap<String, (bool, u64)>,
     generation: u64,
@@ -47,6 +49,7 @@ impl Default for MarkerLayer {
         Self {
             on: false,
             distance: 15.0,
+            ticked_only: false,
             sight: FxHashMap::default(),
             generation: 0,
             camera: [f32::NAN; 5],
@@ -76,15 +79,42 @@ impl MarkerLayer {
     }
 }
 
-/// Opens the finding of a clicked marker, keeping the model around it in
-/// view.
+/// Opens the finding of a clicked marker. Coming from the whole model, the
+/// model around it stays in view; while reviewing findings, the rest of the
+/// model stays as it was chosen (shown, ghosted or hidden).
 pub fn open(app: &mut OpenCheckApp, id: &str) {
+    let reviewing = app.view.focus.is_some();
     app.show_finding(id, false);
-    if !app.view.show_context {
+    // Hidden, once chosen, stays until the reviewer changes it.
+    if !reviewing && !app.view.show_context && !app.view.hide_context {
         app.view.show_context = true;
         app.view.modes_dirty = true;
     }
     app.finding_window_open = true;
+}
+
+/// Picks or lets go of the finding of a marker clicked with Ctrl or Shift,
+/// to act on several at once. The ticks in the list are left alone.
+pub fn pick(app: &mut OpenCheckApp, id: &str) {
+    // The clash opened with a plain click is the first of the picks.
+    if app.checking.picked.is_empty()
+        && let Some(open_one) = app.checking.selected.clone()
+        && app.checking.find(&open_one).is_some()
+    {
+        let same = open_one == id;
+        app.checking.picked.push(open_one);
+        if same {
+            open(app, id);
+            return;
+        }
+    }
+    let picked = &mut app.checking.picked;
+    if let Some(at) = picked.iter().position(|p| p == id) {
+        picked.remove(at);
+    } else {
+        picked.push(id.to_owned());
+    }
+    open(app, id);
 }
 
 /// Works out which markers are in sight and draws them, with the card of
@@ -120,10 +150,20 @@ pub fn draw(
     let reference = app.markers.centre.unwrap_or(eye);
     let distance = app.markers.distance;
 
-    // Candidates: near enough, on screen, both elements drawn.
+    // Candidates: near enough (or ticked), on screen, both elements drawn.
+    let ticked: Option<rustc_hash::FxHashSet<&str>> = app
+        .markers
+        .ticked_only
+        .then(|| app.checking.marked.iter().map(String::as_str).collect());
     let mut near: Vec<(MarkerSource, Pos2, f32)> = results_ui::marker_sources(app)
         .into_iter()
-        .filter(|m| m.point.distance(reference) <= distance)
+        .filter(|m| {
+            app.checking.picked.contains(&m.id)
+                || match &ticked {
+                    Some(ticked) => ticked.contains(m.id.as_str()),
+                    None => m.point.distance(reference) <= distance,
+                }
+        })
         .filter(|m| app.view.is_visible_point(m.point))
         .filter(|m| {
             m.elements
@@ -182,10 +222,9 @@ pub fn draw(
         if !app.markers.sight.get(&m.id).is_some_and(|(seen, _)| *seen) {
             continue;
         }
-        if selected.as_deref() == Some(m.id.as_str()) {
+        paint_marker(&painter, *p, m.color, m.state);
+        if selected.as_deref() == Some(m.id.as_str()) || app.checking.picked.contains(&m.id) {
             paint_sight(&painter, *p, m.color);
-        } else {
-            paint_marker(&painter, *p, m.color, m.state);
         }
         drawn.push((m.id.clone(), *p));
     }
@@ -253,14 +292,17 @@ fn paint_marker(painter: &egui::Painter, p: Pos2, color: Color32, state: MarkerS
     }
 }
 
-/// The chosen finding: a sight in the category's colour.
+/// The chosen finding: a sight in the category's colour around its marker,
+/// which stays readable inside it.
 fn paint_sight(painter: &egui::Painter, p: Pos2, color: Color32) {
     let shade = Color32::from_black_alpha(120);
     for (stroke, c) in [(6.0, shade), (3.0, color)] {
-        painter.circle_stroke(p, 16.0, Stroke::new(stroke, c));
+        painter.circle_stroke(p, RING + 6.0, Stroke::new(stroke, c));
         for d in [Vec2::X, -Vec2::X, Vec2::Y, -Vec2::Y] {
-            painter.line_segment([p + d * 9.0, p + d * 26.0], Stroke::new(stroke, c));
+            painter.line_segment(
+                [p + d * (RING + 2.0), p + d * (RING + 16.0)],
+                Stroke::new(stroke, c),
+            );
         }
     }
-    painter.circle_filled(p, 3.5, color);
 }

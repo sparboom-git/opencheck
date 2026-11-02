@@ -152,7 +152,7 @@ checkers.
   overview of discipline against discipline, then findings per pair, grouped
   by the kind of component. Information rules show the fill rate per building
   part and every element with what it is missing. Selecting a finding shows
-  its two elements in orange and blue with the rest ghosted. Accept real
+  its two elements in their models' colours with the rest ghosted. Accept real
   problems and reject the rest; decisions are kept between runs.
 
 Rulesets are TOML files; [docs/ruleset-authoring.md](docs/ruleset-authoring.md)

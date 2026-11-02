@@ -89,7 +89,7 @@ fn tools() -> Value {
         },
         {
             "name": "finding_pictures",
-            "description": "Pictures of findings from OpenCheck's 3D view: each finding framed with some context around it, its first element orange and the second blue, the rest faint. Each picture is also saved as a PNG file (paths in the answer) for use in reports. The reviewer's view is put back afterwards. OpenCheck's window must not be minimized.",
+            "description": "Pictures of findings from OpenCheck's 3D view: each finding framed with some context around it, each element in its model's colour (project_info lists them), the rest faint. Each picture is also saved as a PNG file (paths in the answer) for use in reports. The reviewer's view is put back afterwards. OpenCheck's window must not be minimized.",
             "inputSchema": { "type": "object", "properties": {
                 "ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 12, "description": "Finding ids, at most 12 per call." },
                 "view": { "type": "string", "enum": ["angle", "top", "south", "north", "west", "east", "current"], "description": "From above at an angle (default), a plan from the top, an elevation from one side, or the direction the reviewer has the view turned to." },

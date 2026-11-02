@@ -119,7 +119,7 @@ or `()`).
 | Call | Finding |
 |---|---|
 | `report(e, "message")` | On one element. |
-| `report(a, b, "message")` | On two elements, shown in orange and blue. |
+| `report(a, b, "message")` | On two elements, shown in their models' colours. |
 | `report(stretch, "message")` | On a blocked stretch: the element and the one blocking it, with the blocked zone drawn in the 3D view. |
 
 Messages can have several lines (`"\n"`). The same finding reported twice is

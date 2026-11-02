@@ -145,8 +145,8 @@ Issues list shows only the issues of one person, or of one day.
 
 Claude can ask for pictures of findings (`finding_pictures`): OpenCheck
 turns the 3D view to each finding in turn, as for a BCF export, captures
-it and puts your view back afterwards. The finding's first element is
-orange, the second blue. Claude sees the pictures, and each is also saved
+it and puts your view back afterwards. Each element of the finding is
+in its model's colour. Claude sees the pictures, and each is also saved
 as a PNG file in a folder next to the project file (*<project> pictures*;
 the temporary folder while the project is not saved), so a report Claude
 writes can use them. A picture can be taken at an angle (default), as a

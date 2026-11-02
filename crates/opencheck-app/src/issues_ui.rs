@@ -550,6 +550,23 @@ fn issue_detail(app: &mut OpenCheckApp, ui: &mut egui::Ui, guid: &str) {
             suggestions.push(user.clone());
         }
     }
+    // The colours of the disciplines and models, read before the issue is borrowed.
+    let discipline_colors: Vec<(opencheck_core::Discipline, egui::Color32)> =
+        opencheck_core::Discipline::ALL
+            .iter()
+            .map(|d| (*d, app.discipline_color(*d)))
+            .collect();
+    let discipline_color = |d: opencheck_core::Discipline| {
+        discipline_colors
+            .iter()
+            .find(|(k, _)| *k == d)
+            .map_or(egui::Color32::GRAY, |(_, c)| *c)
+    };
+    let model_colors: Vec<(String, egui::Color32)> = app
+        .federation
+        .iter()
+        .map(|(id, m)| (m.short_name.clone(), app.model_color(id)))
+        .collect();
     let Some(issue) = app.issues.get_mut(guid) else {
         return;
     };
@@ -610,7 +627,7 @@ fn issue_detail(app: &mut OpenCheckApp, ui: &mut egui::Ui, guid: &str) {
                 for d in &disciplines {
                     let on = issue.responsible.contains(d);
                     let text = RichText::new(d.code()).color(if on {
-                        theme::discipline_color(*d)
+                        discipline_color(*d)
                     } else {
                         theme::text_muted()
                     });
@@ -818,10 +835,14 @@ fn issue_detail(app: &mut OpenCheckApp, ui: &mut egui::Ui, guid: &str) {
         .show(ui, |ui| {
             for component in &issue.components {
                 ui.horizontal(|ui| {
-                    let color = match component.role {
-                        ComponentRole::A => FOCUS_A,
-                        ComponentRole::B => FOCUS_B,
-                    };
+                    let color = model_colors
+                        .iter()
+                        .find(|(name, _)| *name == component.model)
+                        .map(|(_, c)| *c)
+                        .unwrap_or(match component.role {
+                            ComponentRole::A => FOCUS_A,
+                            ComponentRole::B => FOCUS_B,
+                        });
                     let (rect, _) =
                         ui.allocate_exact_size(egui::Vec2::splat(12.0), egui::Sense::hover());
                     ui.painter().rect_filled(rect, 3.0, color);

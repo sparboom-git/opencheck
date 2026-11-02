@@ -395,6 +395,7 @@ pub fn step_pictures(app: &mut OpenCheckApp, ctx: &egui::Context) {
             let direction = job.direction;
             if job.saved.is_none() {
                 let saved = app.save_view();
+                app.view.hide_context = false;
                 if let Some(job) = &mut app.claude.pictures {
                     job.saved = Some(saved);
                 }
@@ -486,7 +487,7 @@ fn finish_pictures(app: &mut OpenCheckApp) {
         "pictures": job.taken,
         "missing": job.missing,
         "folder": job.folder.display().to_string(),
-        "colours": "The finding's first element (a) is orange, the second (b) blue; the point of the finding has a marker. Other elements are drawn faint.",
+        "colours": "Each element of a finding is drawn in its model's colour (see models[].colour in project_info); the point of the finding has a marker. Other elements are drawn faint.",
     })));
     log(app, format!("pictures: {count} taken"));
 }
@@ -541,10 +542,12 @@ fn project_info(app: &OpenCheckApp) -> Value {
     let models: Vec<Value> = app
         .federation
         .iter()
-        .map(|(_, m)| {
+        .map(|(id, m)| {
+            let c = app.model_color(id);
             json!({
                 "name": m.short_name,
                 "discipline": m.discipline.label(),
+                "colour": format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b()),
                 "schema": m.schema,
                 "elements": m.elements.len(),
             })

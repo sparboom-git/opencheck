@@ -56,6 +56,7 @@ pub struct SavedView {
     selection: Vec<ElementRef>,
     section: Option<SectionPlane>,
     show_context: bool,
+    hide_context: bool,
     isolated: Option<FxHashSet<ElementRef>>,
     hidden: FxHashSet<ElementRef>,
     issue: Option<String>,
@@ -161,6 +162,7 @@ impl OpenCheckApp {
             selection: self.view.selection.clone(),
             section: self.view.section,
             show_context: self.view.show_context,
+            hide_context: self.view.hide_context,
             isolated: self.view.isolated.clone(),
             hidden: self.view.hidden.clone(),
             issue: self.issues.selected.clone(),
@@ -175,6 +177,7 @@ impl OpenCheckApp {
         self.view.selection = saved.selection;
         self.view.section = saved.section;
         self.view.show_context = saved.show_context;
+        self.view.hide_context = saved.hide_context;
         self.view.isolated = saved.isolated;
         self.view.hidden = saved.hidden;
         self.view.modes_dirty = true;
@@ -202,6 +205,8 @@ impl OpenCheckApp {
             return;
         }
         let saved = self.save_view();
+        // Pictures ghost the rest as the issue's viewpoint says, whatever the view does now.
+        self.view.hide_context = false;
         self.capture = Some(Capture {
             kind,
             issues,

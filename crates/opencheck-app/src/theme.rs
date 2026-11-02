@@ -145,6 +145,22 @@ pub const CLASH_B: Color32 = Color32::from_rgb(31, 95, 209);
 pub const SKY_TOP: Color32 = Color32::from_rgb(228, 229, 225);
 pub const SKY_BOTTOM: Color32 = SKY_TOP;
 
+/// The green of selected elements in the 3D view (`SELECTED_COLOR` in
+/// `scene.wgsl`). Model colours must stay clear of it.
+pub const SELECTION_GREEN: Color32 = Color32::from_rgb(0, 204, 0);
+
+/// Whether a colour is too close to the selection green to tell apart.
+pub fn near_selection(c: [u8; 3]) -> bool {
+    let [r, g, b] = c.map(i32::from);
+    let [sr, sg, sb] = [
+        SELECTION_GREEN.r(),
+        SELECTION_GREEN.g(),
+        SELECTION_GREEN.b(),
+    ]
+    .map(i32::from);
+    (r - sr).abs() + (g - sg).abs() + (b - sb).abs() < 150 || (g > 140 && g > r + 60 && g > b + 60)
+}
+
 /// Distinct, readable colours for model chips, assigned in load order.
 pub const MODEL_COLORS: [Color32; 8] = [
     Color32::from_rgb(31, 95, 209),
