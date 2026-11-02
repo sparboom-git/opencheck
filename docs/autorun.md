@@ -62,8 +62,9 @@ that is always on.
    file and no check changed, the run stops there.
 4. **Checks**: all chosen rulesets on all files, with the disciplines from
    the configuration, then the visual checks. Their problems become findings
-   with the check types `alignment`, `dimension_jump`, `drain_slope` and
-   `storey_mismatch`; the log says how many each found.
+   with the check types `alignment`, `dimension_jump`, `drain_slope`,
+   `storey_mismatch`, `room_missing` and `level_mismatch` (a level problem
+   names the storeys); the log says how many each found.
 5. **History**: one file per run, `history/run_YYYY-MM-DD_HHMM.json.gz`,
    never changed afterwards. It holds figures per file (size, IFC schema,
    hash, date, objects in all and per class, elements missing information)

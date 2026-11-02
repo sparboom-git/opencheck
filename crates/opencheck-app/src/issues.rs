@@ -86,6 +86,16 @@ pub struct IssueCamera {
     pub eye: [f64; 3],
     pub yaw: f32,
     pub pitch: f32,
+    /// A parallel view (an elevation or a plan); the eye then lies well
+    /// behind the model and `ortho_distance` gives the scale.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ortho: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub ortho_distance: f32,
+}
+
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
 }
 
 /// Section of the viewpoint, world coordinates (metres): a point on the

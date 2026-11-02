@@ -1,7 +1,7 @@
 # Visual Check
 
 The *Visual Check* tab holds checks that colour the model, so a pattern, or
-a break in it, shows at a glance. There are four, each added on its own with
+a break in it, shows at a glance. There are six, each added on its own with
 *Add*, because it does not always make sense to run them all:
 
 | Check | Colours | Marks | Check type |
@@ -10,6 +10,8 @@ a break in it, shows at a glance. There are four, each added on its own with
 | Dimensions in pipe and duct systems | each kind of system | pieces larger than the one before | `dimension_jump` |
 | Fall of drain pipes | enough fall | flat, wrong way, too little | `drain_slope` |
 | Storeys | each storey | elements on another storey, without a storey | `storey_mismatch` |
+| Rooms | rooms | enclosed areas without a room, and their walls | `room_missing` |
+| Levels | nothing; storeys drawn as levels | storeys that differ between the models | `level_mismatch` |
 
 The checks are kept with the project; *Analyse* works the colours out. The
 right panel lists the problems first (what is wrong, with the element under

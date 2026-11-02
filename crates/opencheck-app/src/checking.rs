@@ -73,6 +73,15 @@ pub struct ProjectRuleset {
     pub models: Option<Vec<ModelId>>,
 }
 
+impl ProjectRuleset {
+    /// After `ruleset` was edited in place: the text the project saves and
+    /// autorun reads follows it again. Every editor must call this, or the
+    /// change is lost at the next save.
+    pub fn sync_text(&mut self) {
+        self.text = self.ruleset.to_toml();
+    }
+}
+
 /// An IDS file stored in the project (`requirements/*.ids`).
 pub struct ProjectIds {
     pub path: String,
@@ -1167,6 +1176,36 @@ mod tests {
         assert!(!checking.ratings.contains_key("gone"));
         // Decisions are kept, so they apply again if the finding comes back.
         assert_eq!(checking.decisions.get("gone"), Some(&Decision::Rejected));
+    }
+
+    #[test]
+    fn exclusions_edited_in_place_are_saved_with_the_ruleset() {
+        use opencheck_core::check::{ExcludeOperator, Exclusion};
+        let mut checking = Checking::default();
+        checking.add_builtin(0);
+        let rule = checking.rulesets[0]
+            .ruleset
+            .rules
+            .iter()
+            .position(|r| r.kind == RuleKind::Clash)
+            .expect("the first built-in ruleset has a clash rule");
+        let row = Exclusion {
+            category: "IfcCovering".to_owned(),
+            property: "Name".to_owned(),
+            operator: ExcludeOperator::Contains,
+            value: "isolering".to_owned(),
+            ..Exclusion::default()
+        };
+        checking.rulesets[0].ruleset.rules[rule]
+            .exclude
+            .push(row.clone());
+        // As the Check tab's window and the Ruleset Manager must do.
+        checking.rulesets[0].sync_text();
+
+        let mut loaded = Checking::default();
+        let errors = loaded.load(checking.ruleset_files(), Vec::new(), None);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(loaded.rulesets[0].ruleset.rules[rule].exclude, vec![row]);
     }
 
     #[test]

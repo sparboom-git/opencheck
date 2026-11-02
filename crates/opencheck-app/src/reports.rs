@@ -312,11 +312,45 @@ pub struct Revision {
     pub issued: Option<Issued>,
     pub blocks: Vec<Block>,
     pub snapshot: Snapshot,
+    /// The introduction and the report's name as they were when the
+    /// revision was issued, so it reads the same afterwards; the draft
+    /// follows the report's.
+    pub intro: Option<Intro>,
+    pub name: Option<String>,
 }
 
 impl Revision {
     pub fn is_locked(&self) -> bool {
         self.issued.is_some()
+    }
+}
+
+impl Report {
+    /// The introduction a revision shows: its own, frozen when it was
+    /// issued, else the report's.
+    pub fn intro_for<'a>(&'a self, rev: &'a Revision) -> &'a Intro {
+        rev.intro.as_ref().unwrap_or(&self.intro)
+    }
+
+    /// The name a revision shows, frozen when it was issued.
+    pub fn name_for<'a>(&'a self, rev: &'a Revision) -> &'a str {
+        rev.name.as_deref().unwrap_or(&self.name)
+    }
+
+    /// Issues the current draft: it is locked, and the introduction and
+    /// the name are frozen with it. False when there is no draft.
+    pub fn issue_draft(&mut self, issued: Issued) -> bool {
+        let intro = self.intro.clone();
+        let name = self.name.clone();
+        match self.revisions.last_mut() {
+            Some(rev) if !rev.is_locked() => {
+                rev.intro = Some(intro);
+                rev.name = Some(name);
+                rev.issued = Some(issued);
+                true
+            }
+            _ => false,
+        }
     }
 }
 
@@ -616,6 +650,8 @@ impl OpenCheckApp {
                         },
                         created: now,
                         issued: None,
+                        intro: None,
+                        name: None,
                         blocks: default_blocks(),
                         snapshot,
                     }],
@@ -641,6 +677,8 @@ impl OpenCheckApp {
                         label: next_label(&last.label),
                         created: now,
                         issued: None,
+                        intro: None,
+                        name: None,
                         blocks: last.blocks.clone(),
                         snapshot,
                     });

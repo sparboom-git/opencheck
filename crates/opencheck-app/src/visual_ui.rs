@@ -1129,10 +1129,20 @@ pub fn results_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             let selection: FxHashSet<ElementRef> = app.view.selection.iter().copied().collect();
             let mut pick: Option<Vec<ElementRef>> = None;
             let label = |key: &ElementKey| {
-                app.federation
-                    .get(key.model)
-                    .and_then(|m| m.element(key.express_id))
-                    .map_or_else(|| format!("#{}", key.express_id), |e| e.label().to_owned())
+                let fallback = || format!("#{}", key.express_id);
+                let Some(m) = app.federation.get(key.model) else {
+                    return fallback();
+                };
+                m.element(key.express_id)
+                    .map(|e| e.label().to_owned())
+                    .or_else(|| {
+                        // A storey (the levels check) is a spatial node, not an element.
+                        m.storeys()
+                            .into_iter()
+                            .find(|n| n.express_id == key.express_id)
+                            .map(|n| n.label().to_owned())
+                    })
+                    .unwrap_or_else(fallback)
             };
             let storeys = |elements: &[ElementKey]| {
                 let names: BTreeSet<&str> = elements

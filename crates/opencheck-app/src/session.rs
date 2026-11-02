@@ -58,6 +58,11 @@ struct SavedCamera {
     eye: [f64; 3],
     yaw: f32,
     pitch: f32,
+    /// A parallel view, and the distance that gives its scale.
+    #[serde(default)]
+    ortho: bool,
+    #[serde(default)]
+    ortho_distance: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +124,8 @@ pub fn capture_view(
             eye: to_world(origin, camera.eye),
             yaw: camera.yaw,
             pitch: camera.pitch,
+            ortho: camera.ortho,
+            ortho_distance: camera.ortho_distance,
         }),
         xray: view.xray,
         show_spaces: view.show_spaces,
@@ -169,6 +176,10 @@ pub fn apply_view(
         camera.eye = from_world(origin, c.eye);
         camera.yaw = c.yaw;
         camera.pitch = c.pitch;
+        camera.ortho = c.ortho;
+        if c.ortho {
+            camera.ortho_distance = c.ortho_distance.max(0.5);
+        }
     }
     view.xray = saved.xray;
     view.show_spaces = saved.show_spaces;

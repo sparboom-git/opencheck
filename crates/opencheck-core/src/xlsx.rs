@@ -199,21 +199,10 @@ fn column_index(name: &str) -> usize {
         .saturating_sub(1)
 }
 
+/// Text for an XML element or attribute: the same escaping as Word's files,
+/// without the control characters XML does not allow.
 fn esc(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            // Control characters other than tab and line ends are not
-            // allowed in XML.
-            c if (c as u32) < 0x20 && !matches!(c, '\t' | '\n' | '\r') => {}
-            c => out.push(c),
-        }
-    }
-    out
+    crate::docx::escape(text)
 }
 
 fn unesc(text: &str) -> String {
@@ -718,12 +707,15 @@ struct Shift {
     added: i64,
 }
 
-/// Where row `row` ends up. The end of a range on a repeated row covers the
-/// repeated rows.
-fn moved(row: u32, shifts: &[Shift], end_of_range: bool) -> u32 {
+/// Where row `row` ends up. `range_start`: the first row of the range this
+/// row ends, if it ends one. A range that starts above a repeated row and
+/// ends on it grows to cover the repeated rows; a range within the row
+/// itself (a merged cell, a validation of that row) stays on the first
+/// copy, so the copies below are not hidden behind it.
+fn moved(row: u32, shifts: &[Shift], range_start: Option<u32>) -> u32 {
     let delta: i64 = shifts
         .iter()
-        .filter(|s| s.row < row || (end_of_range && s.row == row))
+        .filter(|s| s.row < row || (s.row == row && range_start.is_some_and(|start| start < s.row)))
         .map(|s| s.added)
         .sum();
     (row as i64 + delta).max(1) as u32
@@ -740,6 +732,8 @@ fn shift_refs(text: &str, shifts: &[Shift]) -> String {
     let mut out = String::new();
     let mut k = 0;
     let mut in_quote = false;
+    // The row of the reference just before, for the end of a range.
+    let mut last_row: Option<u32> = None;
     while k < chars.len() {
         let c = chars[k].1;
         if c == '\'' {
@@ -771,8 +765,10 @@ fn shift_refs(text: &str, shifts: &[Shift]) -> String {
             let end = j.max(k + 1);
             if is_ref {
                 let row: u32 = text[byte(digits)..byte(j)].parse().unwrap_or(0);
+                let range_start = if prev == Some(':') { last_row } else { None };
                 out.push_str(&text[byte(k)..byte(digits)]);
-                out.push_str(&moved(row, shifts, prev == Some(':')).to_string());
+                out.push_str(&moved(row, shifts, range_start).to_string());
+                last_row = Some(row);
             } else {
                 out.push_str(&text[byte(k)..byte(end)]);
             }
@@ -888,7 +884,7 @@ fn fill_sheet(xml: &str, shared: &[String], data: &Data) -> (String, Vec<Shift>,
                 .collect(),
             None => vec![None],
         };
-        let first = moved(row, &shifts, false);
+        let first = moved(row, &shifts, None);
         for (k, item) in items.iter().enumerate() {
             let r = first + k as u32;
             let mut written = String::new();
@@ -1365,6 +1361,11 @@ mod tests {
         );
         assert_eq!(shift_refs("A5", &shifts), "A5");
         assert_eq!(shift_refs("ÆØ A9", &shifts), "ÆØ A11");
+        // A merged cell or a validation on the repeated row itself stays on
+        // its first copy; a range from above still grows over the copies.
+        assert_eq!(shift_refs("A5:B5", &shifts), "A5:B5");
+        assert_eq!(shift_refs("A5:B6", &shifts), "A5:B8");
+        assert_eq!(shift_refs("A2:B5 D5:E5", &shifts), "A2:B7 D5:E5");
     }
 
     fn template() -> Vec<u8> {

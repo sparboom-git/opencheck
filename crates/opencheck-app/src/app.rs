@@ -1296,7 +1296,10 @@ impl OpenCheckApp {
             let region = entries
                 .iter()
                 .fold(Aabb::EMPTY, |acc, e| acc.union(&e.region));
+            // Framed in perspective, whatever view the reviewer is in: a
+            // parallel view would put the eye far behind the model.
             let mut camera = self.camera;
+            camera.ortho = false;
             camera.fit(&finding_frame(&region), self.nav.aspect);
             (
                 (origin + region.center().as_dvec3()).to_array(),
@@ -1304,6 +1307,8 @@ impl OpenCheckApp {
                     eye: (origin + camera.eye.as_dvec3()).to_array(),
                     yaw: camera.yaw,
                     pitch: camera.pitch,
+                    ortho: false,
+                    ortho_distance: 0.0,
                 },
             )
         };
@@ -1454,6 +1459,11 @@ impl OpenCheckApp {
             self.camera.eye = (glam::DVec3::from_array(c.eye) - origin).as_vec3();
             self.camera.yaw = c.yaw;
             self.camera.pitch = c.pitch;
+            self.camera.ortho = c.ortho;
+            if c.ortho {
+                self.camera.ortho_distance = c.ortho_distance.max(0.5);
+            }
+            self.camera.update_clip_planes(&self.scene_bounds);
         }
         // The rest of the viewpoint: section, context and hidden elements.
         self.view.section = issue.section.map(|s| s.plane(origin));
@@ -1483,6 +1493,12 @@ impl OpenCheckApp {
                 eye: (origin + self.camera.eye.as_dvec3()).to_array(),
                 yaw: self.camera.yaw,
                 pitch: self.camera.pitch,
+                ortho: self.camera.ortho,
+                ortho_distance: if self.camera.ortho {
+                    self.camera.ortho_distance
+                } else {
+                    0.0
+                },
             },
             section: self
                 .view

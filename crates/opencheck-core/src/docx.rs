@@ -133,6 +133,9 @@ pub fn escape(text: &str) -> String {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
+            // Control characters other than tab and line ends are not
+            // allowed in XML 1.0; Word refuses a document with one.
+            c if (c as u32) < 0x20 && !matches!(c, '\t' | '\n' | '\r') => {}
             c => out.push(c),
         }
     }
@@ -1250,6 +1253,16 @@ pub fn png_size(png: &[u8]) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn escaping_drops_characters_xml_does_not_allow() {
+        assert_eq!(
+            escape("a\u{0B}b & <c> \"d\""),
+            "ab &amp; &lt;c&gt; &quot;d&quot;"
+        );
+        assert_eq!(escape("tab\tline\nend\r"), "tab\tline\nend\r");
+        assert_eq!(escape("Ø160 \u{1F}x\u{0}"), "Ø160 x");
+    }
 
     #[test]
     fn xml_round_trip_keeps_text_and_attributes() {

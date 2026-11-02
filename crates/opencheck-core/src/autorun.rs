@@ -570,17 +570,30 @@ pub fn visual_findings(
                 .elements
                 .iter()
                 .filter_map(|k| {
-                    let element = federation.get(k.model)?.element(k.express_id)?;
+                    let model = federation.get(k.model)?;
                     let (discipline, file) = model_info(k.model);
-                    Some((
+                    let object = if let Some(element) = model.element(k.express_id) {
                         RunObject {
                             global_id: element.global_id.clone(),
                             class: element.ifc_class.clone(),
                             name: element.name.clone(),
                             file,
-                        },
-                        discipline,
-                    ))
+                        }
+                    } else {
+                        // A storey (the levels check): known by its name,
+                        // which is what stays the same between runs.
+                        let storey = model
+                            .storeys()
+                            .into_iter()
+                            .find(|n| n.express_id == k.express_id)?;
+                        RunObject {
+                            global_id: format!("storey:{}", storey.label()),
+                            class: storey.ifc_class.clone(),
+                            name: storey.label().to_owned(),
+                            file,
+                        }
+                    };
+                    Some((object, discipline))
                 })
                 .collect();
             let (first, d1) = objects.first()?.clone();

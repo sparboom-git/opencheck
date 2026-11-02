@@ -799,7 +799,7 @@ fn export(app: &mut OpenCheckApp, shown: usize, format: Format) {
     let name = format!(
         "{}-{}-rev{}.{extension}",
         clean(&project),
-        clean(&report.name),
+        clean(report.name_for(rev)),
         clean(&rev.label)
     );
     let template = match crate::typeset::template(app.report_template.as_ref()) {
@@ -1034,7 +1034,8 @@ fn draft_view(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                     ui.label(
                         RichText::new(format!(
                             "{} · Konsistens- og kollisionskontrol · Revision {}",
-                            report.name, rev.label
+                            report.name_for(rev),
+                            rev.label
                         ))
                         .color(MUTED),
                     );
@@ -1114,7 +1115,7 @@ fn preview_block(
     let snapshot = &rev.snapshot;
     match block.kind {
         BlockKind::Intro => {
-            let intro = &report.intro;
+            let intro = report.intro_for(rev);
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
             egui::Grid::new(("pv_intro", number))
                 .num_columns(2)
@@ -1559,8 +1560,8 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                 )
                 .fill(theme::accent());
                 if ui.add(issue).clicked() {
-                    if let Some(rev) = draft(app) {
-                        rev.issued = Some(crate::reports::Issued {
+                    if let Some(report) = app.reports.list.get_mut(app.reports.selected) {
+                        report.issue_draft(crate::reports::Issued {
                             date: opencheck_core::project::now_rfc3339(),
                             by: by.trim().to_owned(),
                             note: note.trim().to_owned(),
@@ -1623,8 +1624,8 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                     .button(format!("Lock {label}, then a new revision"))
                     .clicked()
                 {
-                    if let Some(rev) = draft(app) {
-                        rev.issued = Some(crate::reports::Issued {
+                    if let Some(report) = app.reports.list.get_mut(app.reports.selected) {
+                        report.issue_draft(crate::reports::Issued {
                             date: opencheck_core::project::now_rfc3339(),
                             ..Default::default()
                         });

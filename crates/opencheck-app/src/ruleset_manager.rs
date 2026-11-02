@@ -566,8 +566,7 @@ fn project_editor(app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize) {
     });
 
     if changed {
-        let entry = &mut app.checking.rulesets[index];
-        entry.text = entry.ruleset.to_toml();
+        app.checking.rulesets[index].sync_text();
         app.checking.stale = true;
         app.session.dirty = true;
     }

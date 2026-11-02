@@ -11,6 +11,8 @@
 
 use std::collections::BTreeMap;
 
+use super::ElementKey;
+
 use serde::{Deserialize, Serialize};
 
 use super::{Category, ERROR, LevelLine, Problem, VisualModel, VisualOutcome, palette};
@@ -34,7 +36,9 @@ impl Default for LevelRule {
     fn default() -> Self {
         Self {
             disciplines: Discipline::ALL.to_vec(),
-            tolerance_mm: 0.0,
+            // Storeys this close are one level: exporters round heights
+            // differently, and a placement is a product of matrices.
+            tolerance_mm: 10.0,
             master: String::new(),
         }
     }
@@ -43,6 +47,9 @@ impl Default for LevelRule {
 /// One storey of one model.
 struct Storey {
     model: usize,
+    /// The storey itself (a spatial node, not an element): the subject of
+    /// a problem, so autorun can keep it as a finding.
+    key: ElementKey,
     name: String,
     /// Height as the model states it (the IFC world frame), metres.
     z: f64,
@@ -95,6 +102,7 @@ pub(super) fn run(rule: &LevelRule, models: &[VisualModel]) -> VisualOutcome {
                 {
                     storeys.push(Storey {
                         model: index,
+                        key: m.key(node.express_id),
                         name: node.label().to_owned(),
                         z: z * scale,
                         shared: m.world_height(z * scale),
@@ -167,7 +175,7 @@ pub(super) fn run(rule: &LevelRule, models: &[VisualModel]) -> VisualOutcome {
                 if let Some(text) = text {
                     wrong[i] = true;
                     outcome.problems.push(Problem {
-                        elements: Vec::new(),
+                        elements: vec![s.key],
                         severity: Severity::Moderate,
                         text,
                         value: Some(s.z),
@@ -193,7 +201,7 @@ pub(super) fn run(rule: &LevelRule, models: &[VisualModel]) -> VisualOutcome {
                         .map(|&i| format!("{} ({})", storeys[i].name, label[storeys[i].model]))
                         .collect();
                     outcome.problems.push(Problem {
-                        elements: Vec::new(),
+                        elements: level.iter().map(|&i| storeys[i].key).collect(),
                         severity: Severity::Low,
                         text: format!(
                             "{:+.3}: different names: {}",
@@ -223,7 +231,7 @@ pub(super) fn run(rule: &LevelRule, models: &[VisualModel]) -> VisualOutcome {
                         .map(|&i| format!("{:+.3} ({})", storeys[i].z, label[storeys[i].model]))
                         .collect();
                     outcome.problems.push(Problem {
-                        elements: Vec::new(),
+                        elements: list.iter().map(|&i| storeys[i].key).collect(),
                         severity: Severity::Moderate,
                         text: format!(
                             "{}: different heights: {}",

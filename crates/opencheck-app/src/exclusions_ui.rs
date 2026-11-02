@@ -546,6 +546,8 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
         }
     });
     if changed {
+        // The ruleset's text is what the project saves and autorun reads.
+        app.checking.rulesets[index].sync_text();
         app.checking.stale = true;
         app.session.dirty = true;
     }

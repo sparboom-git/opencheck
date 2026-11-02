@@ -273,7 +273,7 @@ impl Writer {
         let snapshot = &rev.snapshot;
         match block.kind {
             BlockKind::Intro => {
-                let intro = &report.intro;
+                let intro = report.intro_for(rev);
                 let date_text = rev
                     .issued
                     .as_ref()

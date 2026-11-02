@@ -216,7 +216,7 @@ pub fn main(layout: &Layout, report: &Report, index: usize) -> String {
         s(&format!(
             "{} – {}",
             field(&fields, "project"),
-            report.name.trim()
+            field(&fields, "report")
         ))
     ));
 
@@ -552,7 +552,7 @@ pub fn values(report: &Report, index: usize) -> Vec<(&'static str, String)> {
     let Some(rev) = report.revisions.get(index) else {
         return Vec::new();
     };
-    let intro = &report.intro;
+    let intro = report.intro_for(rev);
     let project = if rev.snapshot.project.trim().is_empty() {
         "Projekt".to_owned()
     } else {
@@ -560,7 +560,7 @@ pub fn values(report: &Report, index: usize) -> Vec<(&'static str, String)> {
     };
     vec![
         ("project", project),
-        ("report", report.name.trim().to_owned()),
+        ("report", report.name_for(rev).trim().to_owned()),
         ("revision", rev.label.clone()),
         (
             "date",
@@ -684,7 +684,7 @@ fn block_typst(
     let snapshot = &rev.snapshot;
     match block.kind {
         BlockKind::Intro => {
-            let intro = &report.intro;
+            let intro = report.intro_for(rev);
             let date_text = rev
                 .issued
                 .as_ref()

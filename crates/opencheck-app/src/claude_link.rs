@@ -68,12 +68,23 @@ pub struct Link {
     server: Option<Server>,
 }
 
+/// Settings keys of the two permissions, kept between sessions.
+const PROPERTIES_SETTING: &str = "claude_share_properties";
+const ISSUES_SETTING: &str = "claude_make_issues";
+
+fn saved_flag(key: &str, default: bool) -> bool {
+    crate::settings::get(key)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(default)
+}
+
 impl Default for Link {
     fn default() -> Self {
         Self {
             open: false,
-            properties: true,
-            issues: true,
+            properties: saved_flag(PROPERTIES_SETTING, true),
+            // Writing is off until the user allows it, and the choice is kept.
+            issues: saved_flag(ISSUES_SETTING, false),
             log: VecDeque::new(),
             last_call: None,
             status: String::new(),
@@ -1368,14 +1379,26 @@ fn form(app: &mut OpenCheckApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     if !status.is_empty() {
         ui.label(RichText::new(status).small().color(theme::text_muted()));
     }
-    ui.checkbox(&mut app.claude.issues, "Let Claude make issues")
+    if ui
+        .checkbox(&mut app.claude.issues, "Let Claude make issues")
         .on_hover_text(
-            "Issues Claude makes are shown as issued by Claude; filter the issue list to see them",
-        );
-    ui.checkbox(&mut app.claude.properties, "Share element properties")
+            "Off unless you allow it; the choice is kept. Issues Claude makes are shown as \
+             issued by Claude; filter the issue list to see them",
+        )
+        .changed()
+    {
+        crate::settings::set(ISSUES_SETTING, json!(app.claude.issues));
+    }
+    if ui
+        .checkbox(&mut app.claude.properties, "Share element properties")
         .on_hover_text(
-            "Off: Claude sees classes, names, types, systems and sizes, but no property sets",
-        );
+            "Off: Claude sees classes, names, types, systems and sizes, but no property sets. \
+             The choice is kept",
+        )
+        .changed()
+    {
+        crate::settings::set(PROPERTIES_SETTING, json!(app.claude.properties));
+    }
     ui.label(
         RichText::new(
             "What Claude reads (names, systems, properties, pictures of the 3D view) is sent \
