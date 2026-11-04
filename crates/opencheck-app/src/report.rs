@@ -28,17 +28,17 @@ pub const TEMPLATE_SETTING: &str = "report_template";
 pub const FIELDS: &[(&str, &str)] = &[
     ("project", "Project name"),
     ("report", "Report name"),
-    ("revision", "Revision label, e.g. A"),
+    ("revision", "Revision label, e.g. A; – while none"),
     (
         "date",
-        "Date of the revision (issued, or created while a draft)",
+        "Date of the revision, as typed; else issued, or created while a draft",
     ),
     ("status", "Udsendt or Kladde"),
     ("prepared_by", "Prepared by"),
     ("checked_by", "Checked by"),
     ("company", "Company"),
     ("disciplines", "Disciplines"),
-    ("phase", "Phase"),
+    ("phase", "Phase, e.g. Projektforslag (PF)"),
     ("data_date", "Date the data was taken from the check"),
     ("today", "Date of the export"),
     ("opencheck", "OpenCheck version"),
@@ -171,6 +171,38 @@ const SHAPES: &str = r##"
         image(p, width: 100%, height: 6.5cm, fit: "contain")))))
   }
 })
+#let fill-color(rate, accepted) = if accepted { rgb("#2662b0") } else if rate >= 0.999 { rgb("#1e7a4c") } else if rate >= 0.5 { rgb("#e08a1e") } else { rgb("#d64541") }
+#let fill-bar(rate, accepted) = box(width: 2.2cm, height: 5pt, fill: luma(225), radius: 2pt,
+  align(left + horizon, box(width: 100% * calc.max(calc.min(rate, 1), 0.02), height: 5pt,
+    fill: fill-color(rate, accepted), radius: 2pt)))
+// Marks an item read from the geometry, not from a property.
+#let geo-mark = box(baseline: 0.5pt, polygon(stroke: 0.7pt + muted, (0pt, 5.5pt), (6pt, 5.5pt), (3pt, 0pt)))
+// An information check: how it was done and a table per model with its
+// building parts and, under each, the items.
+#let info-card(title, rows, about, notes, geo-note, tables) = block(
+  width: 100%, stroke: (left: 3pt + accent, rest: 0.5pt + luma(205)), radius: 4pt,
+  inset: 9pt, above: 10pt, {
+  block(breakable: false, below: 8pt, text(weight: "bold", size: 1.05em, title))
+  facts(rows)
+  if about.len() > 0 { paragraphs(about) }
+  for note in notes { par(text(fill: rgb("#e08a1e"), note)) }
+  if geo-note != none { par[#geo-mark #geo-note] }
+  for (file, elements, percent, rate, accepted, items) in tables {
+    block(above: 8pt, {
+      set text(size: 0.85em)
+      table(columns: (1fr, auto, auto, auto), align: (left, right, right, left),
+        stroke: (x: none, y: 0.5pt + luma(215)),
+        table.header([#text(weight: "bold", file) #h(4pt) #text(fill: muted, elements)], [],
+          text(weight: "bold", percent), fill-bar(rate, accepted)),
+        ..items.map(((label, sub, count, pct, r, acc, geo)) => (
+          if sub { [#h(10pt)#label#if geo [ #geo-mark]] } else { text(weight: "semibold", label) },
+          text(fill: muted, count),
+          if acc { text(fill: rgb("#2662b0"), weight: "semibold", pct) } else { pct },
+          fill-bar(r, acc),
+        )).flatten())
+    })
+  }
+})
 #let none-text = text(fill: muted, style: "italic", "Ingen emner.")
 #let issue-card(number, title, code, note, picture, rows, description, components) = block(
   width: 100%, stroke: 0.5pt + luma(205), radius: 4pt, inset: 9pt, above: 10pt, {
@@ -205,7 +237,7 @@ const SHAPES: &str = r##"
 /// The Typst document of a Word template: its page, header and footer,
 /// styles and text, with fields filled in and `{{revisions}}` and
 /// `{{content}}` including those parts.
-pub fn main(layout: &Layout, report: &Report, index: usize) -> String {
+pub fn main(layout: &Layout, report: &Report, index: usize, watermark: bool) -> String {
     let fields = values(report, index);
     let styles = &layout.styles;
     let normal = styles.para_style(None);
@@ -267,9 +299,19 @@ pub fn main(layout: &Layout, report: &Report, index: usize) -> String {
             None => shape(default),
         }
     };
+    // A trial print: the watermark across every page, behind the text.
+    let background = if watermark {
+        format!(
+            "place(center + horizon, rotate(-35deg, text(size: 64pt, weight: \"bold\", fill: luma(214), {})))",
+            s(crate::reports::PRELIMINARY_DA)
+        )
+    } else {
+        "none".to_owned()
+    };
     t.push_str(&format!(
         "#set page(width: {}pt, height: {}pt, margin: (top: {top}pt, bottom: {bottom}pt, left: {}pt, right: {}pt),
            header-ascent: 0pt, footer-descent: 0pt,
+  background: {background},
   header: {},
   footer: {})
 ",
@@ -561,13 +603,8 @@ pub fn values(report: &Report, index: usize) -> Vec<(&'static str, String)> {
     vec![
         ("project", project),
         ("report", report.name_for(rev).trim().to_owned()),
-        ("revision", rev.label.clone()),
-        (
-            "date",
-            rev.issued
-                .as_ref()
-                .map_or_else(|| date(&rev.created), |i| date(&i.date)),
-        ),
+        ("revision", rev.label_text().to_owned()),
+        ("date", rev.date_text()),
         (
             "status",
             if rev.issued.is_some() {
@@ -581,7 +618,7 @@ pub fn values(report: &Report, index: usize) -> Vec<(&'static str, String)> {
         ("checked_by", intro.checked_by.trim().to_owned()),
         ("company", intro.company.trim().to_owned()),
         ("disciplines", intro.disciplines.trim().to_owned()),
-        ("phase", intro.phase.trim().to_owned()),
+        ("phase", crate::reports::phase_name(report.phase_for(rev))),
         ("data_date", date(&rev.snapshot.taken)),
         ("today", date(&opencheck_core::project::now_rfc3339())),
         ("opencheck", rev.snapshot.opencheck.clone()),
@@ -590,7 +627,11 @@ pub fn values(report: &Report, index: usize) -> Vec<(&'static str, String)> {
 
 /// The files next to the filled-in template (`opencheck.typ`,
 /// `revisions.typ` and `content.typ`) and the hashes of the pictures used.
-pub fn parts(report: &Report, index: usize) -> (Vec<(&'static str, String)>, Vec<String>) {
+pub fn parts(
+    report: &Report,
+    index: usize,
+    page: &docx::Page,
+) -> (Vec<(&'static str, String)>, Vec<String>) {
     let Some(rev) = report.revisions.get(index) else {
         return (Vec::new(), Vec::new());
     };
@@ -602,7 +643,7 @@ pub fn parts(report: &Report, index: usize) -> (Vec<(&'static str, String)>, Vec
     shared.push_str(SHAPES);
 
     let mut revisions = String::from("#import \"/opencheck.typ\": *\n");
-    revision_table(&mut revisions, &report.revisions[..=index]);
+    revision_table(&mut revisions, report, &report.revisions[..=index]);
 
     let mut content = String::from("#import \"/opencheck.typ\": *\n");
     let mut pictures = Vec::new();
@@ -627,7 +668,7 @@ pub fn parts(report: &Report, index: usize) -> (Vec<(&'static str, String)>, Vec
                 s(&format!("{number} {}", block.heading.trim()))
             ));
         }
-        block_typst(&mut content, report, rev, block, &mut pictures);
+        block_typst(&mut content, report, rev, block, page, &mut pictures);
     }
     pictures.sort();
     pictures.dedup();
@@ -641,22 +682,23 @@ pub fn parts(report: &Report, index: usize) -> (Vec<(&'static str, String)>, Vec
     )
 }
 
-/// The revisions up to the one shown, newest first: label, date, issued by,
-/// change.
-fn revision_table(t: &mut String, revisions: &[Revision]) {
+/// The revisions up to the one shown, newest first: phase, label, date,
+/// issued by, change.
+fn revision_table(t: &mut String, report: &Report, revisions: &[Revision]) {
     t.push_str(
-        "#table(columns: (auto, auto, auto, 1fr),\n  table.header[Revision][Dato][Udsendt af][Ændring],\n",
+        "#table(columns: (auto, auto, auto, auto, 1fr),\n  table.header[Fase][Revision][Dato][Udsendt af][Ændring],\n",
     );
     for r in revisions.iter().rev() {
-        let (when, by, note) = match &r.issued {
-            Some(i) => (date(&i.date), s(&i.by), s(&i.note)),
-            None => (
-                date(&r.created),
-                "text(fill: muted, \"kladde\")".to_owned(),
-                "[]".to_owned(),
-            ),
+        let (by, note) = match &r.issued {
+            Some(i) => (s(&i.by), s(&i.note)),
+            None => ("text(fill: muted, \"kladde\")".to_owned(), "[]".to_owned()),
         };
-        t.push_str(&format!("  {}, {}, {by}, {note},\n", s(&r.label), s(&when)));
+        t.push_str(&format!(
+            "  {}, {}, {}, {by}, {note},\n",
+            or_dash(report.phase_for(r)),
+            s(r.label_text()),
+            or_dash(&r.date_text())
+        ));
     }
     t.push_str(")\n");
 }
@@ -674,38 +716,54 @@ fn paragraphs(t: &mut String, text: &str) {
     }
 }
 
+/// The block's text and the pictures added to it, each sized to the text
+/// column (see [`crate::reports::picture_box`]).
+fn body(t: &mut String, block: &Block, page: &docx::Page, pictures: &mut Vec<String>) {
+    paragraphs(t, &block.body);
+    let text_width = page.width - page.left - page.right;
+    let max_height = (page.height - page.top - page.bottom) * 0.55;
+    for p in &block.pictures {
+        pictures.push(p.hash.clone());
+        let (w, h) = crate::reports::picture_box((p.width, p.height), text_width, max_height);
+        t.push_str(&format!(
+            "#block(above: 6pt, below: 10pt, image({}, width: {w:.1}pt, height: {h:.1}pt))\n",
+            s(&picture_path(&p.hash))
+        ));
+    }
+}
+
 fn block_typst(
     t: &mut String,
     report: &Report,
     rev: &Revision,
     block: &Block,
+    page: &docx::Page,
     pictures: &mut Vec<String>,
 ) {
     let snapshot = &rev.snapshot;
     match block.kind {
         BlockKind::Intro => {
             let intro = report.intro_for(rev);
-            let date_text = rev
-                .issued
-                .as_ref()
-                .map_or_else(|| date(&rev.created), |i| date(&i.date));
             let mut rows = vec![("Udarbejdet af", or_dash(&intro.prepared_by))];
             if !intro.checked_by.trim().is_empty() {
                 rows.push(("Kontrolleret af", s(intro.checked_by.trim())));
             }
             rows.extend([
                 ("Firma", or_dash(&intro.company)),
-                ("Dato", s(&date_text)),
-                ("Revision", s(&rev.label)),
+                ("Dato", or_dash(&rev.date_text())),
+                ("Revision", s(rev.label_text())),
                 ("Fag", or_dash(&intro.disciplines)),
-                ("Fase", or_dash(&intro.phase)),
+                (
+                    "Fase",
+                    or_dash(&crate::reports::phase_name(report.phase_for(rev))),
+                ),
             ]);
             facts(t, &rows);
-            paragraphs(t, &block.body);
+            body(t, block, page, pictures);
         }
-        BlockKind::Text => paragraphs(t, &block.body),
+        BlockKind::Text => body(t, block, page, pictures),
         BlockKind::Models => {
-            paragraphs(t, &block.body);
+            body(t, block, page, pictures);
             t.push_str(
                 "#table(columns: (1fr, auto, auto, auto),\n  table.header[Bygningsmodel (filnavn)][Fag][Version][Virksomhed],\n",
             );
@@ -738,10 +796,10 @@ fn block_typst(
                     snapshot.opencheck
                 ))
             ));
-            paragraphs(t, &block.body);
+            body(t, block, page, pictures);
         }
         BlockKind::Visual => {
-            paragraphs(t, &block.body);
+            body(t, block, page, pictures);
             let checks = block.checks(snapshot);
             if checks.is_empty() {
                 t.push_str(
@@ -754,8 +812,20 @@ fn block_typst(
                 check_card(t, c);
             }
         }
+        BlockKind::Information => {
+            body(t, block, page, pictures);
+            let docs = block.information(snapshot);
+            if docs.is_empty() {
+                t.push_str(
+                    "#text(fill: muted, style: \"italic\", \"Ingen kontrol af informationsniveau i denne revision.\")\n",
+                );
+            }
+            for d in docs {
+                info_card(t, d);
+            }
+        }
         BlockKind::Properties | BlockKind::Geometry | BlockKind::Clashes | BlockKind::Issues => {
-            paragraphs(t, &block.body);
+            body(t, block, page, pictures);
             let issues = block.issues(snapshot);
             if issues.is_empty() {
                 t.push_str("#none-text\n");
@@ -848,6 +918,117 @@ fn check_card(t: &mut String, c: &crate::check_docs::CheckDoc) {
         list(&legend),
         list(&table),
         list(&pictures),
+    ));
+}
+
+/// An information check: how it was done and its fill rates per model.
+fn info_card(t: &mut String, d: &crate::reports::InfoDoc) {
+    use crate::reports::percent;
+    let levels = if d.levels.is_empty() {
+        None
+    } else {
+        let mut distinct: Vec<&str> = d.levels.iter().map(|(_, l)| l.as_str()).collect();
+        distinct.sort_unstable();
+        distinct.dedup();
+        Some(if distinct.len() == 1 {
+            distinct[0].to_owned()
+        } else {
+            d.levels
+                .iter()
+                .map(|(m, l)| format!("{m} {l}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+    };
+    let elements: usize = d.models.iter().map(|m| m.elements).sum();
+    let mut rows = vec![("Kontrol", s(&d.rule)), ("Grundlag", s(&d.standard))];
+    if let Some(levels) = levels {
+        rows.push(("Niveau", s(&levels)));
+    }
+    rows.push((
+        "Omfang",
+        s(&crate::reports::scope_da(
+            elements,
+            d.models.len(),
+            d.findings,
+        )),
+    ));
+    let rows: Vec<String> = rows
+        .iter()
+        .map(|(k, v)| format!("({}, {v})", s(k)))
+        .collect();
+    let texts: Vec<String> = d
+        .about
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(s)
+        .collect();
+    let notes: Vec<String> = d.notes.iter().map(|n| s(n)).collect();
+    let list = |items: &[String]| {
+        if items.is_empty() {
+            "()".to_owned()
+        } else {
+            format!("({},)", items.join(", "))
+        }
+    };
+    let tables: Vec<String> = d
+        .models
+        .iter()
+        .map(|m| {
+            let mut items = Vec::new();
+            for p in &m.parts {
+                items.push(format!(
+                    "({}, false, {}, {}, {:.3}, {}, false)",
+                    s(&p.name),
+                    s(&format!("{} elementer", p.elements)),
+                    s(&percent(p.filled, p.values)),
+                    crate::reports::fill_rate(p.filled, p.values),
+                    p.has_accepted() && p.filled >= p.values
+                ));
+                for i in &p.items {
+                    items.push(format!(
+                        "({}, true, {}, {}, {:.3}, {}, {})",
+                        s(&i.name),
+                        s(&format!("{}/{}", i.present, i.required)),
+                        s(&if i.accepted {
+                            "OK".to_owned()
+                        } else {
+                            percent(i.present, i.required)
+                        }),
+                        if i.accepted {
+                            1.0
+                        } else {
+                            crate::reports::fill_rate(i.present, i.required)
+                        },
+                        i.accepted,
+                        i.geometry > 0
+                    ));
+                }
+            }
+            format!(
+                "({}, {}, {}, {:.3}, {}, {})",
+                s(&m.name),
+                s(&format!("{} elementer", m.elements)),
+                s(&percent(m.filled, m.values)),
+                crate::reports::fill_rate(m.filled, m.values),
+                m.has_accepted() && m.filled >= m.values,
+                list(&items)
+            )
+        })
+        .collect();
+    let geo_note = if d.has_geometry() {
+        s(crate::reports::GEOMETRY_NOTE_DA)
+    } else {
+        "none".to_owned()
+    };
+    t.push_str(&format!(
+        "#info-card({}, {}, {}, {}, {geo_note}, {})\n",
+        s(&d.title),
+        list(&rows),
+        list(&texts),
+        list(&notes),
+        list(&tables),
     ));
 }
 
@@ -1063,7 +1244,7 @@ mod tests {
             .unwrap();
         assert!((layout.page.width - 595.3).abs() < 0.1);
         assert!(layout.title_page);
-        let main = main(&layout, &report(), 0);
+        let main = main(&layout, &report(), 0, false);
         assert!(main.contains("#include \"/content.typ\""));
         assert!(main.contains("#include \"/revisions.typ\""));
         assert!(
@@ -1077,7 +1258,7 @@ mod tests {
 
     #[test]
     fn writes_the_parts_of_a_revision() {
-        let (files, pictures) = parts(&report(), 0);
+        let (files, pictures) = parts(&report(), 0, &docx::Page::default());
         let content = &files.iter().find(|(n, _)| *n == "content.typ").unwrap().1;
         assert!(content.contains("#heading(level: 1, \"1 Indledning\")"));
         assert!(content.contains("#heading(level: 2, \"2.1 Bygningsmodeller\")"));
@@ -1105,7 +1286,7 @@ Set fra siden."
                 pictures: vec!["h1".into()],
                 ..Default::default()
             });
-        let (files, pictures) = parts(&with_check, 0);
+        let (files, pictures) = parts(&with_check, 0, &docx::Page::default());
         let content = &files.iter().find(|(n, _)| *n == "content.typ").unwrap().1;
         assert!(
             content.contains("#check-card(\"Søjler over hinanden\", \"Godkendt\", \"#2E9E4A\"")
@@ -1114,7 +1295,7 @@ Set fra siden."
         assert_eq!(pictures, vec!["h1".to_owned()]);
         let mut report = report();
         report.revisions[0].blocks[3].new_page = true;
-        let (files, _) = parts(&report, 0);
+        let (files, _) = parts(&report, 0, &docx::Page::default());
         let content = &files.iter().find(|(n, _)| *n == "content.typ").unwrap().1;
         assert!(content.contains(
             "#pagebreak(weak: true)

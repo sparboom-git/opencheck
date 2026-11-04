@@ -290,8 +290,11 @@ fn check(
                 }
                 for part in &info.parts {
                     println!(
-                        "    {:<36} {:>5} elements, {:>5} complete",
-                        part.name, part.elements, part.complete
+                        "    {:<36} {:>5} elements, {:>5} complete, {:>4.0} % filled",
+                        part.name,
+                        part.elements,
+                        part.complete,
+                        part.fill_rate() * 100.0
                     );
                     for item in &part.items {
                         println!(
@@ -301,6 +304,9 @@ fn check(
                             item.required,
                             100.0 * item.present as f64 / item.required.max(1) as f64
                         );
+                        if item.accepted {
+                            println!("            accepted as missing");
+                        }
                         if !item.found_in.is_empty() {
                             let places: Vec<String> = item
                                 .found_in

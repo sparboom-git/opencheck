@@ -80,6 +80,12 @@ look…* opens an editor:
   material, system, storey or geometry. Names are matched exactly (case,
   spaces and underscores do not matter); tick *Pattern* to write a regular
   expression instead.
+- **Accept that the models lack the item** is a tick above *Last check*,
+  for the selected part or for all building parts. Some information is
+  agreed not to be in the models of a project; once accepted, elements
+  without it are not reported, and the fill rates show the item as *OK* in
+  a blue of its own, so it stays visible that it was accepted rather than
+  filled in. A tick next to an item on the left marks accepted items.
 - **Last check** shows where the item was found on how many elements, so a
   wrong parameter stands out.
 - **Elements** (right) lists the elements the item is checked on, missing
@@ -107,6 +113,9 @@ improvements to the built-in standard still reach the project:
 ```toml
 base = "opencheck.information.lod-dk"
 
+# Accepted as missing for all building parts.
+accepted = ["depth"]
+
 # For all building parts.
 [items]
 classification-code = [{ classification = true }, { property = "^CCSClassCode$" }]
@@ -114,6 +123,10 @@ classification-code = [{ classification = true }, { property = "^CCSClassCode$" 
 # For one part, by part id and item id.
 [parts.electrical-carrier]
 dimension = [{ property = "^Bredde$", pset = "^EL_Kabelbakke$" }]
+
+# Accepted as missing for one part, by part id.
+[accepted_parts]
+foundation = ["load-bearing"]
 ```
 
 Standard files can give parts their own sources directly, with the same
@@ -163,10 +176,26 @@ requirement added. See below for IDS files.
 
 ## Results
 
-The results panel shows the fill rate per building part (elements with all
-required information, and per item how many have it) and, per discipline and
-building part, every element with what it is missing. Findings can be turned
-into issues like any other; an issue then names the missing items.
+The results panel shows the fill rate per IFC file: a heading per file with
+its fill rate and, under it, the building parts checked in that file. Then,
+per discipline and building part, every element with what it is missing. A
+part's rate is
+the share of required values that are there, over all its items and
+elements: a part whose elements carry four of five items reads as 80 %, not
+as no element complete. Hovering over it gives the values and the elements
+that have everything; under it, each item shows how many elements have it.
+Items the project has accepted as missing count as in order and are shown
+as *OK* in blue, both for the item and in the part's bar. Findings can be
+turned into issues like any other; an issue then names the missing items.
+
+The overview goes into a report as the block *Afsnit: Informationsniveau*
+(in the default report right after *Egenskaber*, before *Geometri*).
+A revision freezes the checks of the last run: a short text on how the
+check was done, the standard and level, and the fill rates per IFC file and
+building part with every item listed, in the PDF, in Word and in the
+preview. Items read from the geometry rather than from a property (levels
+and positions) are marked with a small triangle, and a line under the
+description says so. Each check can be left out by hand.
 
 ## IDS files
 

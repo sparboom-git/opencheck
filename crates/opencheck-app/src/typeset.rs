@@ -174,10 +174,11 @@ pub struct Input {
 }
 
 impl Input {
-    /// Revision `index` of a report with a template.
-    pub fn new(report: &Report, index: usize, template: &Template) -> Self {
-        let main = crate::report::main(&template.layout, report, index);
-        let (parts, used) = crate::report::parts(report, index);
+    /// Revision `index` of a report with a template; `watermark`: a trial
+    /// print, "Foreløbigt tryk" across every page.
+    pub fn new(report: &Report, index: usize, template: &Template, watermark: bool) -> Self {
+        let main = crate::report::main(&template.layout, report, index, watermark);
+        let (parts, used) = crate::report::parts(report, index, &template.layout.page);
         let mut files: FxHashMap<String, Bytes> = parts
             .into_iter()
             .map(|(name, text)| (format!("/{name}"), Bytes::from_string(text)))
@@ -487,7 +488,7 @@ impl Preview {
         let Some((report, shown)) = app.reports.shown() else {
             return;
         };
-        let mut input = Input::new(report, shown, &template);
+        let mut input = Input::new(report, shown, &template, app.reports.preliminary);
         let key = input.key() ^ stamp;
         let preview = &mut app.reports.preview;
         if key != preview.key {
@@ -550,6 +551,57 @@ mod tests {
                         ],
                         ..Default::default()
                     }],
+                    information: vec![crate::reports::InfoDoc {
+                        id: "lod/fill".into(),
+                        title: "Information: LOD DK".into(),
+                        rule: "Fill rate per building part".into(),
+                        standard: "Informationskrav, LOD DK".into(),
+                        about: crate::reports::about_information_da(
+                            true,
+                            "Informationskrav, LOD DK",
+                            &[("ARK".into(), "LOD 300 DK".into())],
+                            true,
+                        ),
+                        levels: vec![("ARK".into(), "LOD 300 DK".into())],
+                        notes: vec!["En note \"med\" [tegn] #x".into()],
+                        models: vec![crate::reports::InfoModel {
+                            name: "ARK".into(),
+                            elements: 3,
+                            values: 6,
+                            filled: 5,
+                            parts: vec![crate::reports::InfoPart {
+                                name: "Væg".into(),
+                                elements: 3,
+                                complete: 2,
+                                values: 6,
+                                filled: 5,
+                                items: vec![
+                                    crate::reports::InfoItem {
+                                        name: "Bredde".into(),
+                                        present: 2,
+                                        required: 3,
+                                        accepted: false,
+                                        geometry: 0,
+                                    },
+                                    crate::reports::InfoItem {
+                                        name: "Dybde".into(),
+                                        present: 0,
+                                        required: 3,
+                                        accepted: true,
+                                        geometry: 0,
+                                    },
+                                    crate::reports::InfoItem {
+                                        name: "Kote".into(),
+                                        present: 3,
+                                        required: 3,
+                                        accepted: false,
+                                        geometry: 3,
+                                    },
+                                ],
+                            }],
+                        }],
+                        findings: 1,
+                    }],
                     ..Default::default()
                 },
                 ..Revision::default()
@@ -557,7 +609,7 @@ mod tests {
             ..Report::default()
         };
         let template = template(None).unwrap();
-        let pages = compile(Input::new(&report, 0, &template)).expect("typesets");
+        let pages = compile(Input::new(&report, 0, &template, false)).expect("typesets");
         assert!(!pages.doc.pages().is_empty());
         assert_eq!(pages.anchors.len(), default_blocks().len());
         assert!(pages.anchors.iter().all(Option::is_some));

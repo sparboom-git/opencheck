@@ -21,7 +21,9 @@ use regex::Regex;
 use rustc_hash::FxHashMap;
 
 use super::engine::{CheckJob, CheckModel, Finding, FindingElement, FindingKind, finding_id};
-use super::information::{InformationSummary, ItemCoverage, PartCoverage};
+use super::information::{
+    InformationSummary, ItemCoverage, ModelCoverage, PartCoverage, merge_parts, tidy_parts,
+};
 use super::ruleset::Rule;
 use crate::{Aabb, Element, IfcModel, PropertyValue};
 
@@ -1599,19 +1601,22 @@ pub(super) fn check_ids(
             })
             .collect();
         let mut elements_seen = rustc_hash::FxHashSet::default();
+        let mut model_parts: Vec<PartCoverage> = Vec::new();
 
         for (e, s, failures) in results {
             elements_seen.insert(e);
             applicable_count[s] += 1;
             let spec = &ids.specifications[s];
-            let coverage = match summary.parts.iter().position(|c| c.part == keys[s]) {
-                Some(i) => &mut summary.parts[i],
+            let coverage = match model_parts.iter().position(|c| c.part == keys[s]) {
+                Some(i) => &mut model_parts[i],
                 None => {
-                    summary.parts.push(PartCoverage {
+                    model_parts.push(PartCoverage {
                         part: keys[s].clone(),
                         name: spec.name.clone(),
                         elements: 0,
                         complete: 0,
+                        values: 0,
+                        filled: 0,
                         items: spec
                             .requirements
                             .iter()
@@ -1621,11 +1626,12 @@ pub(super) fn check_ids(
                                 name: requirement_name(f),
                                 required: 0,
                                 present: 0,
+                                accepted: false,
                                 found_in: Vec::new(),
                             })
                             .collect(),
                     });
-                    summary.parts.last_mut().expect("just pushed")
+                    model_parts.last_mut().expect("just pushed")
                 }
             };
             coverage.elements += 1;
@@ -1637,8 +1643,10 @@ pub(super) fn check_ids(
             }
             for (row, failure) in coverage.items.iter_mut().zip(&failures) {
                 row.required += 1;
+                coverage.values += 1;
                 if failure.is_none() {
                     row.present += 1;
+                    coverage.filled += 1;
                 }
             }
             if !failed {
@@ -1693,6 +1701,12 @@ pub(super) fn check_ids(
             });
         }
         checked += elements_seen.len();
+        merge_parts(&mut summary.parts, &model_parts);
+        summary.models.push(ModelCoverage {
+            model: check_model.id,
+            name: model.short_name.clone(),
+            parts: model_parts,
+        });
     }
 
     // Specifications that need applicable elements the models lack.
@@ -1718,9 +1732,11 @@ pub(super) fn check_ids(
             ));
         }
     }
-    summary
-        .parts
-        .sort_by_key(|c| keys.iter().position(|k| *k == c.part));
+    let order = |id: &str| keys.iter().position(|k| k == id);
+    tidy_parts(&mut summary.parts, order);
+    for model in &mut summary.models {
+        tidy_parts(&mut model.parts, order);
+    }
     (findings, summary, checked)
 }
 

@@ -21,9 +21,9 @@ pub use ids::{
 pub use ids_export::{IdsExport, standard_to_ids};
 pub use information::{
     BUILTIN_STANDARDS, BuildingPart, BuiltinStandard, InformationItem, InformationStandard,
-    InformationSummary, ItemCoverage, ModelFacts, PartCoverage, Source, StandardInfo,
-    StandardOverrides, builtin_standard, display_pattern, exact_name, exact_pattern, is_checked,
-    validate_sources,
+    InformationSummary, ItemCoverage, ModelCoverage, ModelFacts, PartCoverage, Source,
+    StandardInfo, StandardOverrides, builtin_standard, display_pattern, exact_name, exact_pattern,
+    is_checked, validate_sources,
 };
 pub use ruleset::{
     BUILTIN_RULESETS, Between, BuiltinRuleset, EXCLUDE_ATTRIBUTES, ExcludeOperator, Exclusion,

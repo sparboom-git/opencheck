@@ -329,6 +329,9 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
             ui.separator();
             ui.vertical(|ui| {
                 ui.set_width(right);
+                // Long element names and property values are cut short rather
+                // than widening the column, which would hold the window open.
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 ui.horizontal(|ui| {
                     ui.selectable_value(
                         &mut state.side,
@@ -419,8 +422,16 @@ fn item_list(
                 }
                 let changed = overrides.items.contains_key(&item.id)
                     || overrides.parts.values().any(|p| p.contains_key(&item.id));
+                let accepted = overrides.accepted.contains(&item.id)
+                    || overrides
+                        .accepted_parts
+                        .values()
+                        .any(|p| p.contains(&item.id));
                 let text = if changed {
                     RichText::new(format!("{}  {}", item.name, icon::PENCIL_SIMPLE)).strong()
+                } else if accepted {
+                    RichText::new(format!("{}  {}", item.name, icon::CHECK_CIRCLE))
+                        .color(crate::checking_ui::accepted_missing())
                 } else {
                     RichText::new(&item.name)
                 };
@@ -572,6 +583,7 @@ fn source_editor(
         }
     }
 
+    accept_missing(app, ui, state);
     found_in_last_check(app, ui, state, base);
     ui.add_space(6.0);
 
@@ -723,6 +735,37 @@ fn source_editor(
     });
 }
 
+/// A tick that accepts the item as missing in the models, for the selected
+/// part or for all parts. Elements without it raise no finding, and the
+/// fill rates show it as OK in its own colour.
+fn accept_missing(app: &mut OpenCheckApp, ui: &mut egui::Ui, state: &EditorState) {
+    let overrides = app.checking.overrides();
+    let part = state.part.as_deref();
+    let for_all = overrides.is_accepted(&state.item, None);
+    let mut accepted = for_all || overrides.is_accepted(&state.item, part);
+    let label = match part {
+        Some(_) if for_all => "Accepted as missing for all building parts",
+        Some(_) => "Accept that this part lacks the item",
+        None => "Accept that the models lack the item",
+    };
+    let response = ui
+        .add_enabled(
+            !(for_all && part.is_some()),
+            egui::Checkbox::new(&mut accepted, label),
+        )
+        .on_hover_text(
+            "The project agrees that this information need not be in the models. Elements \
+             without it are not reported, and the fill rates show the item as OK in another \
+             colour, so it stays visible that it was accepted rather than filled in. Saved \
+             with the project; takes effect from the next check.",
+        );
+    if response.changed() {
+        let mut overrides = overrides;
+        overrides.set_accepted(&state.item, part, accepted);
+        store(app, overrides);
+    }
+}
+
 /// Where the last check found the item, so a wrong parameter stands out.
 fn found_in_last_check(
     app: &OpenCheckApp,
@@ -758,6 +801,9 @@ fn found_in_last_check(
     if required == 0 {
         return;
     }
+    let overrides = app.checking.overrides();
+    let accepted = overrides.is_accepted(&state.item, None)
+        || overrides.is_accepted(&state.item, state.part.as_deref());
     let mut list: Vec<(&str, usize)> = found.into_iter().collect();
     list.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
     egui::CollapsingHeader::new(
@@ -776,7 +822,14 @@ fn found_in_last_check(
                     .monospace(),
             );
         }
-        if required > present {
+        if required > present && accepted {
+            ui.label(
+                RichText::new(format!("{:>6}  missing, accepted", required - present))
+                    .small()
+                    .monospace()
+                    .color(crate::checking_ui::accepted_missing()),
+            );
+        } else if required > present {
             ui.label(
                 RichText::new(format!("{:>6}  missing", required - present))
                     .small()
@@ -1003,9 +1056,14 @@ fn elements(app: &mut OpenCheckApp, ui: &mut egui::Ui, state: &mut EditorState) 
         }
     });
     if state.rows.is_some() {
+        let overrides = app.checking.overrides();
+        let accepted = overrides.is_accepted(&state.item, None)
+            || overrides.is_accepted(&state.item, state.part.as_deref());
         for (model, found, total) in &state.per_model {
             let color = if found == total {
                 crate::checking_ui::accepted()
+            } else if accepted {
+                crate::checking_ui::accepted_missing()
             } else {
                 theme::danger()
             };

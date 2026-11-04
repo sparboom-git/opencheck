@@ -3575,9 +3575,10 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "opencheck-app"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
+ "arboard",
  "bytemuck",
  "eframe",
  "egui-phosphor",
@@ -3607,7 +3608,7 @@ dependencies = [
 
 [[package]]
 name = "opencheck-cli"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3620,7 +3621,7 @@ dependencies = [
 
 [[package]]
 name = "opencheck-core"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "glam 0.31.1",
  "humantime",

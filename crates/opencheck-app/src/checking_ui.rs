@@ -25,6 +25,10 @@ pub const FOCUS_B: Color32 = theme::CLASH_B;
 pub fn accepted() -> Color32 {
     theme::solved()
 }
+/// Information the project accepts as missing: in order, but not there.
+pub fn accepted_missing() -> Color32 {
+    theme::waived()
+}
 
 pub fn panel_frame() -> egui::Frame {
     egui::Frame::new()

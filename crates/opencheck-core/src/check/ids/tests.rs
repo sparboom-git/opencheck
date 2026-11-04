@@ -946,3 +946,156 @@ fn information_rules_report_and_follow_overrides() {
     );
     assert_eq!(code.present, 0);
 }
+
+/// Items a project accepts as missing raise no finding and count as filled
+/// in the part's rate, while the item's own count still says they are not
+/// there. The part's rate is the share of values, not of complete elements.
+#[test]
+fn accepted_items_raise_no_finding_and_count_as_filled() {
+    use crate::check::{InformationStandard, StandardOverrides, builtin_standard};
+
+    let builtin = crate::check::BUILTIN_RULESETS
+        .iter()
+        .find(|b| b.file_name == "information-lod-dk.toml")
+        .unwrap();
+    let ruleset = Ruleset::from_toml(builtin.toml).unwrap();
+    let models = vec![CheckModel {
+        id: ModelId(1),
+        model: Arc::new(model()),
+        transform: Mat4::IDENTITY,
+        mask: None,
+    }];
+    let run = |standards: Vec<Arc<InformationStandard>>| {
+        let job = CheckJob {
+            ruleset: ruleset.clone(),
+            models: vec![ModelId(1)],
+            levels: vec![(ModelId(1), "300".to_owned())],
+            ids: Vec::new(),
+            standards,
+        };
+        let report = run_check(&models, &[job], &|_| {});
+        let rule = &report.rulesets[0].rules[0];
+        let wall_findings = rule
+            .findings
+            .iter()
+            .filter(|f| f.a.express_id == 10)
+            .count();
+        let summary = rule.information.clone().unwrap();
+        // One model: its own coverage is the total.
+        assert_eq!(summary.models.len(), 1);
+        assert_eq!(summary.models[0].model, ModelId(1));
+        assert_eq!(summary.models[0].parts, summary.parts);
+        let wall = summary
+            .parts
+            .into_iter()
+            .find(|p| p.part == "wall")
+            .unwrap();
+        (wall_findings, wall)
+    };
+
+    let (findings, wall) = run(Vec::new());
+    let missing: Vec<String> = wall
+        .items
+        .iter()
+        .filter(|i| i.present < i.required)
+        .map(|i| i.item.clone())
+        .collect();
+    assert!(!missing.is_empty(), "the test wall lacks something");
+    assert_eq!(findings, 1);
+    assert_eq!(wall.elements, 1);
+    assert_eq!(wall.complete, 0);
+    assert_eq!(wall.values, wall.items.len());
+    assert_eq!(wall.filled, wall.items.len() - missing.len());
+    assert!(wall.fill_rate() > 0.0 && wall.fill_rate() < 1.0);
+    assert!(!wall.has_accepted());
+
+    // Accept one item for the wall only and the rest for every part.
+    let mut overrides = StandardOverrides::new("opencheck.information.lod-dk");
+    overrides.set_accepted(&missing[0], Some("wall"), true);
+    for item in &missing[1..] {
+        overrides.set_accepted(item, None, true);
+    }
+    let overrides = StandardOverrides::from_toml(&overrides.to_toml()).unwrap();
+    let base = builtin_standard("opencheck.information.lod-dk").unwrap();
+    let (adapted, skipped) = overrides.apply(base);
+    assert!(skipped.is_empty(), "{skipped:?}");
+    let (findings, wall) = run(vec![Arc::new(adapted)]);
+    assert_eq!(findings, 0);
+    assert_eq!(wall.complete, 1);
+    assert_eq!(wall.filled, wall.values);
+    assert!(wall.has_accepted());
+    for item in &wall.items {
+        let accepted = missing.contains(&item.item);
+        assert_eq!(item.accepted, accepted, "{}", item.item);
+        // Still not there: the count stays honest.
+        assert_eq!(item.present < item.required, accepted, "{}", item.item);
+    }
+}
+
+/// With several models the summary keeps each file apart and adds them up.
+#[test]
+fn information_coverage_is_kept_per_model() {
+    let builtin = crate::check::BUILTIN_RULESETS
+        .iter()
+        .find(|b| b.file_name == "information-lod-dk.toml")
+        .unwrap();
+    let ruleset = Ruleset::from_toml(builtin.toml).unwrap();
+    let mut second = model();
+    second.short_name = "KON".to_owned();
+    let models = vec![
+        CheckModel {
+            id: ModelId(1),
+            model: Arc::new(model()),
+            transform: Mat4::IDENTITY,
+            mask: None,
+        },
+        CheckModel {
+            id: ModelId(2),
+            model: Arc::new(second),
+            transform: Mat4::IDENTITY,
+            mask: None,
+        },
+    ];
+    let job = CheckJob {
+        ruleset,
+        models: vec![ModelId(1), ModelId(2)],
+        levels: vec![
+            (ModelId(1), "300".to_owned()),
+            (ModelId(2), "300".to_owned()),
+        ],
+        ids: Vec::new(),
+        standards: Vec::new(),
+    };
+    let report = run_check(&models, &[job], &|_| {});
+    let summary = report.rulesets[0].rules[0].information.clone().unwrap();
+    assert_eq!(summary.models.len(), 2);
+    assert_eq!(summary.models[1].name, "KON");
+    let per_model = |i: usize| {
+        summary.models[i]
+            .parts
+            .iter()
+            .find(|p| p.part == "wall")
+            .cloned()
+            .unwrap()
+    };
+    let (first, second) = (per_model(0), per_model(1));
+    assert_eq!(first.elements, 1);
+    assert_eq!(first, second);
+    let total = summary.parts.iter().find(|p| p.part == "wall").unwrap();
+    assert_eq!(total.elements, 2);
+    assert_eq!(total.values, first.values * 2);
+    assert_eq!(total.filled, first.filled * 2);
+    let thickness = |p: &PartCoverage| {
+        p.items
+            .iter()
+            .find(|i| i.item == "thickness")
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(thickness(total).present, 2);
+    assert_eq!(
+        thickness(total).found_in,
+        vec![("Qto_WallBaseQuantities.Width".to_owned(), 2)]
+    );
+    assert_eq!(summary.models[0].fill_rate(), summary.models[1].fill_rate());
+}

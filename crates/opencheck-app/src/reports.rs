@@ -80,6 +80,162 @@ pub struct Snapshot {
     pub pictures: BTreeMap<String, String>,
     /// The documented visual checks; their pictures are among the report's.
     pub checks: Vec<crate::check_docs::CheckDoc>,
+    /// The information checks (LOD) of the last run, with their fill rates.
+    pub information: Vec<InfoDoc>,
+}
+
+/// An information check as it was when the revision was made: how it was
+/// done and the fill rate per model, building part and item.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InfoDoc {
+    /// `<ruleset id>/<rule id>`.
+    pub id: String,
+    /// The ruleset's name, e.g. `Information: LOD DK`.
+    pub title: String,
+    pub rule: String,
+    /// The standard or IDS file checked against.
+    pub standard: String,
+    /// How the check was done, written by OpenCheck in Danish.
+    pub about: String,
+    /// Model name and the level it was checked at, e.g. `LOD 300 DK`.
+    pub levels: Vec<(String, String)>,
+    /// Problems that concern no single element.
+    pub notes: Vec<String>,
+    pub models: Vec<InfoModel>,
+    /// Elements with missing information.
+    pub findings: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InfoModel {
+    pub name: String,
+    pub elements: usize,
+    pub values: usize,
+    pub filled: usize,
+    pub parts: Vec<InfoPart>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InfoPart {
+    pub name: String,
+    pub elements: usize,
+    pub complete: usize,
+    pub values: usize,
+    pub filled: usize,
+    pub items: Vec<InfoItem>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InfoItem {
+    pub name: String,
+    pub present: usize,
+    pub required: usize,
+    /// Missing on some elements, but accepted so by the project.
+    pub accepted: bool,
+    /// Elements where the value follows from the geometry and placement,
+    /// not from a property on the object.
+    pub geometry: usize,
+}
+
+/// The note under an information check whose items include some read from
+/// the geometry; the report marks those items with a triangle.
+pub const GEOMETRY_NOTE_DA: &str = "Egenskaber markeret med en trekant er aflæst af modellens \
+    geometri og placering iht. bygningsdelsspecifikationen og ikke af en parameter på objektet.";
+
+impl InfoDoc {
+    /// Some items are read from the geometry.
+    pub fn has_geometry(&self) -> bool {
+        self.models
+            .iter()
+            .flat_map(|m| &m.parts)
+            .flat_map(|p| &p.items)
+            .any(|i| i.geometry > 0)
+    }
+}
+
+/// The share of values filled in, 0 to 1.
+pub fn fill_rate(filled: usize, values: usize) -> f64 {
+    filled as f64 / values.max(1) as f64
+}
+
+/// The scope of an information check in a report, e.g. `368 elementer i 2
+/// modeller, 110 med manglende information`.
+pub fn scope_da(elements: usize, models: usize, findings: usize) -> String {
+    format!(
+        "{elements} elementer i {models} {}, {findings} med manglende information",
+        if models == 1 { "model" } else { "modeller" }
+    )
+}
+
+/// A fill rate as shown in reports, e.g. `80 %`.
+pub fn percent(filled: usize, values: usize) -> String {
+    format!("{:.0} %", fill_rate(filled, values) * 100.0)
+}
+
+impl InfoModel {
+    pub fn has_accepted(&self) -> bool {
+        self.parts.iter().any(InfoPart::has_accepted)
+    }
+}
+
+impl InfoPart {
+    pub fn has_accepted(&self) -> bool {
+        self.items.iter().any(|i| i.accepted)
+    }
+}
+
+/// How an information check was done, for the report.
+pub fn about_information_da(
+    adaptable: bool,
+    standard: &str,
+    levels: &[(String, String)],
+    accepted: bool,
+) -> String {
+    let mut text = if adaptable {
+        let mut distinct: Vec<&str> = levels.iter().map(|(_, l)| l.as_str()).collect();
+        distinct.sort_unstable();
+        distinct.dedup();
+        let at = match distinct.as_slice() {
+            [] => String::new(),
+            [one] => format!(" Modellerne er kontrolleret på niveau {one}."),
+            _ => format!(
+                " Modellerne er kontrolleret på følgende niveauer: {}.",
+                levels
+                    .iter()
+                    .map(|(m, l)| format!("{m} {l}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        };
+        format!(
+            "Kontrollen er foretaget efter {standard}. Hvert element i modellerne er henført til \
+             en bygningsdelstype ud fra sin IFC-klasse og sine egenskaber, og for hvert element \
+             er det kontrolleret, om de egenskaber, bygningsdelstypen skal bære på det aftalte \
+             informationsniveau, er udfyldt. En egenskab regnes som udfyldt, når den har en \
+             værdi i mindst ét af de steder i modellen, standarden læser den fra.{at}"
+        )
+    } else {
+        format!(
+            "Kontrollen er foretaget efter IDS-filen {standard}. For hver specifikation i filen \
+             er det kontrolleret, at de elementer, den gælder for, opfylder dens krav."
+        )
+    };
+    text.push_str(
+        "\n\nUdfyldningsgraden er andelen af de krævede værdier, der er udfyldt, opgjort pr. \
+         bygningsmodel og bygningsdelstype. Under hver bygningsdelstype er anført, hvor mange \
+         af dens elementer der har hver egenskab.",
+    );
+    if accepted {
+        text.push_str(
+            " Egenskaber, som det på projektet er aftalt ikke indgår i modellerne, er markeret \
+             som accepteret og regnes som i orden.",
+        );
+    }
+    text
 }
 
 /// What a block is.
@@ -101,13 +257,15 @@ pub enum BlockKind {
     Issues,
     /// Documented visual checks.
     Visual,
+    /// The information checks (LOD) with their fill rates.
+    Information,
 }
 
 impl BlockKind {
     pub fn label(self) -> &'static str {
         match self {
             BlockKind::Intro => "Indledning",
-            BlockKind::Text => "Tekst",
+            BlockKind::Text => "Tekst (frit afsnit)",
             BlockKind::Models => "Bygningsmodeller",
             BlockKind::Software => "Software",
             BlockKind::Properties => "Afsnit: Egenskaber",
@@ -115,6 +273,7 @@ impl BlockKind {
             BlockKind::Clashes => "Afsnit: Kollisioner",
             BlockKind::Issues => "Issues",
             BlockKind::Visual => "Afsnit: Visuelle kontroller",
+            BlockKind::Information => "Afsnit: Informationsniveau",
         }
     }
 
@@ -127,7 +286,7 @@ impl BlockKind {
     }
 
     /// The blocks a user can add, in the order offered.
-    pub const ADDABLE: [BlockKind; 9] = [
+    pub const ADDABLE: [BlockKind; 10] = [
         BlockKind::Text,
         BlockKind::Intro,
         BlockKind::Models,
@@ -135,6 +294,7 @@ impl BlockKind {
         BlockKind::Properties,
         BlockKind::Geometry,
         BlockKind::Clashes,
+        BlockKind::Information,
         BlockKind::Visual,
         BlockKind::Issues,
     ];
@@ -189,6 +349,50 @@ pub struct Block {
     pub filter: IssueFilter,
     /// A comment per issue (GUID), in this report only.
     pub notes: BTreeMap<String, String>,
+    /// Pictures added by hand, shown after the text.
+    pub pictures: Vec<BlockPicture>,
+}
+
+/// A picture pasted into a block: among the report's pictures by its hash,
+/// with its size in pixels so it can be laid out without decoding it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BlockPicture {
+    pub hash: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The size a block picture is shown at, in the units of `text_width` (pt
+/// on paper, points on screen): as wide as the text column, a small one at
+/// its own size but at least half the column, and a tall one no higher
+/// than `max_height`, so a screenshot is neither huge nor tiny.
+pub fn picture_box(pixels: (u32, u32), text_width: f32, max_height: f32) -> (f32, f32) {
+    let (pw, ph) = (pixels.0.max(1) as f32, pixels.1.max(1) as f32);
+    // A screen pixel is 0.75 pt at 96 dpi.
+    let mut w = (pw * 0.75).clamp(text_width * 0.5, text_width);
+    let mut h = w * ph / pw;
+    if h > max_height {
+        h = max_height;
+        w = h * pw / ph;
+    }
+    (w, h)
+}
+
+/// Keeps a PNG among the report pictures and describes it for a block.
+/// None when the bytes are not a PNG.
+pub fn store_picture(
+    pictures: &mut FxHashMap<String, Vec<u8>>,
+    png: Vec<u8>,
+) -> Option<BlockPicture> {
+    let (width, height) = opencheck_core::docx::png_size(&png)?;
+    let hash = project::sha256_hex(&png);
+    pictures.entry(hash.clone()).or_insert(png);
+    Some(BlockPicture {
+        hash,
+        width,
+        height,
+    })
 }
 
 impl Default for Block {
@@ -201,6 +405,7 @@ impl Default for Block {
             body: String::new(),
             filter: IssueFilter::default(),
             notes: BTreeMap::new(),
+            pictures: Vec::new(),
         }
     }
 }
@@ -243,6 +448,18 @@ impl Block {
             .checks
             .iter()
             .filter(|c| !self.filter.excluded.contains(&c.id))
+            .collect()
+    }
+
+    /// The information checks the block shows: all but those left out.
+    pub fn information<'a>(&self, snapshot: &'a Snapshot) -> Vec<&'a InfoDoc> {
+        if self.kind != BlockKind::Information {
+            return Vec::new();
+        }
+        snapshot
+            .information
+            .iter()
+            .filter(|d| !self.filter.excluded.contains(&d.id))
             .collect()
     }
 }
@@ -290,6 +507,12 @@ pub fn default_blocks() -> Vec<Block> {
         ),
         Block::new(BlockKind::Text, 2, "Generelle bemærkninger", ""),
         Block::new(BlockKind::Properties, 2, "Egenskaber", ""),
+        Block::new(
+            BlockKind::Information,
+            2,
+            "Informationsniveau",
+            "Modellernes informationsniveau er kontrolleret som beskrevet herunder.",
+        ),
         Block::new(BlockKind::Geometry, 2, "Geometri", ""),
         Block::new(BlockKind::Clashes, 2, "Kollisioner", ""),
         Block::new(
@@ -305,8 +528,14 @@ pub fn default_blocks() -> Vec<Block> {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Revision {
-    /// "A", "B", … or the project's own label.
+    /// "A", "B", … or the project's own label; empty until the first issue
+    /// makes it "A".
     pub label: String,
+    /// The phase the revision belongs to, by its code (see [`PHASES`]).
+    pub phase: String,
+    /// The date printed in the report, as typed; empty: the date of issue,
+    /// or of creation while a draft.
+    pub date: String,
     pub created: String,
     /// Set when issued: then nothing in it changes any more.
     pub issued: Option<Issued>,
@@ -323,6 +552,45 @@ impl Revision {
     pub fn is_locked(&self) -> bool {
         self.issued.is_some()
     }
+
+    /// The label to show: "–" while there is none.
+    pub fn label_text(&self) -> &str {
+        let label = self.label.trim();
+        if label.is_empty() { "–" } else { label }
+    }
+
+    /// The date printed: as typed, else the date of issue, else of creation.
+    pub fn date_text(&self) -> String {
+        let typed = self.date.trim();
+        if !typed.is_empty() {
+            return typed.to_owned();
+        }
+        let when = self.issued.as_ref().map_or(&self.created, |i| &i.date);
+        when.get(..10).unwrap_or(when).to_owned()
+    }
+}
+
+/// The watermark of a trial print.
+pub const PRELIMINARY_DA: &str = "Foreløbigt tryk";
+
+/// The phases a report goes through, code and name, in order.
+pub const PHASES: &[(&str, &str)] = &[
+    ("Disp", "Dispositionsforslag"),
+    ("PF", "Projektforslag"),
+    ("MP", "Myndighedsprojekt"),
+    ("UBP", "Udbudsprojekt"),
+    ("UFP", "Udførelsesprojekt"),
+    ("SU", "Som udført"),
+];
+
+/// The name of a phase code, e.g. "Projektforslag (PF)"; a code not in
+/// [`PHASES`] as it is, and "" for none.
+pub fn phase_name(code: &str) -> String {
+    let code = code.trim();
+    match PHASES.iter().find(|(c, _)| c.eq_ignore_ascii_case(code)) {
+        Some((c, name)) => format!("{name} ({c})"),
+        None => code.to_owned(),
+    }
 }
 
 impl Report {
@@ -337,13 +605,28 @@ impl Report {
         rev.name.as_deref().unwrap_or(&self.name)
     }
 
+    /// The phase code of a revision: its own, else the introduction's
+    /// (reports from before phases were kept per revision).
+    pub fn phase_for<'a>(&'a self, rev: &'a Revision) -> &'a str {
+        let phase = rev.phase.trim();
+        if phase.is_empty() {
+            self.intro_for(rev).phase.trim()
+        } else {
+            phase
+        }
+    }
+
     /// Issues the current draft: it is locked, and the introduction and
-    /// the name are frozen with it. False when there is no draft.
+    /// the name are frozen with it. A draft without a label becomes
+    /// revision A. False when there is no draft.
     pub fn issue_draft(&mut self, issued: Issued) -> bool {
         let intro = self.intro.clone();
         let name = self.name.clone();
         match self.revisions.last_mut() {
             Some(rev) if !rev.is_locked() => {
+                if rev.label.trim().is_empty() {
+                    rev.label = "A".to_owned();
+                }
                 rev.intro = Some(intro);
                 rev.name = Some(name);
                 rev.issued = Some(issued);
@@ -398,11 +681,20 @@ struct SavedReports {
 /// What a revision is made from when its pictures are ready.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NewRevision {
-    /// A new report with this name and first revision label.
-    Report { name: String, label: String },
+    /// A new report with this name, phase and first revision label (may be
+    /// empty: none until issued).
+    Report {
+        name: String,
+        label: String,
+        phase: String,
+    },
     /// The next revision of a report; `replace`: the draft's data is
-    /// renewed instead.
-    Next { report: String, replace: bool },
+    /// renewed instead; `phase`: a new phase starts, without a label.
+    Next {
+        report: String,
+        replace: bool,
+        phase: Option<String>,
+    },
 }
 
 /// The reports of the project and the Report tab's state.
@@ -420,6 +712,8 @@ pub struct Reports {
     /// PNG pictures by content hash.
     pub pictures: FxHashMap<String, Vec<u8>>,
     pub dialog: Option<crate::report_ui::Dialog>,
+    /// Exports and the preview carry a "Foreløbigt tryk" watermark.
+    pub preliminary: bool,
     /// Pictures on the GPU for the preview, by hash.
     pub textures: FxHashMap<String, eframe::egui::TextureHandle>,
     /// The revision shown set in pages.
@@ -448,6 +742,11 @@ impl Reports {
                     .pictures
                     .values()
                     .chain(r.snapshot.checks.iter().flat_map(|c| &c.pictures))
+                    .chain(
+                        r.blocks
+                            .iter()
+                            .flat_map(|b| b.pictures.iter().map(|p| &p.hash)),
+                    )
             })
             .collect();
         used.sort();
@@ -604,6 +903,7 @@ impl OpenCheckApp {
                 .or_insert_with(|| png.clone());
             pictures.insert(guid.clone(), hash);
         }
+        let information = self.information_docs();
         let checks = self.check_docs.list.clone();
         for hash in checks.iter().flat_map(|c| &c.pictures) {
             if let Some(png) = self.check_docs.pictures.get(hash) {
@@ -622,14 +922,97 @@ impl OpenCheckApp {
             issues,
             pictures,
             checks,
+            information,
         }
+    }
+
+    /// The information checks of the last run, frozen for a report.
+    fn information_docs(&self) -> Vec<InfoDoc> {
+        let Some(report) = &self.checking.report else {
+            return Vec::new();
+        };
+        let mut docs = Vec::new();
+        for rs in &report.rulesets {
+            for rule in &rs.rules {
+                let Some(summary) = &rule.information else {
+                    continue;
+                };
+                let adaptable = crate::checking::uses_levels(&rule.rule);
+                let levels: Vec<(String, String)> = if adaptable {
+                    summary
+                        .models
+                        .iter()
+                        .filter(|m| !m.parts.is_empty())
+                        .map(|m| {
+                            (
+                                m.name.clone(),
+                                crate::checking::level_label(&self.checking.level_of(m.model)),
+                            )
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let models: Vec<InfoModel> = summary
+                    .models
+                    .iter()
+                    .filter(|m| !m.parts.is_empty())
+                    .map(|m| InfoModel {
+                        name: m.name.clone(),
+                        elements: m.elements(),
+                        values: m.parts.iter().map(|p| p.values).sum(),
+                        filled: m.parts.iter().map(|p| p.filled).sum(),
+                        parts: m
+                            .parts
+                            .iter()
+                            .map(|p| InfoPart {
+                                name: p.name.clone(),
+                                elements: p.elements,
+                                complete: p.complete,
+                                values: p.values,
+                                filled: p.filled,
+                                items: p
+                                    .items
+                                    .iter()
+                                    .map(|i| InfoItem {
+                                        name: i.name.clone(),
+                                        present: i.present,
+                                        required: i.required,
+                                        accepted: i.accepted && i.present < i.required,
+                                        geometry: i
+                                            .found_in
+                                            .iter()
+                                            .filter(|(place, _)| place == "Geometry")
+                                            .map(|(_, n)| n)
+                                            .sum(),
+                                    })
+                                    .collect(),
+                            })
+                            .collect(),
+                    })
+                    .collect();
+                let accepted = models.iter().any(InfoModel::has_accepted);
+                docs.push(InfoDoc {
+                    id: format!("{}/{}", rs.info.id, rule.rule.id),
+                    title: rs.info.name.clone(),
+                    rule: rule.rule.name.clone(),
+                    standard: summary.standard.clone(),
+                    about: about_information_da(adaptable, &summary.standard, &levels, accepted),
+                    levels,
+                    notes: summary.notes.clone(),
+                    models,
+                    findings: rule.findings.len(),
+                });
+            }
+        }
+        docs
     }
 
     /// Makes the revision asked for, once its pictures are taken.
     pub fn make_revision(&mut self, what: NewRevision, images: &FxHashMap<String, Vec<u8>>) {
         let now = project::now_rfc3339();
         match what {
-            NewRevision::Report { name, label } => {
+            NewRevision::Report { name, label, phase } => {
                 let snapshot = self.snapshot(images, None);
                 let settings = &self.issues.report;
                 let report = Report {
@@ -640,14 +1023,12 @@ impl OpenCheckApp {
                         checked_by: String::new(),
                         company: settings.company.clone(),
                         disciplines: settings.disciplines.clone(),
-                        phase: settings.phase.clone(),
+                        phase: String::new(),
                     },
                     revisions: vec![Revision {
-                        label: if label.trim().is_empty() {
-                            "A".to_owned()
-                        } else {
-                            label.trim().to_owned()
-                        },
+                        label: label.trim().to_owned(),
+                        phase: phase.trim().to_owned(),
+                        date: String::new(),
                         created: now,
                         issued: None,
                         intro: None,
@@ -659,13 +1040,18 @@ impl OpenCheckApp {
                 self.reports.list.push(report);
                 self.reports.selected = self.reports.list.len() - 1;
             }
-            NewRevision::Next { report, replace } => {
+            NewRevision::Next {
+                report,
+                replace,
+                phase,
+            } => {
                 let Some(index) = self.reports.list.iter().position(|r| r.id == report) else {
                     return;
                 };
                 let Some(last) = self.reports.list[index].revisions.last().cloned() else {
                     return;
                 };
+                let last_phase = self.reports.list[index].phase_for(&last).to_owned();
                 let snapshot = self.snapshot(images, Some(&last.snapshot));
                 let revisions = &mut self.reports.list[index].revisions;
                 if replace && !last.is_locked() {
@@ -673,8 +1059,16 @@ impl OpenCheckApp {
                     draft.snapshot = snapshot;
                     draft.created = now;
                 } else {
+                    // A new phase starts without a label; the next revision
+                    // of the same phase follows the last label.
+                    let (label, phase) = match phase {
+                        Some(phase) => (String::new(), phase.trim().to_owned()),
+                        None => (next_label(&last.label), last_phase),
+                    };
                     revisions.push(Revision {
-                        label: next_label(&last.label),
+                        label,
+                        phase,
+                        date: String::new(),
                         created: now,
                         issued: None,
                         intro: None,
@@ -705,6 +1099,50 @@ mod tests {
         assert_eq!(next_label("1.9"), "1.10");
         assert_eq!(next_label("Z"), "Z+");
         assert_eq!(next_label(""), "A");
+    }
+
+    #[test]
+    fn block_pictures_fit_the_text_column() {
+        // A wide screenshot: the width of the column.
+        assert_eq!(picture_box((1600, 800), 450.0, 400.0), (450.0, 225.0));
+        // A small crop: its own size, at least half the column.
+        assert_eq!(picture_box((400, 100), 450.0, 400.0), (300.0, 75.0));
+        assert_eq!(picture_box((100, 100), 450.0, 400.0), (225.0, 225.0));
+        // A tall one: no higher than allowed.
+        let (w, h) = picture_box((600, 2400), 450.0, 400.0);
+        assert_eq!(h, 400.0);
+        assert_eq!(w, 100.0);
+        let mut store = FxHashMap::default();
+        assert!(store_picture(&mut store, vec![1, 2, 3]).is_none());
+        let png = crate::platform::encode_png(3, 2, &[0; 24]).unwrap();
+        let p = store_picture(&mut store, png).unwrap();
+        assert_eq!((p.width, p.height), (3, 2));
+        assert!(store.contains_key(&p.hash));
+    }
+
+    #[test]
+    fn issuing_a_draft_without_a_label_makes_it_a() {
+        let mut report = Report {
+            revisions: vec![Revision {
+                phase: "PF".into(),
+                ..Revision::default()
+            }],
+            ..Report::default()
+        };
+        assert_eq!(report.revisions[0].label_text(), "–");
+        assert!(report.issue_draft(Issued {
+            date: "2026-11-04T10:00:00Z".into(),
+            ..Default::default()
+        }));
+        assert_eq!(report.revisions[0].label, "A");
+        assert_eq!(report.revisions[0].date_text(), "2026-11-04");
+        assert_eq!(report.phase_for(&report.revisions[0]), "PF");
+        assert!(!report.issue_draft(Issued::default()));
+        let mut typed = report.revisions[0].clone();
+        typed.date = "04.11.2026".into();
+        assert_eq!(typed.date_text(), "04.11.2026");
+        assert_eq!(phase_name("pf"), "Projektforslag (PF)");
+        assert_eq!(phase_name("Egen"), "Egen");
     }
 
     #[test]

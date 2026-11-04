@@ -30,6 +30,8 @@ fn or_dash(text: &str) -> String {
 /// What the Word body is written with: the template's styles and the
 /// pictures added.
 struct Writer {
+    /// The height a block picture may take, pt.
+    max_height: f32,
     heading1: String,
     heading2: String,
     /// The width of the text in twips.
@@ -179,6 +181,25 @@ impl Writer {
         table(&w, &rows, false, false)
     }
 
+    /// The block's text and the pictures added to it, each sized to the
+    /// text column (see [`crate::reports::picture_box`]).
+    fn body(&mut self, block: &Block, pictures: &FxHashMap<String, Vec<u8>>) -> String {
+        let mut out = self.paragraphs(&block.body);
+        let text_width = self.width as f32 / 20.0;
+        for p in &block.pictures {
+            let Some(png) = pictures.get(&p.hash) else {
+                continue;
+            };
+            let (w, _) =
+                crate::reports::picture_box((p.width, p.height), text_width, self.max_height);
+            out.push_str(&para(
+                &self.picture(png, (w * 20.0) as u32),
+                "<w:spacing w:before=\"120\" w:after=\"200\"/>",
+            ));
+        }
+        out
+    }
+
     /// A picture added to the document, `width` twips wide.
     fn picture(&mut self, png: &[u8], width: u32) -> String {
         let Some((pw, ph)) = docx::png_size(png) else {
@@ -208,27 +229,23 @@ impl Writer {
         )
     }
 
-    fn revisions(&self, revisions: &[Revision]) -> String {
-        let w = widths(self.width, &[0.12, 0.16, 0.24, 0.48]);
+    fn revisions(&self, report: &Report, revisions: &[Revision]) -> String {
+        let w = widths(self.width, &[0.1, 0.12, 0.16, 0.22, 0.4]);
         let mut rows = vec![
-            ["Revision", "Dato", "Udsendt af", "Ændring"]
+            ["Fase", "Revision", "Dato", "Udsendt af", "Ændring"]
                 .iter()
                 .map(|h| cell_text(h, &format!("<w:b/>{}", muted())))
                 .collect::<Vec<_>>(),
         ];
         for r in revisions.iter().rev() {
-            let (when, by, note, by_rpr) = match &r.issued {
-                Some(i) => (date(&i.date), i.by.clone(), i.note.clone(), String::new()),
-                None => (
-                    date(&r.created),
-                    "kladde".to_owned(),
-                    String::new(),
-                    muted(),
-                ),
+            let (by, note, by_rpr) = match &r.issued {
+                Some(i) => (i.by.clone(), i.note.clone(), String::new()),
+                None => ("kladde".to_owned(), String::new(), muted()),
             };
             rows.push(vec![
-                cell_text(&r.label, ""),
-                cell_text(&when, ""),
+                cell_text(&or_dash(report.phase_for(r)), ""),
+                cell_text(r.label_text(), ""),
+                cell_text(&or_dash(&r.date_text()), ""),
                 cell_text(&by, &by_rpr),
                 cell_text(&note, ""),
             ]);
@@ -274,27 +291,26 @@ impl Writer {
         match block.kind {
             BlockKind::Intro => {
                 let intro = report.intro_for(rev);
-                let date_text = rev
-                    .issued
-                    .as_ref()
-                    .map_or_else(|| date(&rev.created), |i| date(&i.date));
                 let mut rows = vec![("Udarbejdet af", or_dash(&intro.prepared_by))];
                 if !intro.checked_by.trim().is_empty() {
                     rows.push(("Kontrolleret af", intro.checked_by.trim().to_owned()));
                 }
                 rows.extend([
                     ("Firma", or_dash(&intro.company)),
-                    ("Dato", date_text),
-                    ("Revision", rev.label.clone()),
+                    ("Dato", or_dash(&rev.date_text())),
+                    ("Revision", rev.label_text().to_owned()),
                     ("Fag", or_dash(&intro.disciplines)),
-                    ("Fase", or_dash(&intro.phase)),
+                    (
+                        "Fase",
+                        or_dash(&crate::reports::phase_name(report.phase_for(rev))),
+                    ),
                 ]);
                 out.push_str(&self.facts(&rows, self.width * 6 / 10));
-                out.push_str(&self.paragraphs(&block.body));
+                out.push_str(&self.body(block, pictures));
             }
-            BlockKind::Text => out.push_str(&self.paragraphs(&block.body)),
+            BlockKind::Text => out.push_str(&self.body(block, pictures)),
             BlockKind::Models => {
-                out.push_str(&self.paragraphs(&block.body));
+                out.push_str(&self.body(block, pictures));
                 let w = widths(self.width, &[0.42, 0.18, 0.2, 0.2]);
                 let mut rows = vec![
                     ["Bygningsmodel (filnavn)", "Fag", "Version", "Virksomhed"]
@@ -333,10 +349,10 @@ impl Writer {
                     ),
                     "",
                 ));
-                out.push_str(&self.paragraphs(&block.body));
+                out.push_str(&self.body(block, pictures));
             }
             BlockKind::Visual => {
-                out.push_str(&self.paragraphs(&block.body));
+                out.push_str(&self.body(block, pictures));
                 let checks = block.checks(snapshot);
                 if checks.is_empty() {
                     out.push_str(&para(
@@ -352,11 +368,28 @@ impl Writer {
                     out.push_str(&card);
                 }
             }
+            BlockKind::Information => {
+                out.push_str(&self.body(block, pictures));
+                let docs = block.information(snapshot);
+                if docs.is_empty() {
+                    out.push_str(&para(
+                        &run(
+                            "Ingen kontrol af informationsniveau i denne revision.",
+                            &format!("<w:i/>{}", muted()),
+                        ),
+                        "",
+                    ));
+                }
+                for d in docs {
+                    let card = self.info_card(d);
+                    out.push_str(&card);
+                }
+            }
             BlockKind::Properties
             | BlockKind::Geometry
             | BlockKind::Clashes
             | BlockKind::Issues => {
-                out.push_str(&self.paragraphs(&block.body));
+                out.push_str(&self.body(block, pictures));
                 let issues = block.issues(snapshot);
                 if issues.is_empty() {
                     out.push_str(&para(
@@ -382,6 +415,126 @@ impl Writer {
                 }
             }
         }
+    }
+
+    /// An information check: how it was done and a table per model with
+    /// its building parts and their items.
+    fn info_card(&self, d: &crate::reports::InfoDoc) -> String {
+        use crate::reports::percent;
+        const ACCEPTED: &str = "<w:color w:val=\"2662B0\"/>";
+        let mut out = para(
+            &run(&d.title, "<w:b/>"),
+            &format!(
+                "<w:keepNext/><w:pBdr><w:top w:val=\"single\" w:sz=\"4\" w:space=\"6\" w:color=\"{RULE}\"/><w:left w:val=\"single\" w:sz=\"24\" w:space=\"6\" w:color=\"2B7FF6\"/></w:pBdr>                 <w:spacing w:before=\"240\" w:after=\"80\"/>"
+            ),
+        );
+        let elements: usize = d.models.iter().map(|m| m.elements).sum();
+        let mut rows = vec![
+            ("Kontrol", d.rule.clone()),
+            ("Grundlag", d.standard.clone()),
+        ];
+        if !d.levels.is_empty() {
+            let mut distinct: Vec<&str> = d.levels.iter().map(|(_, l)| l.as_str()).collect();
+            distinct.sort_unstable();
+            distinct.dedup();
+            rows.push((
+                "Niveau",
+                if distinct.len() == 1 {
+                    distinct[0].to_owned()
+                } else {
+                    d.levels
+                        .iter()
+                        .map(|(m, l)| format!("{m} {l}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                },
+            ));
+        }
+        rows.push((
+            "Omfang",
+            crate::reports::scope_da(elements, d.models.len(), d.findings),
+        ));
+        out.push_str(&self.facts(&rows, self.width * 7 / 10));
+        out.push_str(&self.paragraphs(&d.about));
+        for note in &d.notes {
+            out.push_str(&para(&run(note, "<w:color w:val=\"E08A1E\"/>"), ""));
+        }
+        if d.has_geometry() {
+            out.push_str(&para(
+                &format!(
+                    "{}{}",
+                    run("\u{25B3} ", &muted()),
+                    run(crate::reports::GEOMETRY_NOTE_DA, "")
+                ),
+                "",
+            ));
+        }
+        let small = "<w:sz w:val=\"17\"/>";
+        let w = widths(self.width, &[0.58, 0.22, 0.2]);
+        for m in &d.models {
+            let mut rows = vec![vec![
+                cell_text(&m.name, &format!("<w:b/>{small}")),
+                cell_text(
+                    &format!("{} elementer", m.elements),
+                    &format!("{}{small}", muted()),
+                ),
+                cell_text(
+                    &percent(m.filled, m.values),
+                    &format!(
+                        "<w:b/>{}{small}",
+                        if m.has_accepted() && m.filled >= m.values {
+                            ACCEPTED
+                        } else {
+                            ""
+                        }
+                    ),
+                ),
+            ]];
+            for p in &m.parts {
+                rows.push(vec![
+                    cell_text(&p.name, &format!("<w:b/>{small}")),
+                    cell_text(
+                        &format!("{} elementer", p.elements),
+                        &format!("{}{small}", muted()),
+                    ),
+                    cell_text(
+                        &percent(p.filled, p.values),
+                        &format!(
+                            "{}{small}",
+                            if p.has_accepted() && p.filled >= p.values {
+                                ACCEPTED
+                            } else {
+                                ""
+                            }
+                        ),
+                    ),
+                ]);
+                for i in &p.items {
+                    let mark = if i.geometry > 0 {
+                        run(" \u{25B3}", &format!("{}{small}", muted()))
+                    } else {
+                        String::new()
+                    };
+                    rows.push(vec![
+                        para(
+                            &format!("{}{mark}", run(&i.name, small)),
+                            "<w:spacing w:before=\"0\" w:after=\"0\"/><w:ind w:left=\"220\"/>",
+                        ),
+                        cell_text(
+                            &format!("{}/{}", i.present, i.required),
+                            &format!("{}{small}", muted()),
+                        ),
+                        if i.accepted {
+                            cell_text("OK", &format!("<w:b/>{ACCEPTED}{small}"))
+                        } else {
+                            cell_text(&percent(i.present, i.required), small)
+                        },
+                    ]);
+                }
+            }
+            out.push_str(&table(&w, &rows, true, true));
+        }
+        out
     }
 
     /// A documented check: result, how it was done, colours and pictures.
@@ -652,15 +805,24 @@ impl Writer {
     }
 }
 
-/// Revision `index` of a report as a Word document made from `template`.
+/// Revision `index` of a report as a Word document made from `template`;
+/// `watermark`: a trial print, "Foreløbigt tryk" across every page.
 pub fn build(
     template: &Docx,
     page: &docx::Page,
     report: &Report,
     index: usize,
     pictures: &FxHashMap<String, Vec<u8>>,
+    watermark: bool,
 ) -> Result<Vec<u8>, String> {
     let rev = report.revisions.get(index).ok_or("no such revision")?;
+    let stamped;
+    let template = if watermark {
+        stamped = template.stamped(crate::reports::PRELIMINARY_DA);
+        &stamped
+    } else {
+        template
+    };
     let mut writer = Writer {
         heading1: template
             .style_id("heading 1")
@@ -669,9 +831,10 @@ pub fn build(
             .style_id("heading 2")
             .unwrap_or_else(|| "Heading2".into()),
         width: (((page.width - page.left - page.right) * 20.0) as u32).max(4000),
+        max_height: (page.height - page.top - page.bottom) * 0.55,
         pictures: Vec::new(),
     };
-    let revisions = writer.revisions(&report.revisions[..=index]);
+    let revisions = writer.revisions(report, &report.revisions[..=index]);
     let content = writer.content(report, rev, pictures);
     let fields = values(report, index);
     template.fill(
@@ -695,11 +858,49 @@ mod tests {
             revisions: vec![Revision {
                 label: "A".into(),
                 blocks: default_blocks(),
+                snapshot: crate::reports::Snapshot {
+                    information: vec![crate::reports::InfoDoc {
+                        id: "lod/fill".into(),
+                        title: "Information: LOD DK".into(),
+                        about: "Kontrollen er foretaget efter standarden.".into(),
+                        notes: vec!["En <note>".into()],
+                        models: vec![crate::reports::InfoModel {
+                            name: "ARK".into(),
+                            elements: 3,
+                            values: 6,
+                            filled: 6,
+                            parts: vec![crate::reports::InfoPart {
+                                name: "Væg".into(),
+                                elements: 3,
+                                complete: 3,
+                                values: 6,
+                                filled: 6,
+                                items: vec![crate::reports::InfoItem {
+                                    name: "Dybde".into(),
+                                    present: 0,
+                                    required: 3,
+                                    accepted: true,
+                                    geometry: 0,
+                                }],
+                            }],
+                        }],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
                 ..Revision::default()
             }],
             ..Report::default()
         };
-        let bytes = build(&template, &layout.page, &report, 0, &FxHashMap::default()).unwrap();
+        let bytes = build(
+            &template,
+            &layout.page,
+            &report,
+            0,
+            &FxHashMap::default(),
+            false,
+        )
+        .unwrap();
         let word = Docx::open(&bytes).unwrap();
         let filled = word.layout().unwrap();
         let text: Vec<String> = filled
@@ -726,9 +927,32 @@ mod tests {
             })
             .collect();
         assert!(header.contains("Revision A"), "{header}");
+        // A trial print carries the watermark in every header.
+        let bytes = build(
+            &template,
+            &layout.page,
+            &report,
+            0,
+            &FxHashMap::default(),
+            true,
+        )
+        .unwrap();
+        let stamped = Docx::open(&bytes).unwrap();
+        let header1 = String::from_utf8_lossy(stamped.part("word/header1.xml").unwrap());
+        assert!(header1.contains("Foreløbigt tryk"), "{header1}");
+        assert!(header1.contains("<v:textpath"), "{header1}");
+        assert!(stamped.layout().is_ok());
         let mut report = report;
         report.revisions[0].blocks[2].new_page = true;
-        let bytes = build(&template, &layout.page, &report, 0, &FxHashMap::default()).unwrap();
+        let bytes = build(
+            &template,
+            &layout.page,
+            &report,
+            0,
+            &FxHashMap::default(),
+            false,
+        )
+        .unwrap();
         let word = Docx::open(&bytes).unwrap();
         let xml = String::from_utf8_lossy(word.part("word/document.xml").unwrap());
         assert_eq!(xml.matches("<w:pageBreakBefore/>").count(), 1);
@@ -833,20 +1057,129 @@ mod tests {
                         pictures: vec!["p1".into(), "p1".into()],
                         ..Default::default()
                     }],
+                    information: vec![crate::reports::InfoDoc {
+                        id: "lod/fill".into(),
+                        title: "Information: LOD DK".into(),
+                        rule: "Fill rate per building part".into(),
+                        standard: "Informationskrav, LOD DK".into(),
+                        about: crate::reports::about_information_da(
+                            true,
+                            "Informationskrav, LOD DK",
+                            &[("STR".into(), "LOD 300 DK".into())],
+                            true,
+                        ),
+                        levels: vec![("STR".into(), "LOD 300 DK".into())],
+                        models: vec![crate::reports::InfoModel {
+                            name: "STR".into(),
+                            elements: 368,
+                            values: 1840,
+                            filled: 1480,
+                            parts: vec![
+                                crate::reports::InfoPart {
+                                    name: "Fundament".into(),
+                                    elements: 243,
+                                    complete: 0,
+                                    values: 1215,
+                                    filled: 1215,
+                                    items: [
+                                        "Klassifikationskode",
+                                        "Type (-kode/-ID)",
+                                        "Typenavn",
+                                        "Længde",
+                                    ]
+                                    .iter()
+                                    .map(|n| crate::reports::InfoItem {
+                                        name: (*n).into(),
+                                        present: 243,
+                                        required: 243,
+                                        accepted: false,
+                                        geometry: 0,
+                                    })
+                                    .chain([
+                                        crate::reports::InfoItem {
+                                            name: "Lastbærende".into(),
+                                            present: 0,
+                                            required: 243,
+                                            accepted: true,
+                                            geometry: 0,
+                                        },
+                                        crate::reports::InfoItem {
+                                            name: "Centerkote".into(),
+                                            present: 243,
+                                            required: 243,
+                                            accepted: false,
+                                            geometry: 243,
+                                        },
+                                    ])
+                                    .collect(),
+                                },
+                                crate::reports::InfoPart {
+                                    name: "Reces- og hulobjekter".into(),
+                                    elements: 125,
+                                    complete: 0,
+                                    values: 625,
+                                    filled: 265,
+                                    items: vec![
+                                        crate::reports::InfoItem {
+                                            name: "Typenavn".into(),
+                                            present: 125,
+                                            required: 125,
+                                            accepted: false,
+                                            geometry: 0,
+                                        },
+                                        crate::reports::InfoItem {
+                                            name: "Dybde".into(),
+                                            present: 15,
+                                            required: 125,
+                                            accepted: false,
+                                            geometry: 0,
+                                        },
+                                    ],
+                                },
+                            ],
+                        }],
+                        findings: 110,
+                        ..Default::default()
+                    }],
                     ..Default::default()
                 },
                 ..Revision::default()
             }],
             ..Report::default()
         };
-        let pictures: FxHashMap<String, Vec<u8>> = [("p1".to_owned(), png)].into_iter().collect();
+        let mut pictures: FxHashMap<String, Vec<u8>> =
+            [("p1".to_owned(), png)].into_iter().collect();
+        // A wide screenshot and a small crop pasted into a text block.
+        let mut report = report;
+        let shot = |w: u32, h: u32, grey: u8| {
+            crate::platform::encode_png(w, h, &vec![grey; (w * h * 4) as usize]).unwrap()
+        };
+        let mut block = Block::new(
+            BlockKind::Text,
+            2,
+            "Bemærkning med billeder",
+            "Et skærmbillede fra modellen og et lille udsnit.",
+        );
+        for (w, h, grey) in [(1600, 700, 200), (300, 120, 150)] {
+            let p = crate::reports::store_picture(&mut pictures, shot(w, h, grey)).unwrap();
+            block.pictures.push(p);
+        }
+        report.revisions[0].blocks.insert(4, block);
         let custom = std::env::var("OPENCHECK_SAMPLE_TEMPLATE")
             .ok()
             .map(PathBuf::from);
         let template = crate::typeset::template(custom.as_ref()).unwrap();
-        let word = build(&template.docx, &template.layout.page, &report, 0, &pictures).unwrap();
+        let word = build(
+            &template.docx,
+            &template.layout.page,
+            &report,
+            0,
+            &pictures,
+            true,
+        )
+        .unwrap();
         std::fs::write(format!("{dir}/sample.docx"), word).unwrap();
-        let mut input = crate::typeset::Input::new(&report, 0, &template);
+        let mut input = crate::typeset::Input::new(&report, 0, &template, true);
         input.attach(&pictures);
         let pages = crate::typeset::compile(input).unwrap();
         std::fs::write(
@@ -854,5 +1187,19 @@ mod tests {
             crate::typeset::pdf(&pages.doc).unwrap(),
         )
         .unwrap();
+        // Every page as a picture too, to look at the layout.
+        for i in 0..pages.doc.pages().len() {
+            let image = crate::typeset::render(&pages.doc, i, 1.5).unwrap();
+            let mut out = Vec::new();
+            {
+                let mut encoder =
+                    png::Encoder::new(&mut out, image.size[0] as u32, image.size[1] as u32);
+                encoder.set_color(png::ColorType::Rgba);
+                let mut writer = encoder.write_header().unwrap();
+                let data: Vec<u8> = image.pixels.iter().flat_map(|p| p.to_array()).collect();
+                writer.write_image_data(&data).unwrap();
+            }
+            std::fs::write(format!("{dir}/page{}.png", i + 1), out).unwrap();
+        }
     }
 }

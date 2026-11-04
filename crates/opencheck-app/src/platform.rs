@@ -53,6 +53,42 @@ pub fn pick_file(title: &str, filter: Filter) -> Option<PathBuf> {
     }
 }
 
+/// The picture on the clipboard as a PNG, when it holds one and no text
+/// (text is pasted by the text fields themselves). None in the browser.
+pub fn clipboard_png() -> Option<Vec<u8>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut clipboard = arboard::Clipboard::new().ok()?;
+        if clipboard.get_text().is_ok_and(|t| !t.trim().is_empty()) {
+            return None;
+        }
+        let image = clipboard.get_image().ok()?;
+        encode_png(
+            u32::try_from(image.width).ok()?,
+            u32::try_from(image.height).ok()?,
+            &image.bytes,
+        )
+    }
+    #[cfg(target_arch = "wasm32")]
+    None
+}
+
+/// RGBA pixels, row by row, as a PNG.
+pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
+    if rgba.len() < (width as usize) * (height as usize) * 4 {
+        return None;
+    }
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().ok()?;
+        writer.write_image_data(rgba).ok()?;
+    }
+    Some(out)
+}
+
 /// Asks for several files to open (desktop only, as [`pick_file`]).
 pub fn pick_files(title: &str, filter: Filter) -> Option<Vec<PathBuf>> {
     #[cfg(not(target_arch = "wasm32"))]

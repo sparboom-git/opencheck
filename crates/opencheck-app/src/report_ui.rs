@@ -9,6 +9,7 @@ use eframe::egui::{self, Color32, RichText};
 use egui_phosphor::regular as icon;
 use opencheck_core::Discipline;
 use opencheck_core::triage::Category;
+use rustc_hash::FxHashMap;
 
 use crate::app::OpenCheckApp;
 use crate::c402;
@@ -22,13 +23,22 @@ pub enum Dialog {
     NewReport {
         name: String,
         label: String,
+        phase: String,
     },
     Issue {
         by: String,
         note: String,
+        /// The label the revision is issued as; "A" for a draft without one.
+        label: String,
     },
     /// New data while the newest revision is still a draft.
     UpdateData,
+    /// The next version of a report: the next revision of its phase, or a
+    /// new phase, which starts without a revision.
+    NewVersion {
+        new_phase: bool,
+        phase: String,
+    },
     DeleteBlock(usize),
 }
 
@@ -85,7 +95,8 @@ fn empty_state(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         if ui.add(button).clicked() {
             app.reports.dialog = Some(Dialog::NewReport {
                 name: "K&K-rapport".to_owned(),
-                label: "A".to_owned(),
+                label: String::new(),
+                phase: app.issues.report.phase.trim().to_owned(),
             });
         }
     });
@@ -125,7 +136,8 @@ fn contents_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         if ui.button(icon::PLUS).on_hover_text("New report…").clicked() {
             app.reports.dialog = Some(Dialog::NewReport {
                 name: "K&K-rapport".to_owned(),
-                label: "A".to_owned(),
+                label: String::new(),
+                phase: app.issues.report.phase.trim().to_owned(),
             });
         }
     });
@@ -147,10 +159,16 @@ fn contents_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         } else {
             icon::PENCIL_SIMPLE
         };
+        let phase = report.phase_for(rev);
+        let phase = if phase.is_empty() {
+            String::new()
+        } else {
+            format!("{phase} · ")
+        };
         if ui
             .selectable_label(
                 i == shown,
-                format!("{glyph}  Rev. {}  ·  {status}", rev.label),
+                format!("{glyph}  {phase}Rev. {}  ·  {status}", rev.label_text()),
             )
             .clicked()
         {
@@ -318,14 +336,20 @@ fn editor_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         }
     });
     let rev = &app.reports.list[index].revisions[shown];
+    let phase = crate::reports::phase_name(app.reports.list[index].phase_for(rev));
+    let phase = if phase.is_empty() {
+        String::new()
+    } else {
+        format!("{phase} · ")
+    };
     let status = match &rev.issued {
         Some(i) => format!(
-            "Rev. {} · issued {} by {}",
-            rev.label,
+            "{phase}Rev. {} · issued {} by {}",
+            rev.label_text(),
             i.date.get(..10).unwrap_or(""),
             if i.by.is_empty() { "–" } else { &i.by }
         ),
-        None => format!("Rev. {} · draft", rev.label),
+        None => format!("{phase}Rev. {} · draft", rev.label_text()),
     };
     let data = format!(
         "data from {} · {} issues · {} models",
@@ -341,12 +365,12 @@ fn editor_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         ui.add_enabled_ui(!busy, |ui| {
             if ui
                 .button(format!(
-                    "{}  Update data → new revision",
+                    "{}  Update data → new version",
                     icon::ARROWS_CLOCKWISE
                 ))
                 .on_hover_text(
-                    "Takes the issues, pictures and models as they are now into the next revision. \
-                     Texts, choices and comments come along.",
+                    "Takes the issues, pictures and models as they are now into the next revision \
+                     or a new phase. Texts, choices and comments come along.",
                 )
                 .clicked()
             {
@@ -354,14 +378,7 @@ fn editor_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 if draft_open {
                     app.reports.dialog = Some(Dialog::UpdateData);
                 } else {
-                    let id = app.reports.list[index].id.clone();
-                    app.request_revision(
-                        NewRevision::Next {
-                            report: id,
-                            replace: false,
-                        },
-                        ui.ctx(),
-                    );
+                    app.reports.dialog = Some(new_version_dialog(app));
                 }
             }
         });
@@ -372,9 +389,16 @@ fn editor_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 .clicked()
             {
                 let by = app.reports.list[index].intro.prepared_by.clone();
+                let label = app.reports.list[index].revisions[last].label.trim();
+                let label = if label.is_empty() {
+                    "A".to_owned()
+                } else {
+                    label.to_owned()
+                };
                 app.reports.dialog = Some(Dialog::Issue {
                     by,
                     note: String::new(),
+                    label,
                 });
             }
         });
@@ -392,6 +416,11 @@ fn editor_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         {
             export(app, shown, Format::Word);
         }
+        ui.checkbox(&mut app.reports.preliminary, "Foreløbigt tryk")
+            .on_hover_text(
+                "Stamps \"Foreløbigt tryk\" across every page of the preview and the exports: a \
+                 trial print, marked as not the valid document.",
+            );
     });
     if busy {
         let (done, total) = app.capture.as_ref().map_or((0, 0), |c| c.progress());
@@ -425,14 +454,16 @@ fn editor_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         return;
     };
     let project = &mut app.issues.report.project;
-    let report = &mut app.reports.list[index];
+    let reports = &mut app.reports;
+    let report = &mut reports.list[index];
+    let store = (&mut reports.pictures, &mut reports.textures);
     let mut changed = false;
     egui::ScrollArea::vertical()
         .id_salt("report_editor")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_enabled_ui(editable, |ui| {
-                changed |= block_editor(ui, report, shown, b, project);
+                changed |= block_editor(ui, report, shown, b, project, store);
             });
         });
     if changed {
@@ -440,17 +471,25 @@ fn editor_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     }
 }
 
+/// The report's pictures (PNG by hash) and their textures.
+type PictureStore<'a> = (
+    &'a mut FxHashMap<String, Vec<u8>>,
+    &'a mut FxHashMap<String, egui::TextureHandle>,
+);
+
 fn block_editor(
     ui: &mut egui::Ui,
     report: &mut Report,
     shown: usize,
     b: usize,
     project: &mut String,
+    store: PictureStore,
 ) -> bool {
     let mut changed = false;
     let intro = &mut report.intro;
     let rev = &mut report.revisions[shown];
     let (blocks, snapshot) = (&mut rev.blocks, &mut rev.snapshot);
+    let (rev_phase, rev_date) = (&mut rev.phase, &mut rev.date);
     let block = &mut blocks[b];
     ui.label(
         RichText::new(block.kind.label())
@@ -516,11 +555,42 @@ fn block_editor(
                 ("Checked by (optional)", &mut intro.checked_by),
                 ("Company", &mut intro.company),
                 ("Disciplines", &mut intro.disciplines),
-                ("Phase", &mut intro.phase),
             ],
         );
         ui.label(
-            RichText::new("Date and revision come from the revision. The fields are kept for the report's next revisions.")
+            RichText::new("The fields are kept for the report's next revisions.")
+                .small()
+                .color(theme::text_muted()),
+        );
+        ui.add_space(8.0);
+        ui.label(RichText::new("This revision").strong());
+        egui::Grid::new("intro_revision")
+            .num_columns(2)
+            .spacing([10.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Phase");
+                if rev_phase.trim().is_empty() && !intro.phase.trim().is_empty() {
+                    // A report from before phases were kept per revision.
+                    *rev_phase = intro.phase.trim().to_owned();
+                }
+                changed |= phase_combo(ui, "intro_phase", rev_phase);
+                ui.end_row();
+                ui.label("Date");
+                changed |= ui
+                    .add(
+                        egui::TextEdit::singleline(rev_date)
+                            .desired_width(300.0)
+                            .hint_text("empty: the date of issue"),
+                    )
+                    .on_hover_text(
+                        "Printed as typed, e.g. 2026-11-04 or 04.11.2026. Empty: the date the \
+                         revision is issued, or made while a draft.",
+                    )
+                    .changed();
+                ui.end_row();
+            });
+        ui.label(
+            RichText::new("The revision label is given when the revision is issued or made.")
                 .small()
                 .color(theme::text_muted()),
         );
@@ -536,6 +606,7 @@ fn block_editor(
         )
         .changed();
     ui.add_space(8.0);
+    changed |= picture_editor(ui, block, store);
 
     match block.kind {
         BlockKind::Models => {
@@ -580,6 +651,44 @@ fn block_editor(
         }
         kind if kind.shows_issues() => {
             changed |= filter_editor(ui, block, snapshot);
+        }
+        BlockKind::Information => {
+            ui.label(
+                RichText::new(format!(
+                    "Information checks  {}",
+                    snapshot.information.len()
+                ))
+                .strong(),
+            );
+            if snapshot.information.is_empty() {
+                ui.label(
+                    RichText::new(
+                        "None in this revision. Run a check with an information ruleset, then \
+                         Update data.",
+                    )
+                    .small()
+                    .color(theme::text_muted()),
+                );
+            }
+            for d in &snapshot.information {
+                let mut shown = !block.filter.excluded.contains(&d.id);
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut shown, "").changed() {
+                        flip(&mut block.filter.excluded, d.id.clone());
+                        changed = true;
+                    }
+                    ui.label(&d.title);
+                    ui.label(
+                        RichText::new(format!(
+                            "{} models · {} with missing information",
+                            d.models.len(),
+                            d.findings
+                        ))
+                        .small()
+                        .color(theme::text_muted()),
+                    );
+                });
+            }
         }
         BlockKind::Visual => {
             ui.label(
@@ -796,12 +905,16 @@ fn export(app: &mut OpenCheckApp, shown: usize, format: Format) {
         Format::Pdf => ("pdf", "PDF"),
         Format::Word => ("docx", "Word document"),
     };
-    let name = format!(
-        "{}-{}-rev{}.{extension}",
-        clean(&project),
-        clean(report.name_for(rev)),
-        clean(&rev.label)
-    );
+    let mut name = format!("{}-{}", clean(&project), clean(report.name_for(rev)));
+    let phase = report.phase_for(rev);
+    if !phase.is_empty() {
+        name.push_str(&format!("-{}", clean(phase)));
+    }
+    if !rev.label.trim().is_empty() {
+        name.push_str(&format!("-rev{}", clean(rev.label.trim())));
+    }
+    let name = format!("{name}.{extension}");
+    let watermark = app.reports.preliminary;
     let template = match crate::typeset::template(app.report_template.as_ref()) {
         Ok(t) => t,
         Err(e) => {
@@ -815,7 +928,7 @@ fn export(app: &mut OpenCheckApp, shown: usize, format: Format) {
     };
     let bytes = match format {
         Format::Pdf => {
-            let mut input = crate::typeset::Input::new(report, shown, &template);
+            let mut input = crate::typeset::Input::new(report, shown, &template, watermark);
             input.attach(&app.reports.pictures);
             crate::typeset::compile(input)
                 .and_then(|pages| crate::typeset::pdf(&pages.doc))
@@ -832,6 +945,7 @@ fn export(app: &mut OpenCheckApp, shown: usize, format: Format) {
             report,
             shown,
             &app.reports.pictures,
+            watermark,
         )
         .map_err(|e| format!("Could not write the Word document: {e}")),
     };
@@ -1035,7 +1149,7 @@ fn draft_view(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                         RichText::new(format!(
                             "{} · Konsistens- og kollisionskontrol · Revision {}",
                             report.name_for(rev),
-                            rev.label
+                            rev.label_text()
                         ))
                         .color(MUTED),
                     );
@@ -1135,24 +1249,22 @@ fn preview_block(
                         row("Kontrolleret af", &intro.checked_by);
                     }
                     row("Firma", &intro.company);
-                    row(
-                        "Dato",
-                        rev.issued
-                            .as_ref()
-                            .map_or(&rev.created, |i| &i.date)
-                            .get(..10)
-                            .unwrap_or(""),
-                    );
-                    row("Revision", &rev.label);
+                    row("Dato", &rev.date_text());
+                    row("Revision", rev.label_text());
                     row("Fag", &intro.disciplines);
-                    row("Fase", &intro.phase);
+                    row("Fase", &crate::reports::phase_name(report.phase_for(rev)));
                 });
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
             paragraphs(ui, &block.body);
+            block_pictures(app, ui, block);
         }
-        BlockKind::Text => paragraphs(ui, &block.body),
+        BlockKind::Text => {
+            paragraphs(ui, &block.body);
+            block_pictures(app, ui, block);
+        }
         BlockKind::Models => {
             paragraphs(ui, &block.body);
+            block_pictures(app, ui, block);
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
             egui::Grid::new(("pv_models", number))
                 .num_columns(3)
@@ -1195,9 +1307,26 @@ fn preview_block(
                 }
             ));
             paragraphs(ui, &block.body);
+            block_pictures(app, ui, block);
+        }
+        BlockKind::Information => {
+            paragraphs(ui, &block.body);
+            block_pictures(app, ui, block);
+            let docs = block.information(snapshot);
+            if docs.is_empty() {
+                ui.label(
+                    RichText::new("Ingen kontrol af informationsniveau i denne revision.")
+                        .italics()
+                        .color(MUTED),
+                );
+            }
+            for d in docs {
+                preview_information(ui, d, &paragraphs);
+            }
         }
         BlockKind::Visual => {
             paragraphs(ui, &block.body);
+            block_pictures(app, ui, block);
             let checks = block.checks(snapshot);
             if checks.is_empty() {
                 ui.label(
@@ -1288,6 +1417,7 @@ fn preview_block(
         }
         _ => {
             paragraphs(ui, &block.body);
+            block_pictures(app, ui, block);
             let issues = block.issues(snapshot);
             if issues.is_empty() {
                 ui.label(RichText::new("Ingen emner.").italics().color(MUTED));
@@ -1315,6 +1445,99 @@ fn preview_block(
             }
         }
     }
+}
+
+/// An information check in the draft preview: how it was done and a table
+/// per model with its building parts and their items.
+fn preview_information(
+    ui: &mut egui::Ui,
+    d: &crate::reports::InfoDoc,
+    paragraphs: &dyn Fn(&mut egui::Ui, &str),
+) {
+    use crate::reports::percent;
+    const ACCEPTED: Color32 = Color32::from_rgb(0x26, 0x62, 0xb0);
+    egui::Frame::new()
+        .stroke(egui::Stroke::new(1.0, Color32::from_gray(215)))
+        .corner_radius(4)
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(&d.title).strong());
+            let elements: usize = d.models.iter().map(|m| m.elements).sum();
+            ui.label(
+                RichText::new(format!(
+                    "{} · {} · {}",
+                    d.rule,
+                    d.standard,
+                    crate::reports::scope_da(elements, d.models.len(), d.findings)
+                ))
+                .small()
+                .color(MUTED),
+            );
+            paragraphs(ui, &d.about);
+            for note in &d.notes {
+                ui.label(RichText::new(note).small().color(theme::c2()));
+            }
+            if d.has_geometry() {
+                ui.label(format!(
+                    "{}  {}",
+                    icon::TRIANGLE,
+                    crate::reports::GEOMETRY_NOTE_DA
+                ));
+                ui.add_space(4.0);
+            }
+            for m in &d.models {
+                ui.add_space(4.0);
+                egui::Grid::new(("info_table", &d.id, &m.name))
+                    .num_columns(3)
+                    .striped(true)
+                    .spacing([12.0, 2.0])
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(&m.name).small().strong());
+                        ui.label(
+                            RichText::new(format!("{} elementer", m.elements))
+                                .small()
+                                .color(MUTED),
+                        );
+                        let full = m.has_accepted() && m.filled >= m.values;
+                        let text = RichText::new(percent(m.filled, m.values)).small().strong();
+                        ui.label(if full { text.color(ACCEPTED) } else { text });
+                        ui.end_row();
+                        for p in &m.parts {
+                            ui.label(RichText::new(&p.name).small().strong());
+                            ui.label(
+                                RichText::new(format!("{} elementer", p.elements))
+                                    .small()
+                                    .color(MUTED),
+                            );
+                            let full = p.has_accepted() && p.filled >= p.values;
+                            let text = RichText::new(percent(p.filled, p.values)).small();
+                            ui.label(if full { text.color(ACCEPTED) } else { text });
+                            ui.end_row();
+                            for i in &p.items {
+                                let mark = if i.geometry > 0 {
+                                    format!("  {}", icon::TRIANGLE)
+                                } else {
+                                    String::new()
+                                };
+                                ui.label(RichText::new(format!("    {}{mark}", i.name)).small());
+                                ui.label(
+                                    RichText::new(format!("{}/{}", i.present, i.required))
+                                        .small()
+                                        .color(MUTED),
+                                );
+                                if i.accepted {
+                                    ui.label(RichText::new("OK").small().strong().color(ACCEPTED));
+                                } else {
+                                    ui.label(RichText::new(percent(i.present, i.required)).small());
+                                }
+                                ui.end_row();
+                            }
+                        }
+                    });
+            }
+        });
+    ui.add_space(6.0);
 }
 
 fn preview_issue(
@@ -1429,19 +1652,119 @@ pub fn png_image(png: &[u8]) -> Option<egui::ColorImage> {
 }
 
 fn texture(app: &mut OpenCheckApp, ctx: &egui::Context, hash: &str) -> Option<egui::TextureHandle> {
-    if let Some(t) = app.reports.textures.get(hash) {
+    texture_of(&app.reports.pictures, &mut app.reports.textures, ctx, hash)
+}
+
+/// The texture of a report picture, made from its PNG the first time.
+fn texture_of(
+    pictures: &FxHashMap<String, Vec<u8>>,
+    textures: &mut FxHashMap<String, egui::TextureHandle>,
+    ctx: &egui::Context,
+    hash: &str,
+) -> Option<egui::TextureHandle> {
+    if let Some(t) = textures.get(hash) {
         return Some(t.clone());
     }
-    let image = png_image(app.reports.pictures.get(hash)?)?;
+    let image = png_image(pictures.get(hash)?)?;
     let texture = ctx.load_texture(
         format!("report-{hash}"),
         image,
         egui::TextureOptions::LINEAR,
     );
-    app.reports
-        .textures
-        .insert(hash.to_owned(), texture.clone());
+    textures.insert(hash.to_owned(), texture.clone());
     Some(texture)
+}
+
+/// The pictures of a block in the editor: each with a button to remove it,
+/// and ways to add one: pasted from the clipboard (also by Ctrl+V while
+/// the editor is open) or picked as a PNG file. True when changed.
+fn picture_editor(ui: &mut egui::Ui, block: &mut Block, store: PictureStore) -> bool {
+    let (pictures, textures) = store;
+    let mut changed = false;
+    ui.label(RichText::new("Pictures").strong());
+    let mut remove = None;
+    ui.horizontal_wrapped(|ui| {
+        for (i, p) in block.pictures.iter().enumerate() {
+            let Some(texture) = texture_of(pictures, textures, ui.ctx(), &p.hash) else {
+                continue;
+            };
+            let size = texture.size_vec2();
+            let w = 140.0_f32.min(size.x.max(40.0));
+            ui.vertical(|ui| {
+                ui.add(
+                    egui::Image::new(&texture)
+                        .fit_to_exact_size(egui::vec2(w, w * size.y / size.x.max(1.0))),
+                );
+                if ui
+                    .small_button(format!("{}  Remove", icon::TRASH))
+                    .clicked()
+                {
+                    remove = Some(i);
+                }
+            });
+        }
+    });
+    if let Some(i) = remove {
+        block.pictures.remove(i);
+        changed = true;
+    }
+    let mut added: Option<Vec<u8>> = None;
+    ui.horizontal(|ui| {
+        if ui
+            .button(format!("{}  Paste picture", icon::CLIPBOARD))
+            .on_hover_text("A screenshot on the clipboard. Ctrl+V while editing does the same.")
+            .clicked()
+        {
+            added = crate::platform::clipboard_png();
+        }
+        if ui
+            .button(format!("{}  Add picture…", icon::IMAGE))
+            .on_hover_text("A PNG file")
+            .clicked()
+        {
+            added = crate::platform::pick_file("Add picture", ("PNG picture", &["png"]))
+                .and_then(|path| std::fs::read(path).ok());
+        }
+    });
+    if added.is_none()
+        && ui.is_enabled()
+        && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::V))
+    {
+        added = crate::platform::clipboard_png();
+    }
+    if let Some(png) = added {
+        match crate::reports::store_picture(pictures, png) {
+            Some(p) => {
+                block.pictures.push(p);
+                changed = true;
+            }
+            None => {
+                ui.label(RichText::new("Not a PNG picture.").color(theme::danger()));
+            }
+        }
+    }
+    ui.label(
+        RichText::new(
+            "Pictures follow the text: as wide as the text column, a small one at its own size, \
+             a tall one kept to half a page.",
+        )
+        .small()
+        .color(theme::text_muted()),
+    );
+    ui.add_space(8.0);
+    changed
+}
+
+/// The pictures of a block in the draft preview, sized as on paper.
+fn block_pictures(app: &mut OpenCheckApp, ui: &mut egui::Ui, block: &Block) {
+    let width = ui.available_width();
+    for p in &block.pictures {
+        if let Some(texture) = texture(app, ui.ctx(), &p.hash) {
+            let (w, h) = crate::reports::picture_box((p.width, p.height), width, 420.0);
+            ui.add(egui::Image::new(&texture).fit_to_exact_size(egui::vec2(w, h)));
+            ui.add_space(6.0);
+        }
+    }
 }
 
 // ---- Dialogs -------------------------------------------------------------------
@@ -1470,8 +1793,8 @@ fn dialogs(app: &mut OpenCheckApp, ctx: &egui::Context) {
 fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bool {
     let ctx = ui.ctx().clone();
     match dialog {
-        Dialog::NewReport { name, label } => {
-            let (mut name, mut label) = (name.clone(), label.clone());
+        Dialog::NewReport { name, label, phase } => {
+            let (mut name, mut label, mut phase) = (name.clone(), label.clone(), phase.clone());
             ui.heading(RichText::new(format!("{}  New report", icon::FILE_TEXT)).strong());
             ui.label(
                 RichText::new(
@@ -1488,9 +1811,19 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                     ui.label("Name");
                     ui.add(egui::TextEdit::singleline(&mut name).desired_width(260.0));
                     ui.end_row();
-                    ui.label("First revision");
-                    ui.add(egui::TextEdit::singleline(&mut label).desired_width(80.0))
-                        .on_hover_text("A as default, or the project's own label, e.g. P01");
+                    ui.label("Phase");
+                    phase_combo(ui, "new_report_phase", &mut phase);
+                    ui.end_row();
+                    ui.label("Revision");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut label)
+                            .desired_width(80.0)
+                            .hint_text("none"),
+                    )
+                    .on_hover_text(
+                        "Usually empty: the report has no revision until it is issued, which makes \
+                         it A. Or the project's own label, e.g. P01.",
+                    );
                     ui.end_row();
                 });
             let mut done = false;
@@ -1504,6 +1837,7 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                         NewRevision::Report {
                             name: name.trim().to_owned(),
                             label: label.clone(),
+                            phase: phase.clone(),
                         },
                         &ctx,
                     );
@@ -1514,21 +1848,18 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                 }
             });
             if !done {
-                app.reports.dialog = Some(Dialog::NewReport { name, label });
+                app.reports.dialog = Some(Dialog::NewReport { name, label, phase });
             }
             false
         }
-        Dialog::Issue { by, note } => {
-            let (mut by, mut note) = (by.clone(), note.clone());
-            let label = app
+        Dialog::Issue { by, note, label } => {
+            let (mut by, mut note, mut label) = (by.clone(), note.clone(), label.clone());
+            let unlabeled = app
                 .reports
                 .current()
                 .and_then(|r| r.revisions.last())
-                .map(|r| r.label.clone())
-                .unwrap_or_default();
-            ui.heading(
-                RichText::new(format!("{}  Issue revision {label}", icon::SEAL_CHECK)).strong(),
-            );
+                .is_some_and(|r| r.label.trim().is_empty());
+            ui.heading(RichText::new(format!("{}  Issue revision", icon::SEAL_CHECK)).strong());
             ui.label(
                 RichText::new(
                     "The revision is locked: its texts and data read the same from then on. Changes \
@@ -1541,6 +1872,14 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                 .num_columns(2)
                 .spacing([10.0, 6.0])
                 .show(ui, |ui| {
+                    ui.label("Revision");
+                    ui.add(egui::TextEdit::singleline(&mut label).desired_width(80.0))
+                        .on_hover_text(if unlabeled {
+                            "The first issue is revision A"
+                        } else {
+                            "The label the revision is issued as"
+                        });
+                    ui.end_row();
                     ui.label("Issued by");
                     ui.add(egui::TextEdit::singleline(&mut by).desired_width(260.0));
                     ui.end_row();
@@ -1561,6 +1900,9 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                 .fill(theme::accent());
                 if ui.add(issue).clicked() {
                     if let Some(report) = app.reports.list.get_mut(app.reports.selected) {
+                        if let Some(rev) = report.revisions.last_mut().filter(|r| !r.is_locked()) {
+                            rev.label = label.trim().to_owned();
+                        }
                         report.issue_draft(crate::reports::Issued {
                             date: opencheck_core::project::now_rfc3339(),
                             by: by.trim().to_owned(),
@@ -1575,7 +1917,7 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                 }
             });
             if !done {
-                app.reports.dialog = Some(Dialog::Issue { by, note });
+                app.reports.dialog = Some(Dialog::Issue { by, note, label });
             }
             false
         }
@@ -1584,7 +1926,7 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                 .reports
                 .current()
                 .and_then(|r| r.revisions.last())
-                .map(|r| r.label.clone())
+                .map(|r| r.label_text().to_owned())
                 .unwrap_or_default();
             ui.heading(
                 RichText::new(format!(
@@ -1595,7 +1937,7 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
             );
             ui.label(
                 "New data can renew the draft's data, or the draft can be locked first so the new \
-                 data goes into a new revision.",
+                 data goes into a new revision or a new phase.",
             );
             let id = app
                 .reports
@@ -1603,6 +1945,7 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                 .map(|r| r.id.clone())
                 .unwrap_or_default();
             let mut done = false;
+            let mut next = false;
             ui.horizontal_wrapped(|ui| {
                 if ui
                     .button(format!("Renew the data of {label}"))
@@ -1615,13 +1958,14 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                         NewRevision::Next {
                             report: id.clone(),
                             replace: true,
+                            phase: None,
                         },
                         &ctx,
                     );
                     done = true;
                 }
                 if ui
-                    .button(format!("Lock {label}, then a new revision"))
+                    .button(format!("Lock {label}, then a new version…"))
                     .clicked()
                 {
                     if let Some(report) = app.reports.list.get_mut(app.reports.selected) {
@@ -1630,10 +1974,69 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                             ..Default::default()
                         });
                     }
+                    app.session.dirty = true;
+                    next = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    done = true;
+                }
+            });
+            if next {
+                // The dialog for the new version takes this one's place.
+                app.reports.dialog = Some(new_version_dialog(app));
+                return false;
+            }
+            !done
+        }
+        Dialog::NewVersion { new_phase, phase } => {
+            let (mut new_phase, mut phase) = (*new_phase, phase.clone());
+            let Some(report) = app.reports.current() else {
+                return false;
+            };
+            let id = report.id.clone();
+            let (last_label, last_phase) = report
+                .revisions
+                .last()
+                .map(|r| (r.label.clone(), report.phase_for(r).to_owned()))
+                .unwrap_or_default();
+            let next = crate::reports::next_label(&last_label);
+            let same = if last_phase.is_empty() {
+                format!("Next revision: {next}")
+            } else {
+                format!(
+                    "Next revision: {next} in {}",
+                    crate::reports::phase_name(&last_phase)
+                )
+            };
+            ui.heading(RichText::new(format!("{}  New version", icon::ARROWS_CLOCKWISE)).strong());
+            ui.label(
+                RichText::new(
+                    "The latest check's issues, pictures and models go into the new version; texts, \
+                     choices and comments come along. A new phase starts without a revision.",
+                )
+                .small()
+                .color(theme::text_muted()),
+            );
+            ui.radio_value(&mut new_phase, false, same);
+            ui.horizontal(|ui| {
+                ui.radio_value(&mut new_phase, true, "New phase:");
+                ui.add_enabled_ui(new_phase, |ui| {
+                    phase_combo(ui, "new_version_phase", &mut phase);
+                });
+            });
+            let mut done = false;
+            ui.horizontal(|ui| {
+                let make = egui::Button::new(
+                    RichText::new(format!("{}  Make the version", icon::CHECK))
+                        .color(theme::on_accent()),
+                )
+                .fill(theme::accent());
+                if ui.add(make).clicked() {
                     app.request_revision(
                         NewRevision::Next {
-                            report: id.clone(),
+                            report: id,
                             replace: false,
+                            phase: new_phase.then(|| phase.clone()),
                         },
                         &ctx,
                     );
@@ -1643,7 +2046,10 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
                     done = true;
                 }
             });
-            !done
+            if !done {
+                app.reports.dialog = Some(Dialog::NewVersion { new_phase, phase });
+            }
+            false
         }
         Dialog::DeleteBlock(i) => {
             let name = app
@@ -1685,4 +2091,63 @@ fn dialog_body(app: &mut OpenCheckApp, ui: &mut egui::Ui, dialog: &Dialog) -> bo
             !done
         }
     }
+}
+
+/// The dialog for the next version of the current report: the next
+/// revision of its phase by default, the following phase offered.
+fn new_version_dialog(app: &OpenCheckApp) -> Dialog {
+    let last = app
+        .reports
+        .current()
+        .and_then(|r| r.revisions.last().map(|rev| r.phase_for(rev).to_owned()))
+        .unwrap_or_default();
+    let next = crate::reports::PHASES
+        .iter()
+        .position(|(c, _)| c.eq_ignore_ascii_case(&last))
+        .and_then(|i| crate::reports::PHASES.get(i + 1))
+        .map_or(last, |(c, _)| (*c).to_owned());
+    Dialog::NewVersion {
+        new_phase: false,
+        phase: next,
+    }
+}
+
+/// A choice of phase: none, the phases of [`crate::reports::PHASES`], and
+/// the code set already when it is the project's own. True when changed.
+fn phase_combo(ui: &mut egui::Ui, id: &str, phase: &mut String) -> bool {
+    let mut changed = false;
+    let known = crate::reports::PHASES
+        .iter()
+        .any(|(c, _)| c.eq_ignore_ascii_case(phase.trim()));
+    let shown = if phase.trim().is_empty() {
+        "–".to_owned()
+    } else {
+        crate::reports::phase_name(phase)
+    };
+    egui::ComboBox::from_id_salt(id)
+        .width(220.0)
+        .selected_text(shown)
+        .show_ui(ui, |ui| {
+            if ui
+                .selectable_label(phase.trim().is_empty(), "–  (no phase)")
+                .clicked()
+            {
+                phase.clear();
+                changed = true;
+            }
+            for (code, name) in crate::reports::PHASES {
+                let selected = code.eq_ignore_ascii_case(phase.trim());
+                if ui
+                    .selectable_label(selected, format!("{code}  {name}"))
+                    .clicked()
+                {
+                    *phase = (*code).to_owned();
+                    changed = true;
+                }
+            }
+            if !known && !phase.trim().is_empty() {
+                let _ = ui.selectable_label(true, phase.trim());
+            }
+        });
+    changed
 }

@@ -23,8 +23,8 @@ use super::geom::{
 use super::ids::{Ids, check_ids, ids_path};
 use super::index::BoxIndex;
 use super::information::{
-    InformationStandard, InformationSummary, ItemCoverage, ModelFacts, PartCoverage,
-    builtin_standard, is_checked,
+    InformationStandard, InformationSummary, ItemCoverage, ModelCoverage, ModelFacts, PartCoverage,
+    builtin_standard, is_checked, merge_parts, tidy_parts,
 };
 use super::ruleset::{Between, Rule, RuleKind, Ruleset, RulesetInfo, Selector, Zone, ZoneSide};
 use crate::{Aabb, IfcModel, ModelId};
@@ -951,6 +951,7 @@ fn check_information(
             .filter(|l| standard.standard.levels.iter().any(|x| x == l))
             .unwrap_or(&standard.standard.default_level);
         let facts = ModelFacts::new(model);
+        let mut model_parts: Vec<PartCoverage> = Vec::new();
         // (element index, part index, required item indices, where each was found)
         type Outcome = (usize, usize, Vec<usize>, Vec<Option<String>>);
         let results: Vec<Outcome> = model
@@ -990,24 +991,27 @@ fn check_information(
         checked += results.len();
 
         for (e, p, required, found) in results {
+            let part = &standard.parts[p];
+            // Items the project accepts as missing raise no finding.
             let missing: Vec<usize> = required
                 .iter()
                 .zip(&found)
-                .filter(|(_, f)| f.is_none())
+                .filter(|(i, f)| f.is_none() && !standard.accepted(part, &standard.items[**i]))
                 .map(|(&i, _)| i)
                 .collect();
-            let part = &standard.parts[p];
-            let coverage = match summary.parts.iter().position(|c| c.part == part.id) {
-                Some(i) => &mut summary.parts[i],
+            let coverage = match model_parts.iter().position(|c| c.part == part.id) {
+                Some(i) => &mut model_parts[i],
                 None => {
-                    summary.parts.push(PartCoverage {
+                    model_parts.push(PartCoverage {
                         part: part.id.clone(),
                         name: part.name.clone(),
                         elements: 0,
                         complete: 0,
+                        values: 0,
+                        filled: 0,
                         items: Vec::new(),
                     });
-                    summary.parts.last_mut().expect("just pushed")
+                    model_parts.last_mut().expect("just pushed")
                 }
             };
             coverage.elements += 1;
@@ -1016,6 +1020,7 @@ fn check_information(
             }
             for (&i, where_found) in required.iter().zip(&found) {
                 let item = &standard.items[i];
+                let accepted = standard.accepted(part, item);
                 let row = match coverage.items.iter().position(|c| c.item == item.id) {
                     Some(r) => &mut coverage.items[r],
                     None => {
@@ -1024,12 +1029,17 @@ fn check_information(
                             name: item.name.clone(),
                             required: 0,
                             present: 0,
+                            accepted,
                             found_in: Vec::new(),
                         });
                         coverage.items.last_mut().expect("just pushed")
                     }
                 };
                 row.required += 1;
+                coverage.values += 1;
+                if where_found.is_some() || accepted {
+                    coverage.filled += 1;
+                }
                 if let Some(place) = where_found {
                     row.present += 1;
                     match row.found_in.iter_mut().find(|(p, _)| p == place) {
@@ -1076,14 +1086,18 @@ fn check_information(
                 zones: Vec::new(),
             });
         }
+        merge_parts(&mut summary.parts, &model_parts);
+        summary.models.push(ModelCoverage {
+            model: check_model.id,
+            name: model.short_name.clone(),
+            parts: model_parts,
+        });
     }
     // Keep the standard's order of parts.
-    summary
-        .parts
-        .sort_by_key(|c| standard.parts.iter().position(|p| p.id == c.part));
-    for row in summary.parts.iter_mut().flat_map(|p| &mut p.items) {
-        row.found_in
-            .sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let order = |id: &str| standard.parts.iter().position(|p| p.id == id);
+    tidy_parts(&mut summary.parts, order);
+    for model in &mut summary.models {
+        tidy_parts(&mut model.parts, order);
     }
     (findings, summary, checked)
 }

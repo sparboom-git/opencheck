@@ -307,6 +307,53 @@ impl Docx {
         relationships(self.xml(&rels_name(part)).as_ref(), part)
     }
 
+    /// The document with `text` as a watermark across every page: a
+    /// WordArt shape in each header, as Word makes one, behind the text.
+    pub fn stamped(&self, text: &str) -> Docx {
+        let mut out = self.clone();
+        let shape = format!(
+            "<w:p><w:pPr><w:pStyle w:val=\"Header\"/></w:pPr><w:r><w:rPr><w:noProof/></w:rPr>\
+             <w:pict xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\">\
+             <v:shapetype id=\"_x0000_t136\" coordsize=\"21600,21600\" o:spt=\"136\" adj=\"10800\" path=\"m@7,l@8,m@5,21600l@6,21600e\">\
+             <v:formulas><v:f eqn=\"sum #0 0 10800\"/><v:f eqn=\"prod #0 2 1\"/><v:f eqn=\"sum 21600 0 @1\"/>\
+             <v:f eqn=\"sum 0 0 @2\"/><v:f eqn=\"sum 21600 0 @3\"/><v:f eqn=\"if @0 @3 0\"/><v:f eqn=\"if @0 21600 @1\"/>\
+             <v:f eqn=\"if @0 0 @2\"/><v:f eqn=\"if @0 @4 21600\"/><v:f eqn=\"mid @5 @6\"/><v:f eqn=\"mid @8 @5\"/>\
+             <v:f eqn=\"mid @7 @8\"/><v:f eqn=\"mid @6 @7\"/><v:f eqn=\"sum @6 0 @5\"/></v:formulas>\
+             <v:path textpathok=\"t\" o:connecttype=\"custom\" o:connectlocs=\"@9,0;@10,10800;@11,21600;@12,10800\" o:connectangles=\"270,180,90,0\"/>\
+             <v:textpath on=\"t\" fitshape=\"t\"/><v:handles><v:h position=\"#0,bottomRight\" xrange=\"6629,14971\"/></v:handles>\
+             <o:lock v:ext=\"edit\" text=\"t\" shapetype=\"t\"/></v:shapetype>\
+             <v:shape id=\"OpenCheckWatermark\" o:spid=\"_x0000_s2049\" type=\"#_x0000_t136\" \
+             style=\"position:absolute;margin-left:0;margin-top:0;width:527.85pt;height:131.95pt;rotation:315;z-index:-251656192;\
+             mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;mso-position-vertical-relative:margin\" \
+             o:allowincell=\"f\" fillcolor=\"silver\" stroked=\"f\"><v:fill opacity=\".5\"/>\
+             <v:textpath style=\"font-family:Calibri;font-size:1pt\" string=\"{}\"/></v:shape></w:pict></w:r></w:p>",
+            escape(text)
+        );
+        let names: Vec<String> = self
+            .parts
+            .keys()
+            .filter(|n| n.starts_with("word/header") && n.ends_with(".xml"))
+            .cloned()
+            .collect();
+        for name in names {
+            let xml = String::from_utf8_lossy(&self.parts[&name]).into_owned();
+            // Right after the root element's start tag.
+            let Some(start) = xml.find("<w:hdr") else {
+                continue;
+            };
+            let Some(end) = xml[start..].find('>') else {
+                continue;
+            };
+            let at = start + end + 1;
+            let mut stamped = String::with_capacity(xml.len() + shape.len());
+            stamped.push_str(&xml[..at]);
+            stamped.push_str(&shape);
+            stamped.push_str(&xml[at..]);
+            out.parts.insert(name, stamped.into_bytes());
+        }
+        out
+    }
+
     /// The bytes of a part, e.g. a picture.
     pub fn part(&self, name: &str) -> Option<&[u8]> {
         self.parts.get(name).map(Vec::as_slice)

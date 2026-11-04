@@ -288,13 +288,15 @@ The reports made on the Report tab:
   "reports": [
     {
       "id": "…", "name": "K&K-rapport",
-      "intro": { "prepared_by": "ABC", "checked_by": "", "company": "…", "disciplines": "KON", "phase": "Projektforslag" },
+      "intro": { "prepared_by": "ABC", "checked_by": "", "company": "…", "disciplines": "KON" },
       "revisions": [
         {
-          "label": "A", "created": "2026-10-31T08:40:00Z",
+          "label": "A", "phase": "PF", "date": "", "created": "2026-10-31T08:40:00Z",
           "issued": { "date": "2026-10-31T09:00:00Z", "by": "ABC", "note": "Første udgave" },
           "blocks": [
             { "kind": "intro", "level": 1, "heading": "Indledning", "body": "…" },
+            { "kind": "text", "level": 2, "heading": "Bemærkning", "body": "…",
+              "pictures": [ { "hash": "<sha256 of the PNG>", "width": 1280, "height": 720 } ] },
             { "kind": "clashes", "level": 2, "heading": "Kollisioner", "body": "…",
               "filter": { "categories": ["C3"], "statuses": [], "rulesets": [], "disciplines": [], "excluded": [] },
               "notes": { "<issue guid>": "Comment in the report" } }
@@ -306,7 +308,16 @@ The reports made on the Report tab:
             "rulesets": [ "Clash: between disciplines" ],
             "issues": [ … issues as in issues.json, Revit ids and assignees filled in … ],
             "pictures": { "<issue guid>": "<sha256 of the PNG>" },
-            "checks": [ … documented checks as in documentation.json … ]
+            "checks": [ … documented checks as in documentation.json … ],
+            "information": [
+              { "id": "<ruleset id>/<rule id>", "title": "Information: LOD DK", "rule": "…",
+                "standard": "…", "about": "How the check was done, in Danish",
+                "levels": [ ["K09", "LOD 300 DK"] ], "notes": [], "findings": 12,
+                "models": [ { "name": "K09", "elements": 243, "values": 1215, "filled": 972,
+                              "parts": [ { "name": "Fundament", "elements": 243, "complete": 0,
+                                           "values": 1215, "filled": 972,
+                                           "items": [ { "name": "Længde", "present": 243, "required": 243, "accepted": false, "geometry": 0 } ] } ] } ] }
+            ]
           }
         }
       ]
@@ -315,13 +326,18 @@ The reports made on the Report tab:
 }
 ```
 
-A revision's `snapshot` is the data it shows, frozen when it was made; an
-`issued` revision is never changed again. Block `kind` is `intro`, `text`,
+A revision's `label` is empty until it is issued, which makes it "A" unless
+another label is given; `phase` is a phase code (`Disp`, `PF`, `MP`, `UBP`,
+`UFP`, `SU` or the project's own) and `date` the date printed, as typed, or
+empty for the date of issue. A revision's `snapshot` is the data it shows,
+frozen when it was made; an `issued` revision is never changed again. Block `kind` is `intro`, `text`,
 `models`, `software`, `properties`, `geometry`, `clashes`, `issues` or
 `visual` (documented checks; `filter.excluded` holds the ids left out);
 `level` 1 is a chapter, 2 a section in it. A filter's empty list lets
-everything through. Pictures are stored once under `reports/pictures/`, named
-by the SHA-256 of their bytes, and shared by the revisions that show them.
+everything through. A block's `pictures` are those pasted into it by hand,
+with their size in pixels. Pictures are stored once under
+`reports/pictures/`, named by the SHA-256 of their bytes, and shared by the
+revisions and blocks that show them.
 Reports or fields a reader does not understand are left out with a message
 and written back unchanged.
 

@@ -37,7 +37,9 @@ built.
   part and LOD level (200, 300, 325 DK) with the level per project and per
   model.
 - Information requirements adapted per project: where each item is read
-  from, for all building parts or one; "found in" per item in the results.
+  from, for all building parts or one; items accepted as missing, shown as
+  OK in blue; "found in" per item in the results; fill rates per IFC file
+  as the share of required values filled in.
 - IDS 1.0: import `.ids` files and check them (app and `check --ids`);
   export the built-in standard as IDS (`export-ids` and the Add menu). The
   official buildingSMART test cases run against the implementation.
@@ -53,7 +55,12 @@ built.
   criticality (C1–C3), responsible disciplines, assignee by initials, Revit
   Element IDs, a dialog for the fields when issues are created.
 - BCF 2.1 file export with pictures and viewpoints.
-- Illustrated issue report (HTML in Danish, printable to PDF).
+- The Report tab: reports after C402 built from blocks (introduction,
+  models, software, issues by filter, visual checks, information level,
+  free text with pasted pictures), with phases and revisions (issued and
+  locked, next revision or new phase), a Word template the user changes,
+  PDF set by OpenCheck itself (Typst) and Word export, a page preview and
+  a "Foreløbigt tryk" watermark for trial prints.
 - Issues exported to Excel (`.xlsx`) from a template the user can change
   (company name, columns, page header and footer), with the model files and
   their dates; A4 portrait.
@@ -101,8 +108,9 @@ built.
   the viewer (camera, section, selection); a coordinate offset per project if
   Revit or other tools place cameras elsewhere; more servers than Dalux;
   automatic sync.
-- **Reports, next steps**: report templates (layout and fields), the IKT
-  manager's summary report, PDF without going through the browser.
+- **Reports, next steps**: the IKT manager's summary report across
+  projects; pictures in JPEG; a model update section (what changed between
+  two revisions).
 - **Working area, next steps**: several areas, named areas to switch
   between.
 - **Information requirements, next steps**: allowed values and value

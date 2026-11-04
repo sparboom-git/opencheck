@@ -37,6 +37,8 @@ typst-render = "=0.15.1"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ureq = { version = "3", features = ["json"] }
 getrandom = "0.3"
+# Pictures pasted into report blocks.
+arboard = { version = "3", default-features = false, features = ["image-data"] }
 
 # Browser only: start-up, file downloads and async file picking.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

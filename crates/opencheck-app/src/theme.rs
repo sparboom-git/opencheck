@@ -21,6 +21,8 @@ struct Palette {
     panel: Color32,
     danger: Color32,
     solved: Color32,
+    /// In order because the project accepts it so, not because it is there.
+    waived: Color32,
     c2: Color32,
     /// Text on an accent-filled button.
     on_accent: Color32,
@@ -37,6 +39,7 @@ const LIGHT: Palette = Palette {
     panel: Color32::WHITE,
     danger: Color32::from_rgb(180, 35, 24),
     solved: Color32::from_rgb(30, 122, 76),
+    waived: Color32::from_rgb(38, 98, 176),
     c2: Color32::from_rgb(168, 98, 0),
     on_accent: Color32::WHITE,
 };
@@ -53,6 +56,7 @@ const DARK: Palette = Palette {
     panel: Color32::from_rgb(24, 25, 28),
     danger: Color32::from_rgb(236, 96, 84),
     solved: Color32::from_rgb(82, 196, 132),
+    waived: Color32::from_rgb(108, 164, 236),
     c2: Color32::from_rgb(230, 160, 52),
     on_accent: Color32::from_rgb(20, 21, 24),
 };
@@ -124,6 +128,11 @@ pub fn danger() -> Color32 {
 /// Issues and findings solved by a model update, and accepted findings.
 pub fn solved() -> Color32 {
     p().solved
+}
+/// In order only because the project accepts it: information the project
+/// has agreed may be missing from the models.
+pub fn waived() -> Color32 {
+    p().waived
 }
 
 /// Criticality C1, C2 and C3. C2 is a dark amber so it also reads as text.

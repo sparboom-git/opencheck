@@ -7,10 +7,11 @@
 
 use eframe::egui::{self, Color32, RichText};
 use egui_phosphor::regular as icon;
-use opencheck_core::Discipline;
 use opencheck_core::check::{
-    CheckReport, Finding, FindingElement, FindingKind, RuleResult, RulesetResult, Severity,
+    CheckReport, Finding, FindingElement, FindingKind, PartCoverage, RuleResult, RulesetResult,
+    Severity,
 };
+use opencheck_core::{Discipline, ModelId};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::app::{IssueTarget, OpenCheckApp};
@@ -18,7 +19,9 @@ use crate::checking::{
     CategoryFilter, Decision, PairKey, ResultsTab, StatusFilter, SuggestionFilter, category_of,
     pair_key, rule_key,
 };
-use crate::checking_ui::{FOCUS_A, FOCUS_B, accepted, dot, panel_frame, severity_color};
+use crate::checking_ui::{
+    FOCUS_A, FOCUS_B, accepted, accepted_missing, dot, panel_frame, severity_color,
+};
 use crate::{issues_ui, theme};
 use opencheck_core::triage::{Category, Rating};
 
@@ -1072,96 +1075,51 @@ fn information_overview(
                             .color(theme::text_muted()),
                     );
                 }
-                for part in &summary.parts {
-                    let share = part.complete as f32 / part.elements.max(1) as f32;
-                    let id = ui.make_persistent_id(("fill", &ruleset.info.id, &part.part));
+                // One heading per IFC file, with the parts checked in it.
+                for model in summary.models.iter().filter(|m| !m.parts.is_empty()) {
+                    let share = model.fill_rate() as f32;
+                    let waived = model.has_accepted();
+                    let id = ui.make_persistent_id(("fill_model", &ruleset.info.id, model.model.0));
                     egui::collapsing_header::CollapsingState::load_with_default_open(
                         ui.ctx(),
                         id,
-                        false,
+                        true,
                     )
                     .show_header(ui, |ui| {
-                        let name = ui
-                            .add(egui::Button::new(RichText::new(&part.name).strong()).frame(false))
-                            .on_hover_text("Show the elements with missing information in 3D");
-                        if name.clicked() {
-                            let ids: Vec<String> = info_pairs
-                                .iter()
-                                .flat_map(|p| &p.groups)
-                                .filter(|g| g.class == part.name)
-                                .flat_map(|g| g.ids())
-                                .collect();
-                            if !ids.is_empty() {
-                                actions.show_group = Some(ids);
-                            }
-                        }
+                        ui.label(RichText::new(&model.name).strong());
+                        ui.label(
+                            RichText::new(format!("{} elements", model.elements()))
+                                .small()
+                                .color(theme::text_muted()),
+                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let color = if waived && share >= 0.999 {
+                                accepted_missing()
+                            } else {
+                                theme::text_muted()
+                            };
                             ui.label(
-                                RichText::new(format!("{}/{}", part.complete, part.elements))
+                                RichText::new(format!("{:.0} %", share * 100.0))
                                     .small()
-                                    .color(theme::text_muted()),
+                                    .color(color),
                             )
-                            .on_hover_text("Elements with all required information");
-                            fill_bar(ui, share);
+                            .on_hover_text(
+                                "Required values filled in, over the file's building parts",
+                            );
+                            fill_bar(ui, share, waived);
                         });
                     })
                     .body(|ui| {
-                        let adaptable = crate::checking::uses_levels(&rule.rule);
-                        for item in &part.items {
-                            let share = item.present as f32 / item.required.max(1) as f32;
-                            ui.horizontal(|ui| {
-                                let label = ui.add(
-                                    egui::Label::new(RichText::new(&item.name).small())
-                                        .sense(egui::Sense::click()),
-                                );
-                                let label = if item.found_in.is_empty() {
-                                    label
-                                } else {
-                                    label.on_hover_ui(|ui| {
-                                        ui.label(RichText::new("Found in").small().strong());
-                                        for (place, n) in item.found_in.iter().take(8) {
-                                            ui.label(
-                                                RichText::new(format!("{n:>6}  {place}"))
-                                                    .small()
-                                                    .monospace(),
-                                            );
-                                        }
-                                        if item.found_in.len() > 8 {
-                                            ui.label(
-                                                RichText::new(format!(
-                                                    "… {} more places",
-                                                    item.found_in.len() - 8
-                                                ))
-                                                .small(),
-                                            );
-                                        }
-                                        if adaptable {
-                                            ui.label(
-                                                RichText::new("Click to change where to look")
-                                                    .small()
-                                                    .color(theme::text_muted()),
-                                            );
-                                        }
-                                    })
-                                };
-                                if adaptable && label.clicked() {
-                                    actions.adapt = Some((item.item.clone(), part.part.clone()));
-                                }
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(
-                                            RichText::new(format!(
-                                                "{}/{}",
-                                                item.present, item.required
-                                            ))
-                                            .small()
-                                            .color(theme::text_muted()),
-                                        );
-                                        fill_bar(ui, share);
-                                    },
-                                );
-                            });
+                        for part in &model.parts {
+                            part_coverage(
+                                ui,
+                                ruleset,
+                                rule,
+                                part,
+                                Some(model.model),
+                                info_pairs,
+                                actions,
+                            );
                         }
                     });
                 }
@@ -1169,12 +1127,150 @@ fn information_overview(
     }
 }
 
-/// A small bar from red (nothing filled in) to green (complete).
-fn fill_bar(ui: &mut egui::Ui, share: f32) {
+/// One building part's fill rate with its items, for one model or for all.
+/// A click on the part shows its findings in 3D.
+fn part_coverage(
+    ui: &mut egui::Ui,
+    ruleset: &RulesetResult,
+    rule: &RuleResult,
+    part: &PartCoverage,
+    model: Option<ModelId>,
+    info_pairs: &[Pair],
+    actions: &mut Actions,
+) {
+    // The share of required values that are there, so a part with
+    // four of five items filled in reads as 80 %, not as 0 elements.
+    let share = part.fill_rate() as f32;
+    let waived = part.has_accepted();
+    let id = ui.make_persistent_id(("fill", &ruleset.info.id, model.map(|m| m.0), &part.part));
+    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+        .show_header(ui, |ui| {
+            let name = ui
+                .add(egui::Button::new(RichText::new(&part.name).strong()).frame(false))
+                .on_hover_text("Show the elements with missing information in 3D");
+            if name.clicked() {
+                let ids: Vec<String> = info_pairs
+                    .iter()
+                    .flat_map(|p| &p.groups)
+                    .filter(|g| g.class == part.name)
+                    .flat_map(|g| {
+                        g.rows
+                            .iter()
+                            .filter(|r| model.is_none_or(|m| r.finding.a.model == m))
+                            .map(|r| r.finding.id.clone())
+                    })
+                    .collect();
+                if !ids.is_empty() {
+                    actions.show_group = Some(ids);
+                }
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let color = if waived && share >= 0.999 {
+                    accepted_missing()
+                } else {
+                    theme::text_muted()
+                };
+                ui.label(
+                    RichText::new(format!("{:.0} %", share * 100.0))
+                        .small()
+                        .color(color),
+                )
+                .on_hover_text(format!(
+                    "{} of {} required values are filled in{}\n\
+                 {} of {} elements have everything",
+                    part.filled,
+                    part.values,
+                    if waived {
+                        " or accepted as missing"
+                    } else {
+                        ""
+                    },
+                    part.complete,
+                    part.elements
+                ));
+                fill_bar(ui, share, waived);
+            });
+        })
+        .body(|ui| {
+            let adaptable = crate::checking::uses_levels(&rule.rule);
+            for item in &part.items {
+                let share = item.present as f32 / item.required.max(1) as f32;
+                // Accepted as missing: in order, in its own colour.
+                let waived = item.accepted && item.present < item.required;
+                ui.horizontal(|ui| {
+                    let label = ui.add(
+                        egui::Label::new(RichText::new(&item.name).small())
+                            .sense(egui::Sense::click()),
+                    );
+                    let label = if item.found_in.is_empty() {
+                        label
+                    } else {
+                        label.on_hover_ui(|ui| {
+                            ui.label(RichText::new("Found in").small().strong());
+                            for (place, n) in item.found_in.iter().take(8) {
+                                ui.label(
+                                    RichText::new(format!("{n:>6}  {place}"))
+                                        .small()
+                                        .monospace(),
+                                );
+                            }
+                            if item.found_in.len() > 8 {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "… {} more places",
+                                        item.found_in.len() - 8
+                                    ))
+                                    .small(),
+                                );
+                            }
+                            if adaptable {
+                                ui.label(
+                                    RichText::new("Click to change where to look")
+                                        .small()
+                                        .color(theme::text_muted()),
+                                );
+                            }
+                        })
+                    };
+                    if adaptable && label.clicked() {
+                        actions.adapt = Some((item.item.clone(), part.part.clone()));
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if waived {
+                            ui.label(
+                                RichText::new(format!("OK · {}/{}", item.present, item.required))
+                                    .small()
+                                    .color(accepted_missing()),
+                            )
+                            .on_hover_text(format!(
+                                "Accepted as missing in the models: {} of {} \
+                                 elements have it, and none is reported",
+                                item.present, item.required
+                            ));
+                            fill_bar(ui, 1.0, true);
+                        } else {
+                            ui.label(
+                                RichText::new(format!("{}/{}", item.present, item.required))
+                                    .small()
+                                    .color(theme::text_muted()),
+                            );
+                            fill_bar(ui, share, false);
+                        }
+                    });
+                });
+            }
+        });
+}
+
+/// A small bar from red (nothing filled in) to green (complete); a complete
+/// bar that owes something to accepted items is in the accepted colour.
+fn fill_bar(ui: &mut egui::Ui, share: f32, waived: bool) {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(90.0, 10.0), egui::Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, 3.0, theme::border());
-    let color = if share >= 0.999 {
+    let color = if share >= 0.999 && waived {
+        accepted_missing()
+    } else if share >= 0.999 {
         accepted()
     } else if share >= 0.5 {
         severity_color(Severity::Moderate)

@@ -150,8 +150,8 @@ checkers.
   runs checks.
 - **Results** have a tab per ruleset and a section for each under *All*: an
   overview of discipline against discipline, then findings per pair, grouped
-  by the kind of component. Information rules show the fill rate per building
-  part and every element with what it is missing. Selecting a finding shows
+  by the kind of component. Information rules show the fill rate per IFC file
+  and building part, and every element with what it is missing. Selecting a finding shows
   its two elements in their models' colours with the rest ghosted. Accept real
   problems and reject the rest; decisions are kept between runs.
 
@@ -204,22 +204,39 @@ those chapters; blocks can be added, moved and deleted, and each has a
 heading, a text and, for issues, filters (criticality, status, responsible
 discipline, ruleset), issues left out by hand and a comment per issue.
 
-- **Revisions**: a report keeps its revisions (A, B, … or the project's own
-  labels). Each freezes its data when made: the issues with their pictures,
-  the models and the rulesets. *Issue revision* locks it with date, who issued
-  it and what changed; *Update data → new revision* takes the latest check
-  into the next revision, texts and choices included. Every revision stays in
-  the project and can be opened and exported again.
+- **Revisions and phases**: a report keeps its revisions. A new report is
+  made for a phase (Disp, PF, MP, UBP, UFP or SU: dispositionsforslag to som
+  udført) and starts without a revision, as Danish practice has it; *Issue
+  revision* locks it as revision A (or the label typed) with date, who
+  issued it and what changed. Each revision freezes its data when made: the
+  issues with their pictures, the models and the rulesets. *Update data →
+  new version* takes the latest check into the next revision (B, C, …) of
+  the phase, or into a new phase, which starts without a revision again.
+  The date printed in the report is typed by hand in the introduction block;
+  empty, it is the date of issue. Every revision stays in the project and
+  can be opened and exported again.
+- **Text and pictures**: *Add block → Tekst (frit afsnit)* adds a blank
+  section for free text. Screenshots can be pasted into any block (*Paste
+  picture*, or Ctrl+V while editing) or added as PNG files; they are shown
+  after the text, as wide as the text column, a small crop at its own size
+  and a tall one kept to half a page, in the PDF, in Word and in the
+  preview.
 - **Preview** beside the editor shows the report set in A4 pages, exactly as
   it prints, or as a quick draft without pages. A block chosen on the left is
   scrolled into view; a block clicked in the preview is edited.
 - **Export PDF** and **Export Word** write the revision shown, with a table
-  of the revisions on the first page and page header and footer. OpenCheck
-  sets the PDF itself (with [Typst](https://typst.app)); nothing else is
-  needed.
+  of the revisions (phase, revision, date, issued by, change) on the first
+  page and page header and footer. OpenCheck sets the PDF itself (with
+  [Typst](https://typst.app)); nothing else is needed. *Foreløbigt tryk*
+  stamps a watermark across every page of the preview and both exports, for
+  a trial print that is clearly not the valid document.
 - **Visual checks**: the section *Visuelle kontroller* shows the documented
   checks with their result, method, colours and pictures; checks can be left
   out by hand.
+- **Information level**: the section *Informationsniveau* shows each
+  information check (LOD) of the last run: how it was done, written by
+  OpenCheck in Danish, and the fill rate per IFC file and building part with
+  the items under each. Accepted items are marked as OK in blue.
 - **Template**: reports are made from a Word template. *File → Settings*
   saves the standard one to change in Word (logo, header and footer, page
   margins, fonts, colours, the Heading 1 and Heading 2 styles, the text on

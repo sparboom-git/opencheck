@@ -16,7 +16,7 @@
 //! with alternatives per requirement added.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -24,7 +24,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
 use super::ruleset::{RulesetError, Selector};
-use crate::{Element, IfcModel, PropertyValue};
+use crate::{Element, IfcModel, ModelId, PropertyValue};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -121,6 +121,10 @@ pub struct InformationItem {
     pub description: String,
     /// The item is present when any of these has a value.
     pub any: Vec<Source>,
+    /// The project accepts that the item is missing in the models: no
+    /// findings, and the fill rates show it as accepted rather than filled.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub accepted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -139,6 +143,9 @@ pub struct BuildingPart {
     /// own sources, e.g. a width that cable carriers keep in another property.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sources: BTreeMap<String, Vec<Source>>,
+    /// Items, by id, the project accepts as missing for this part.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub accepted: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -170,6 +177,12 @@ impl InformationStandard {
         item: &'a InformationItem,
     ) -> &'a [Source] {
         part.sources.get(&item.id).unwrap_or(&item.any)
+    }
+
+    /// The project accepts that the item is missing on the part's elements,
+    /// for this part or for all parts.
+    pub fn accepted(&self, part: &BuildingPart, item: &InformationItem) -> bool {
+        item.accepted || part.accepted.contains(&item.id)
     }
 
     /// The part an element belongs to: the first that applies.
@@ -214,6 +227,16 @@ impl InformationStandard {
                     ));
                 }
                 validate_sources(&format!("part '{}', item '{item}'", part.id), sources)?;
+            }
+            if let Some(missing) = part
+                .accepted
+                .iter()
+                .find(|i| !item_ids.contains(i.as_str()))
+            {
+                return invalid(format!(
+                    "part '{}': accepts unknown item '{missing}'",
+                    part.id
+                ));
             }
             for (level, items) in &part.levels {
                 if !info.levels.contains(level) {
@@ -518,6 +541,9 @@ pub struct ItemCoverage {
     pub required: usize,
     /// Of those, elements that have it.
     pub present: usize,
+    /// The project accepts the item as missing: elements without it count
+    /// as in order, shown apart from those that have it.
+    pub accepted: bool,
     /// Where it was found and on how many elements, most common first,
     /// e.g. `("Pset_WallCommon.Width", 120)`.
     pub found_in: Vec<(String, usize)>,
@@ -530,16 +556,117 @@ pub struct PartCoverage {
     pub name: String,
     /// Elements that belong to the part.
     pub elements: usize,
-    /// Elements that have every required item.
+    /// Elements that have every required item (or are accepted without it).
     pub complete: usize,
+    /// Values required: every item on every element of the part.
+    pub values: usize,
+    /// Of those, values that are there or accepted as missing. The share
+    /// `filled / values` is the fill rate shown for the part.
+    pub filled: usize,
     pub items: Vec<ItemCoverage>,
+}
+
+impl PartCoverage {
+    /// The share of required values that are there or accepted, 0 to 1.
+    pub fn fill_rate(&self) -> f64 {
+        self.filled as f64 / self.values.max(1) as f64
+    }
+
+    /// Some values count only because the project accepts them as missing.
+    pub fn has_accepted(&self) -> bool {
+        self.items
+            .iter()
+            .any(|i| i.accepted && i.present < i.required)
+    }
+
+    /// Adds another model's coverage of the same part.
+    pub fn merge(&mut self, other: &PartCoverage) {
+        self.elements += other.elements;
+        self.complete += other.complete;
+        self.values += other.values;
+        self.filled += other.filled;
+        for item in &other.items {
+            let row = match self.items.iter().position(|i| i.item == item.item) {
+                Some(i) => &mut self.items[i],
+                None => {
+                    self.items.push(ItemCoverage {
+                        item: item.item.clone(),
+                        name: item.name.clone(),
+                        required: 0,
+                        present: 0,
+                        accepted: item.accepted,
+                        found_in: Vec::new(),
+                    });
+                    self.items.last_mut().expect("just pushed")
+                }
+            };
+            row.required += item.required;
+            row.present += item.present;
+            row.accepted |= item.accepted;
+            for (place, n) in &item.found_in {
+                match row.found_in.iter_mut().find(|(p, _)| p == place) {
+                    Some((_, total)) => *total += n,
+                    None => row.found_in.push((place.clone(), *n)),
+                }
+            }
+        }
+    }
+}
+
+/// Adds a model's parts to a list over all models, by part id.
+pub fn merge_parts(into: &mut Vec<PartCoverage>, parts: &[PartCoverage]) {
+    for part in parts {
+        match into.iter_mut().find(|p| p.part == part.part) {
+            Some(total) => total.merge(part),
+            None => into.push(part.clone()),
+        }
+    }
+}
+
+/// Sorts parts in the standard's order and each item's places by count.
+pub fn tidy_parts(parts: &mut [PartCoverage], order: impl Fn(&str) -> Option<usize>) {
+    parts.sort_by_key(|c| order(&c.part));
+    for row in parts.iter_mut().flat_map(|p| &mut p.items) {
+        row.found_in
+            .sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    }
+}
+
+/// Results for one model (IFC file): its building parts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelCoverage {
+    pub model: ModelId,
+    /// The model's short name.
+    pub name: String,
+    pub parts: Vec<PartCoverage>,
+}
+
+impl ModelCoverage {
+    /// Elements checked in the model.
+    pub fn elements(&self) -> usize {
+        self.parts.iter().map(|p| p.elements).sum()
+    }
+
+    /// The share of required values that are there or accepted, 0 to 1.
+    pub fn fill_rate(&self) -> f64 {
+        let values: usize = self.parts.iter().map(|p| p.values).sum();
+        let filled: usize = self.parts.iter().map(|p| p.filled).sum();
+        filled as f64 / values.max(1) as f64
+    }
+
+    pub fn has_accepted(&self) -> bool {
+        self.parts.iter().any(PartCoverage::has_accepted)
+    }
 }
 
 /// Summary of an information rule: the levels used and the fill rate per part.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct InformationSummary {
     pub standard: String,
+    /// Over all models.
     pub parts: Vec<PartCoverage>,
+    /// Per model, in the order checked; the same parts split by file.
+    pub models: Vec<ModelCoverage>,
     /// Problems that concern no single element, e.g. a missing IDS file or
     /// an IDS specification that requires elements the models lack.
     pub notes: Vec<String>,
@@ -553,12 +680,18 @@ pub struct InformationSummary {
 pub struct StandardOverrides {
     /// Id of the standard the changes apply to.
     pub base: String,
+    /// Items, by id, accepted as missing for all building parts.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub accepted: BTreeSet<String>,
     /// Sources per item id, replacing the item's own.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub items: BTreeMap<String, Vec<Source>>,
     /// Sources per part id and item id, replacing those of the item for that part.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub parts: BTreeMap<String, BTreeMap<String, Vec<Source>>>,
+    /// Items, by id, accepted as missing for one part, by part id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub accepted_parts: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl StandardOverrides {
@@ -587,7 +720,49 @@ impl StandardOverrides {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty() && self.parts.values().all(BTreeMap::is_empty)
+        self.items.is_empty()
+            && self.parts.values().all(BTreeMap::is_empty)
+            && self.accepted.is_empty()
+            && self.accepted_parts.values().all(BTreeSet::is_empty)
+    }
+
+    /// Whether the item is accepted as missing for the part, or for all
+    /// parts when `part` is None.
+    pub fn is_accepted(&self, item: &str, part: Option<&str>) -> bool {
+        match part {
+            Some(part) => self
+                .accepted_parts
+                .get(part)
+                .is_some_and(|items| items.contains(item)),
+            None => self.accepted.contains(item),
+        }
+    }
+
+    /// Accepts the item as missing, or stops accepting it, for the part or
+    /// for all parts when `part` is None.
+    pub fn set_accepted(&mut self, item: &str, part: Option<&str>, accepted: bool) {
+        match (part, accepted) {
+            (Some(part), true) => {
+                self.accepted_parts
+                    .entry(part.to_owned())
+                    .or_default()
+                    .insert(item.to_owned());
+            }
+            (Some(part), false) => {
+                if let Some(items) = self.accepted_parts.get_mut(part) {
+                    items.remove(item);
+                    if items.is_empty() {
+                        self.accepted_parts.remove(part);
+                    }
+                }
+            }
+            (None, true) => {
+                self.accepted.insert(item.to_owned());
+            }
+            (None, false) => {
+                self.accepted.remove(item);
+            }
+        }
     }
 
     /// The standard with these changes. Changes to items or parts the
@@ -612,6 +787,25 @@ impl StandardOverrides {
                     continue;
                 }
                 part.sources.insert(item.clone(), sources.clone());
+            }
+        }
+        for id in &self.accepted {
+            match standard.items.iter_mut().find(|i| &i.id == id) {
+                Some(item) => item.accepted = true,
+                None => skipped.push(format!("The standard has no item '{id}' any more.")),
+            }
+        }
+        for (part_id, items) in &self.accepted_parts {
+            let Some(part) = standard.parts.iter_mut().find(|p| &p.id == part_id) else {
+                skipped.push(format!("The standard has no part '{part_id}' any more."));
+                continue;
+            };
+            for item in items {
+                if base.item(item).is_none() {
+                    skipped.push(format!("The standard has no item '{item}' any more."));
+                    continue;
+                }
+                part.accepted.insert(item.clone());
             }
         }
         (standard, skipped)
@@ -708,6 +902,24 @@ mod tests {
         let (adapted, skipped) = overrides.apply(base);
         assert_eq!(skipped.len(), 2);
         assert_eq!(adapted.items, base.items);
+        // Accepting an item as missing reaches the item, or one part.
+        let mut overrides = StandardOverrides::new(&base.standard.id);
+        overrides.set_accepted("depth", None, true);
+        overrides.set_accepted("load-bearing", Some("foundation"), true);
+        assert!(!overrides.is_empty());
+        assert!(overrides.is_accepted("depth", None));
+        assert!(!overrides.is_accepted("depth", Some("foundation")));
+        let (adapted, skipped) = overrides.apply(base);
+        assert!(skipped.is_empty(), "{skipped:?}");
+        let depth = adapted.item("depth").unwrap();
+        let foundation = adapted.parts.iter().find(|p| p.id == "foundation").unwrap();
+        assert!(adapted.accepted(foundation, depth));
+        assert!(adapted.accepted(foundation, adapted.item("load-bearing").unwrap()));
+        assert!(!base.accepted(foundation, base.item("depth").unwrap()));
+        let text = overrides.to_toml();
+        assert_eq!(StandardOverrides::from_toml(&text).unwrap(), overrides);
+        overrides.set_accepted("load-bearing", Some("foundation"), false);
+        assert!(overrides.accepted_parts.is_empty());
         // Bad sources are refused.
         let bad = "base = \"x\"
 [items]
