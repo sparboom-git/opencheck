@@ -19,7 +19,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::app::{OpenCheckApp, Tab};
 use crate::checking_ui::{panel_frame, section_title};
-use crate::scene::ElementRef;
+use crate::scene::{ElementRef, PaintRest};
 use crate::theme;
 
 /// State of the tab; the rules themselves are kept with the project.
@@ -31,8 +31,9 @@ pub struct VisualUi {
     pub results: FxHashMap<usize, VisualResult>,
     /// Keep the colours on the other tabs.
     pub keep: bool,
-    /// Draw the elements the rule does not colour normally, not ghosted.
-    pub show_rest: bool,
+    /// How the elements a rule does not colour are drawn, where it was chosen:
+    /// by kind of rule. See [`rest`] for the kinds without a choice.
+    pub rest: FxHashMap<std::mem::Discriminant<VisualKind>, PaintRest>,
     /// Analyse only the selected elements.
     pub only_selection: bool,
     /// The plan shown from a result's plan buttons.
@@ -61,6 +62,48 @@ fn element_ref(key: &ElementKey) -> ElementRef {
     }
 }
 
+/// How the selected rule draws the elements it does not colour. An alignment
+/// check leaves them out until something else is chosen, as only the walls
+/// and columns matter there; the other checks ghost them.
+pub fn rest(app: &OpenCheckApp) -> PaintRest {
+    let Some(rule) = app.visual.selected.and_then(|i| app.checking.visual.get(i)) else {
+        return PaintRest::default();
+    };
+    let chosen = app.visual.rest.get(&std::mem::discriminant(&rule.kind));
+    chosen.copied().unwrap_or(match rule.kind {
+        VisualKind::Alignment(_) => PaintRest::Hidden,
+        _ => PaintRest::Ghosted,
+    })
+}
+
+/// Chooses how the selected rule's kind draws the elements it does not colour.
+pub fn set_rest(app: &mut OpenCheckApp, rest: PaintRest) {
+    let Some(rule) = app.visual.selected.and_then(|i| app.checking.visual.get(i)) else {
+        return;
+    };
+    app.visual
+        .rest
+        .insert(std::mem::discriminant(&rule.kind), rest);
+    apply_paint(app);
+}
+
+/// The choices of [`set_rest`], as radio buttons.
+pub fn rest_choices(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> bool {
+    let current = rest(app);
+    let mut clicked = false;
+    for (choice, label) in [
+        (PaintRest::Shown, "Shown"),
+        (PaintRest::Ghosted, "Ghosted: faint and grey"),
+        (PaintRest::Hidden, "Hidden: only the coloured elements"),
+    ] {
+        if ui.radio(current == choice, label).clicked() {
+            set_rest(app, choice);
+            clicked = true;
+        }
+    }
+    clicked
+}
+
 /// Shows or removes the colours, after the tab, the result or the options
 /// changed.
 pub fn apply_paint(app: &mut OpenCheckApp) {
@@ -68,7 +111,7 @@ pub fn apply_paint(app: &mut OpenCheckApp) {
     let shown = state.shown();
     let visible = shown.is_some() && (app.tab == Tab::Visual || state.keep);
     app.view.paint = shown.filter(|_| visible).map(|r| r.colors.clone());
-    app.view.paint_ghost_rest = !state.show_rest;
+    app.view.paint_rest = rest(app);
     app.view.modes_dirty = true;
 }
 
@@ -114,45 +157,43 @@ fn kind_label(rule: &VisualRule) -> String {
 // ---- Left: rules and settings --------------------------------------------
 
 pub fn rules_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
-    egui::Panel::left("visual_rules")
-        .resizable(true)
-        .default_size(360.0)
-        .min_size(280.0)
-        .frame(panel_frame())
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                section_title(ui, "Visual checks");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.menu_button(format!("{}  Add", icon::PLUS), |ui| {
-                        ui.set_min_width(280.0);
-                        for rule in offered_kinds(app) {
-                            if ui
-                                .button(kind_label(&rule))
-                                .on_hover_text(rule.kind.description())
-                                .clicked()
-                            {
-                                add_rule(app, rule);
-                                ui.close();
-                            }
-                        }
-                    });
-                });
+    crate::side_panel::show(app, ui, |app| &mut app.visual_panel, rules_contents);
+}
+
+fn rules_contents(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        section_title(ui, "Visual checks");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.menu_button(format!("{}  Add", icon::PLUS), |ui| {
+                ui.set_min_width(280.0);
+                for rule in offered_kinds(app) {
+                    if ui
+                        .button(kind_label(&rule))
+                        .on_hover_text(rule.kind.description())
+                        .clicked()
+                    {
+                        add_rule(app, rule);
+                        ui.close();
+                    }
+                }
             });
-            ui.add_space(4.0);
-            if app.checking.visual.is_empty() {
-                empty(app, ui);
-                return;
-            }
-            rule_list(app, ui);
+            app.visual_panel.pin(ui);
+        });
+    });
+    ui.add_space(4.0);
+    if app.checking.visual.is_empty() {
+        empty(app, ui);
+        return;
+    }
+    rule_list(app, ui);
+    ui.separator();
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            settings(app, ui);
+            ui.add_space(10.0);
             ui.separator();
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    settings(app, ui);
-                    ui.add_space(10.0);
-                    ui.separator();
-                    crate::check_docs::list(app, ui);
-                });
+            crate::check_docs::list(app, ui);
         });
 }
 
@@ -329,17 +370,15 @@ fn settings(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         }
     });
     ui.add_space(6.0);
-    let state = &mut app.visual;
-    let keep = ui
-        .checkbox(&mut state.keep, "Keep the colours on the other tabs")
-        .changed();
-    let rest = ui
-        .checkbox(&mut state.show_rest, "Show the other elements normally")
-        .on_hover_text("Otherwise they are ghosted, so the colours stand out")
-        .changed();
-    if keep || rest {
+    if ui
+        .checkbox(&mut app.visual.keep, "Keep the colours on the other tabs")
+        .changed()
+    {
         apply_paint(app);
     }
+    ui.add_space(6.0);
+    ui.label("The other elements");
+    rest_choices(app, ui);
     if let Some(result) = app.visual.results.get(&index) {
         ui.add_space(8.0);
         let stale = app.checking.visual.get(index) != Some(&result.rule);

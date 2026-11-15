@@ -135,6 +135,16 @@ pub struct OpenCheckApp {
     pub settings_open: bool,
     /// Features under development, and whether they are switched on.
     pub wip: crate::wip::Wip,
+    /// The Check tab's rulesets panel: always shown or hiding itself.
+    pub rulesets_panel: crate::side_panel::SidePanel,
+    /// The same for the Visual Check tab's panel of checks.
+    pub visual_panel: crate::side_panel::SidePanel,
+    /// The last run, when it did not close normally: told once at the start.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub unclean: Option<crate::logs::Unclean>,
+    /// How many of `errors` are in the session's log.
+    #[cfg(not(target_arch = "wasm32"))]
+    errors_logged: usize,
     /// The user's Excel template; `None` for the standard one.
     pub excel_template: Option<std::path::PathBuf>,
     /// The user's report template; `None` for the standard one.
@@ -190,6 +200,9 @@ impl OpenCheckApp {
         theme::install(&cc.egui_ctx, theme::saved_dark());
         let render_state = cc.wgpu_render_state.clone();
         if let Some(rs) = &render_state {
+            // For the session's log: faults often depend on the graphics card.
+            #[cfg(not(target_arch = "wasm32"))]
+            log::info!("graphics: {:?}", rs.adapter.get_info());
             SceneGpu::install(rs);
         }
         let mut app = Self {
@@ -245,6 +258,20 @@ impl OpenCheckApp {
             welcome_never_again: false,
             settings_open: false,
             wip: crate::wip::Wip::saved(),
+            rulesets_panel: crate::side_panel::SidePanel::saved(
+                "check_rulesets",
+                "rulesets_autohide",
+                340.0,
+            ),
+            visual_panel: crate::side_panel::SidePanel::saved(
+                "visual_rules",
+                "visual_autohide",
+                360.0,
+            ),
+            #[cfg(not(target_arch = "wasm32"))]
+            unclean: crate::logs::take_previous(),
+            #[cfg(not(target_arch = "wasm32"))]
+            errors_logged: 0,
             excel_template: crate::settings::saved_excel_template(),
             report_template: crate::settings::saved_path(crate::report::TEMPLATE_SETTING),
             initials: crate::settings::initials(),
@@ -2127,6 +2154,14 @@ fn source_label(source: &ModelSource) -> String {
 
 impl eframe::App for OpenCheckApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // The errors shown to the user also go to the session's log.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            for error in self.errors.iter().skip(self.errors_logged) {
+                log::error!("shown to the user: {error}");
+            }
+            self.errors_logged = self.errors.len();
+        }
         let ctx = ui.ctx().clone();
         if ctx.input(|i| i.key_pressed(egui::Key::F12)) {
             self.frame_stats = !self.frame_stats;
@@ -2198,6 +2233,8 @@ impl eframe::App for OpenCheckApp {
             crate::bcf_ui::window(self, &ctx);
             crate::settings::window(self, &ctx);
             crate::wip::conversions_window(self, &ctx);
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::logs::window(self, &ctx);
             crate::check_docs::window(self, &ctx);
             crate::exclusions_ui::window(self, &ctx);
             crate::issue_dialog::window(self, &ctx);

@@ -851,51 +851,67 @@ fn summary(app: &OpenCheckApp, ui: &mut egui::Ui, report: &CheckReport) {
     }
 }
 
+/// A combo box as one piece of a wrapped row. A combo box asks for the rest
+/// of the row, so on its own it never moves to the next line and the row
+/// holds the panel wide.
+fn wrapping<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.allocate_ui(egui::vec2(width, ui.spacing().interact_size.y), add)
+        .inner
+}
+
 fn filters(app: &mut OpenCheckApp, ui: &mut egui::Ui, report: &CheckReport) {
     let presort = app.checking.tab == ResultsTab::Presort;
     let filter = &mut app.checking.filter;
     ui.horizontal_wrapped(|ui| {
         // Suggestions are only filtered on the Pre-sort tab.
         if presort {
-            egui::ComboBox::from_id_salt("filter_suggestion")
-                .selected_text(filter.suggestion.label())
-                .width(130.0)
+            wrapping(ui, 130.0, |ui| {
+                egui::ComboBox::from_id_salt("filter_suggestion")
+                    .selected_text(filter.suggestion.label())
+                    .width(130.0)
+                    .show_ui(ui, |ui| {
+                        for s in SuggestionFilter::ALL {
+                            ui.selectable_value(&mut filter.suggestion, s, s.label());
+                        }
+                    });
+            });
+        }
+        wrapping(ui, 110.0, |ui| {
+            egui::ComboBox::from_id_salt("filter_status")
+                .selected_text(filter.status.label())
+                .width(110.0)
                 .show_ui(ui, |ui| {
-                    for s in SuggestionFilter::ALL {
-                        ui.selectable_value(&mut filter.suggestion, s, s.label());
+                    for s in StatusFilter::ALL {
+                        ui.selectable_value(&mut filter.status, s, s.label());
                     }
                 });
-        }
-        egui::ComboBox::from_id_salt("filter_status")
-            .selected_text(filter.status.label())
-            .width(110.0)
-            .show_ui(ui, |ui| {
-                for s in StatusFilter::ALL {
-                    ui.selectable_value(&mut filter.status, s, s.label());
-                }
-            });
-        egui::ComboBox::from_id_salt("filter_category")
-            .selected_text(filter.category.label())
-            .width(110.0)
-            .show_ui(ui, |ui| {
-                for c in CategoryFilter::ALL {
-                    ui.selectable_value(&mut filter.category, c, c.label());
-                }
-            })
-            .response
-            .on_hover_text(
-                "The C402 category decided for the finding: an approved suggestion, or the \
-                 criticality of the issue it is in",
-            );
-        egui::ComboBox::from_id_salt("filter_severity")
-            .selected_text(filter.severity.map_or("Severity: all", |s| s.label()))
-            .width(110.0)
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut filter.severity, None, "Severity: all");
-                for s in [Severity::Critical, Severity::Moderate, Severity::Low] {
-                    ui.selectable_value(&mut filter.severity, Some(s), s.label());
-                }
-            });
+        });
+        wrapping(ui, 110.0, |ui| {
+            egui::ComboBox::from_id_salt("filter_category")
+                .selected_text(filter.category.label())
+                .width(110.0)
+                .show_ui(ui, |ui| {
+                    for c in CategoryFilter::ALL {
+                        ui.selectable_value(&mut filter.category, c, c.label());
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "The C402 category decided for the finding: an approved suggestion, or the \
+                     criticality of the issue it is in",
+                );
+        });
+        wrapping(ui, 110.0, |ui| {
+            egui::ComboBox::from_id_salt("filter_severity")
+                .selected_text(filter.severity.map_or("Severity: all", |s| s.label()))
+                .width(110.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut filter.severity, None, "Severity: all");
+                    for s in [Severity::Critical, Severity::Moderate, Severity::Low] {
+                        ui.selectable_value(&mut filter.severity, Some(s), s.label());
+                    }
+                });
+        });
         let rule_name = filter
             .rule
             .as_ref()
@@ -908,23 +924,25 @@ fn filters(app: &mut OpenCheckApp, ui: &mut egui::Ui, report: &CheckReport) {
                 })
             })
             .unwrap_or_else(|| "Rule: all".to_owned());
-        egui::ComboBox::from_id_salt("filter_rule")
-            .selected_text(rule_name)
-            .width(150.0)
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut filter.rule, None, "Rule: all");
-                for rs in report
-                    .rulesets
-                    .iter()
-                    .filter(|rs| filter.ruleset.as_ref().is_none_or(|id| *id == rs.info.id))
-                {
-                    for r in &rs.rules {
-                        let key = rule_key(&rs.info.id, &r.rule.id);
-                        ui.selectable_value(&mut filter.rule, Some(key), &r.rule.name)
-                            .on_hover_text(&rs.info.name);
+        wrapping(ui, 150.0, |ui| {
+            egui::ComboBox::from_id_salt("filter_rule")
+                .selected_text(rule_name)
+                .width(150.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut filter.rule, None, "Rule: all");
+                    for rs in report
+                        .rulesets
+                        .iter()
+                        .filter(|rs| filter.ruleset.as_ref().is_none_or(|id| *id == rs.info.id))
+                    {
+                        for r in &rs.rules {
+                            let key = rule_key(&rs.info.id, &r.rule.id);
+                            ui.selectable_value(&mut filter.rule, Some(key), &r.rule.name)
+                                .on_hover_text(&rs.info.name);
+                        }
                     }
-                }
-            });
+                })
+        });
     });
 }
 

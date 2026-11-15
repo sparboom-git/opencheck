@@ -288,6 +288,14 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
         ui.separator();
         ui.add_space(4.0);
         crate::wip::section(app, ui);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            ui.add_space(12.0);
+            ui.separator();
+            ui.add_space(4.0);
+            crate::logs::section(ui);
+        }
     });
     app.settings_open = open;
 }

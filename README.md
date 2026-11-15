@@ -110,7 +110,11 @@ checkers.
 
 - A new project has no rulesets; *Add* offers the **built-in rulesets**, your
   own rulesets and **IDS 1.0** files (buildingSMART Information Delivery
-  Specification). Each ruleset can be limited to some of the models.
+  Specification). Each ruleset can be limited to some of the models. The
+  pin next to *Add* lets the rulesets panel hide itself, leaving the room to
+  the 3D view and the results: it comes out over the view with the mouse on
+  the bar at the left edge. The choice is remembered. The Visual Check tab's
+  panel of checks has the same pin, with a choice of its own.
   - *Clash: between disciplines*: every loaded model against the others.
   - *Clash: within each model*: an internal check of each model on its own.
     Fittings, terminals and dampers joined to the duct or pipe of their own
@@ -294,7 +298,8 @@ Each check is added on its own:
 - **Alignment of walls and columns**: structural walls and columns standing
   in line from storey to storey share a colour; those out of line with the
   one above or below are red. Centre line or face alignment, with a
-  tolerance.
+  tolerance. Everything else is hidden, so only the walls and columns show;
+  *The other elements* brings it back, ghosted or as it is.
 - **Dimensions in pipe and duct systems** (WIP, offered with WIP switched on
   in *File → Settings*): each kind of system in its own
   muted colour; a pipe or duct larger than the piece before it, seen from
@@ -343,6 +348,20 @@ fit. On the desktop the button next to a dialog's close button opens it in a
 window of its own, which can be moved outside OpenCheck's window, for
 example onto a second screen; *Back into OpenCheck* puts it back. The choice
 is remembered.
+
+### Logs and crash reports
+
+The desktop app keeps a log of each of its last ten sessions in
+`%APPDATA%\OpenCheck\logs`: how it started (version, system, graphics
+card), the warnings and errors, and how the session ended. When the program
+fails it writes a crash report there: what failed, where, and the last
+lines of the log. A session that did not close normally is told at the next
+start, with a button showing the file. *File → Settings → Open the log
+folder* opens the folder. Nothing is sent from OpenCheck: the user sends
+the files when reporting a problem. They hold no model content, but file
+names and folder paths can appear in them. When the system itself ends the
+program (out of memory, a fault in the graphics driver) no report can be
+written; the log still shows that the session did not close.
 
 ## Projects
 

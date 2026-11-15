@@ -3631,7 +3631,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "opencheck-app"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3665,7 +3665,7 @@ dependencies = [
 
 [[package]]
 name = "opencheck-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3678,7 +3678,7 @@ dependencies = [
 
 [[package]]
 name = "opencheck-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "glam 0.31.1",
  "humantime",
@@ -3700,7 +3700,7 @@ dependencies = [
 
 [[package]]
 name = "opencheck-rvt"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "opencheck-core",
  "rvt",

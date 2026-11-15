@@ -90,44 +90,50 @@ pub fn rule_summary(rule: &opencheck_core::check::Rule) -> String {
 // ---- Left: rulesets ------------------------------------------------------------
 
 pub fn rulesets_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
-    egui::Panel::left("check_rulesets")
-        .resizable(true)
-        .default_size(340.0)
-        .min_size(280.0)
-        .frame(panel_frame())
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                section_title(ui, "Rulesets");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    add_menu(app, ui);
-                });
-            });
-            let manager = egui::Button::new(
-                RichText::new(format!("{}  Ruleset Manager", icon::SLIDERS_HORIZONTAL)).strong(),
-            )
-            .min_size(egui::vec2(ui.available_width(), 30.0));
-            if ui
-                .add(manager)
-                .on_hover_text("Create and edit rulesets and rules, keep a library, run checks")
-                .clicked()
-            {
-                app.manager.open();
-            }
-            ui.add_space(6.0);
-            let run_area = 92.0;
-            egui::ScrollArea::vertical()
-                .max_height((ui.available_height() - run_area).max(80.0))
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    if app.checking.rulesets.is_empty() {
-                        library(app, ui);
-                    } else {
-                        ruleset_cards(app, ui);
-                    }
-                });
-            ui.separator();
-            run_area_ui(app, ui);
+    crate::side_panel::show(app, ui, |app| &mut app.rulesets_panel, rulesets_contents);
+}
+
+fn rulesets_contents(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        section_title(ui, "Rulesets");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            add_menu(app, ui);
+            app.rulesets_panel.pin(ui);
         });
+    });
+    let manager = egui::Button::new(
+        RichText::new(format!("{}  Ruleset Manager", icon::SLIDERS_HORIZONTAL)).strong(),
+    )
+    .min_size(egui::vec2(ui.available_width(), 30.0));
+    if ui
+        .add(manager)
+        .on_hover_text("Create and edit rulesets and rules, keep a library, run checks")
+        .clicked()
+    {
+        app.manager.open();
+    }
+    ui.add_space(6.0);
+    let run_area = 92.0;
+    egui::ScrollArea::vertical()
+        .max_height((ui.available_height() - run_area).max(80.0))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            if app.checking.rulesets.is_empty() {
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(format!(
+                        "No rulesets yet. Add the ones you want to run with {} Add; they are \
+                         saved with the project.",
+                        icon::PLUS
+                    ))
+                    .color(theme::text_muted()),
+                );
+            } else {
+                ruleset_cards(app, ui);
+            }
+        });
+    ui.separator();
+    run_area_ui(app, ui);
 }
 
 /// The built-in rulesets, finished ones (`wip` false) or those still in
@@ -322,56 +328,6 @@ fn download_guide(app: &mut OpenCheckApp) {
     ) && let Err(e) = crate::platform::write(&path, RULESET_GUIDE.as_bytes())
     {
         app.errors.push(format!("Could not save the guide: {e}"));
-    }
-}
-
-/// Shown while the project has no rulesets: the built-in ones as cards.
-fn library(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
-    ui.label(
-        RichText::new("Add the rulesets you want to run. They are saved with the project.")
-            .color(theme::text_muted()),
-    );
-    ui.add_space(6.0);
-    let card = |app: &mut OpenCheckApp, ui: &mut egui::Ui, index: usize, ruleset: &Ruleset| {
-        egui::Frame::new()
-            .fill(theme::surface())
-            .corner_radius(8)
-            .inner_margin(egui::Margin::same(10))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&ruleset.ruleset.name).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(format!("{} Add", icon::PLUS)).clicked() {
-                            app.checking.add_builtin(index);
-                            app.session.dirty = true;
-                        }
-                    });
-                });
-                ui.label(
-                    RichText::new(&ruleset.ruleset.description)
-                        .small()
-                        .color(theme::text_muted()),
-                );
-            });
-        ui.add_space(4.0);
-    };
-    for (index, ruleset) in builtin_list(false) {
-        card(app, ui, index, &ruleset);
-    }
-    // Rulesets not finished yet are offered only with WIP on (Settings).
-    let wip = builtin_list(true);
-    if app.wip.on && !wip.is_empty() {
-        egui::CollapsingHeader::new(RichText::new(wip_heading()).strong())
-            .id_salt("wip_rulesets")
-            .default_open(false)
-            .show(ui, |ui| {
-                ui.label(RichText::new(WIP_NOTE).small().color(theme::text_muted()));
-                ui.add_space(4.0);
-                for (index, ruleset) in &wip {
-                    card(app, ui, *index, ruleset);
-                }
-            });
     }
 }
 

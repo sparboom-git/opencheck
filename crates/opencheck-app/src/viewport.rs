@@ -1483,6 +1483,25 @@ fn tool_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
                         }
                     }
                 });
+            } else if app.view.paint.is_some() {
+                // A visual check's colours: the elements it does not colour.
+                let button = icon_button(
+                    ui,
+                    icon::CUBE_TRANSPARENT,
+                    app.view.paint_rest != crate::scene::PaintRest::Shown,
+                    "The elements the visual check does not colour: shown, ghosted or hidden",
+                );
+                egui::Popup::menu(&button).show(|ui| {
+                    ui.set_min_width(220.0);
+                    ui.label(
+                        RichText::new("The other elements")
+                            .small()
+                            .color(theme::text_muted()),
+                    );
+                    if crate::visual_ui::rest_choices(app, ui) {
+                        ui.close();
+                    }
+                });
             } else if icon_button(ui, icon::CUBE_TRANSPARENT, app.view.xray, "X-ray (X)").clicked()
             {
                 app.toggle_xray();

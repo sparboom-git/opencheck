@@ -17,7 +17,9 @@ The checks are kept with the project; *Analyse* works the colours out. The
 right panel lists the problems first (what is wrong, with the element under
 it) and then the colours. A click selects the element or the group and zooms
 to it. Everything the check does not colour is ghosted, so the colours stand
-out; *Show the other elements normally* turns that off. The colours stay on
+out; under *The other elements* (or the X-ray button in the 3D view) they can
+be shown normally or hidden instead. The alignment check hides them from the
+start, so only the walls and columns are seen. The colours stay on
 the Visual Check tab, or on all tabs with *Keep the colours on the other
 tabs*. *Clear colours* removes them.
 

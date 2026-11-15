@@ -77,10 +77,22 @@ pub struct ViewState {
     pub hide_context: bool,
     /// Colours from a visual check, drawn instead of the model's own.
     pub paint: Option<FxHashMap<ElementRef, [u8; 3]>>,
-    /// With `paint`: ghost the elements it does not colour.
-    pub paint_ghost_rest: bool,
+    /// With `paint`: what happens to the elements it does not colour.
+    pub paint_rest: PaintRest,
     /// Set whenever something that affects element modes changes.
     pub modes_dirty: bool,
+}
+
+/// How the elements a visual check does not colour are drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PaintRest {
+    /// As they are without the check.
+    Shown,
+    /// Faint and grey, so the colours stand out.
+    #[default]
+    Ghosted,
+    /// Left out: only the coloured elements are drawn.
+    Hidden,
 }
 
 impl ViewState {
@@ -230,6 +242,13 @@ impl ViewState {
                 .is_some_and(|s| model.slot_storey[local_slot].as_deref() != Some(s.as_str()));
         // Reviewing findings with the rest hidden rather than ghosted.
         let hidden = hidden || (self.focus.is_some() && !self.show_context && self.hide_context);
+        // A visual check that leaves out what it does not colour.
+        let hidden = hidden
+            || (self.paint_rest == PaintRest::Hidden
+                && self
+                    .paint
+                    .as_ref()
+                    .is_some_and(|p| !p.contains_key(&element)));
         if hidden {
             DisplayMode::Hidden
         } else if self.ghosted.contains(&element) || (self.focus.is_some() && !self.show_context) {
@@ -273,7 +292,9 @@ impl ViewState {
             (DisplayMode::Normal | DisplayMode::Hover | DisplayMode::Ghost, Some([r, g, b])) => {
                 PAINTED | (u32::from(*r) << 16) | (u32::from(*g) << 8) | u32::from(*b)
             }
-            (DisplayMode::Normal | DisplayMode::Hover, None) if self.paint_ghost_rest => {
+            (DisplayMode::Normal | DisplayMode::Hover, None)
+                if self.paint_rest == PaintRest::Ghosted =>
+            {
                 DisplayMode::Ghost as u32
             }
             _ => mode as u32,

@@ -28,6 +28,8 @@ mod issues_ui;
 mod jobs;
 mod lenient;
 mod library;
+#[cfg(not(target_arch = "wasm32"))]
+mod logs;
 mod markers;
 mod measure;
 mod panels;
@@ -43,6 +45,7 @@ mod ruleset_manager;
 mod scene;
 mod session;
 mod settings;
+mod side_panel;
 mod snap;
 mod standard_editor;
 mod theme;
@@ -60,6 +63,8 @@ use eframe::egui;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
+    // First: a failure while starting is then in the log too.
+    logs::init();
     let files: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
 
     let options = eframe::NativeOptions {
@@ -75,11 +80,16 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
 
-    eframe::run_native(
+    let result = eframe::run_native(
         "OpenCheck",
         options,
         Box::new(|cc| Ok(Box::new(app::OpenCheckApp::new(cc, files)))),
-    )
+    );
+    if let Err(e) = &result {
+        log::error!("the window could not be run: {e}");
+    }
+    logs::closed();
+    result
 }
 
 /// The window's icon, from the PNG made by `scripts/app-icons.py`.

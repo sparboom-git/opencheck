@@ -26,6 +26,8 @@ serde_json.workspace = true
 sha2.workspace = true
 toml.workspace = true
 webbrowser = "1"
+# The session log and what the libraries warn about (see logs.rs).
+log = "0.4"
 png = "0.18.1"
 # Typesetting of reports: PDF and the page preview.
 typst = "=0.15.1"
@@ -45,7 +47,6 @@ arboard = { version = "3", default-features = false, features = ["image-data"] }
 # Browser only: start-up, file downloads and async file picking.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = "0.4"
-log = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url"] }
 
