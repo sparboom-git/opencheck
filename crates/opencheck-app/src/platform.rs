@@ -74,6 +74,8 @@ pub fn clipboard_png() -> Option<Vec<u8>> {
 }
 
 /// RGBA pixels, row by row, as a PNG.
+// In the browser only the tests use it: there is no clipboard picture there.
+#[cfg_attr(all(target_arch = "wasm32", not(test)), expect(dead_code))]
 pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
     if rgba.len() < (width as usize) * (height as usize) * 4 {
         return None;
