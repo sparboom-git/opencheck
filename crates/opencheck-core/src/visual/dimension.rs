@@ -162,11 +162,11 @@ pub(super) fn run(rule: &DimensionRule, models: &[VisualModel]) -> VisualOutcome
 
     // A colour per kind of system.
     let mut kinds: Vec<(String, Vec<usize>)> = Vec::new();
-    for n in 0..net.nodes.len() {
+    for (n, node) in net.nodes.iter().enumerate() {
         if !taking_part(n) {
             continue;
         }
-        let kind = &net.nodes[n].kind;
+        let kind = &node.kind;
         match kinds.iter_mut().find(|(k, _)| k == kind) {
             Some((_, list)) => list.push(n),
             None => kinds.push((kind.clone(), vec![n])),
