@@ -72,6 +72,13 @@ pub enum VisualKind {
     Levels(LevelRule),
 }
 
+impl VisualKind {
+    /// Not finished: offered only as work in progress.
+    pub fn work_in_progress(&self) -> bool {
+        matches!(self, Self::Dimensions(_) | Self::DrainSlope(_))
+    }
+}
+
 impl VisualRule {
     fn new(name: &str, kind: VisualKind) -> Self {
         Self {

@@ -50,6 +50,7 @@ mod triage;
 mod typeset;
 mod viewport;
 mod visual_ui;
+mod wip;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;

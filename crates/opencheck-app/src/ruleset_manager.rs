@@ -265,6 +265,8 @@ fn item_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 app.manager.item,
                 Item::Builtin(i) if BUILTIN_RULESETS.get(i).is_some_and(|b| b.work_in_progress)
             );
+            // Offered only with WIP on (Settings).
+            let wip_on = app.wip.on;
             let mut builtin = |ui: &mut egui::Ui, wip: bool| {
                 for (i, builtin) in BUILTIN_RULESETS.iter().enumerate() {
                     if builtin.work_in_progress != wip {
@@ -280,21 +282,23 @@ fn item_list(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 }
             };
             builtin(ui, false);
-            egui::CollapsingHeader::new(
-                RichText::new("WIP").small().strong().color(theme::text_muted()),
-            )
-            .id_salt("manager_wip")
-            .default_open(selected_wip)
-            .show(ui, |ui| {
-                ui.label(
-                    RichText::new(crate::checking_ui::WIP_NOTE)
-                        .small()
-                        .color(theme::text_muted()),
-                );
-                builtin(ui, true);
-            })
-            .header_response
-            .on_hover_text(crate::checking_ui::WIP_NOTE);
+            if wip_on || selected_wip {
+                egui::CollapsingHeader::new(
+                    RichText::new("WIP").small().strong().color(theme::text_muted()),
+                )
+                .id_salt("manager_wip")
+                .default_open(selected_wip)
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new(crate::checking_ui::WIP_NOTE)
+                            .small()
+                            .color(theme::text_muted()),
+                    );
+                    builtin(ui, true);
+                })
+                .header_response
+                .on_hover_text(crate::checking_ui::WIP_NOTE);
+            }
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("MY LIBRARY").small().strong().color(theme::text_muted()));

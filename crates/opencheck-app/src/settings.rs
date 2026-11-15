@@ -1,6 +1,6 @@
 //! The user's choices for the app itself, kept in
 //! `%APPDATA%/OpenCheck/settings.json` (the theme, the Excel and report
-//! templates), and the Settings dialog (File → Settings).
+//! templates, the WIP switch), and the Settings dialog (File → Settings).
 
 use std::path::PathBuf;
 
@@ -283,6 +283,11 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
         ui.separator();
         ui.add_space(4.0);
         report_section(app, ui);
+
+        ui.add_space(12.0);
+        ui.separator();
+        ui.add_space(4.0);
+        crate::wip::section(app, ui);
     });
     app.settings_open = open;
 }

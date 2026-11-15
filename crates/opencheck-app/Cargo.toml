@@ -36,6 +36,8 @@ typst-render = "=0.15.1"
 # Desktop only: BCF Live's HTTP client and sign-in.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ureq = { version = "3", features = ["json"] }
+# Revit files (WIP): the conversion takes long, so not in the browser.
+opencheck-rvt.workspace = true
 getrandom = "0.3"
 # Pictures pasted into report blocks.
 arboard = { version = "3", default-features = false, features = ["image-data"] }

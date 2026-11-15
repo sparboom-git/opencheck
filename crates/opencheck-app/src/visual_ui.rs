@@ -92,6 +92,25 @@ fn kind_icon(kind: &VisualKind) -> &'static str {
     }
 }
 
+/// The checks that can be added: those still in progress only with WIP on
+/// (File → Settings). One already in a project stays.
+fn offered_kinds(app: &OpenCheckApp) -> Vec<VisualRule> {
+    VisualRule::all_kinds()
+        .into_iter()
+        .filter(|rule| app.wip.on || !rule.kind.work_in_progress())
+        .collect()
+}
+
+/// A check's icon and name, marked when it is still in progress.
+fn kind_label(rule: &VisualRule) -> String {
+    let wip = if rule.kind.work_in_progress() {
+        "  (WIP)"
+    } else {
+        ""
+    };
+    format!("{}  {}{wip}", kind_icon(&rule.kind), rule.name)
+}
+
 // ---- Left: rules and settings --------------------------------------------
 
 pub fn rules_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
@@ -106,10 +125,9 @@ pub fn rules_panel(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.menu_button(format!("{}  Add", icon::PLUS), |ui| {
                         ui.set_min_width(280.0);
-                        for rule in VisualRule::all_kinds() {
-                            let text = format!("{}  {}", kind_icon(&rule.kind), rule.name);
+                        for rule in offered_kinds(app) {
                             if ui
-                                .button(text)
+                                .button(kind_label(&rule))
                                 .on_hover_text(rule.kind.description())
                                 .clicked()
                             {
@@ -154,11 +172,9 @@ fn empty(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         .color(theme::text_muted()),
     );
     ui.add_space(8.0);
-    for rule in VisualRule::all_kinds() {
-        let button = egui::Button::new(
-            RichText::new(format!("{}  {}", kind_icon(&rule.kind), rule.name)).strong(),
-        )
-        .min_size(egui::vec2(ui.available_width(), 30.0));
+    for rule in offered_kinds(app) {
+        let button = egui::Button::new(RichText::new(kind_label(&rule)).strong())
+            .min_size(egui::vec2(ui.available_width(), 30.0));
         if ui
             .add(button)
             .on_hover_text(rule.kind.description())

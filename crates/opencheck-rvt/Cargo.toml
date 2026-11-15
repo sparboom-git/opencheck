@@ -1,0 +1,17 @@
+[package]
+name = "opencheck-rvt"
+description = "Revit files for OpenCheck: converts .rvt to IFC4 with rvt-rs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The converter itself. Its version is set once, in the workspace Cargo.toml.
+rvt.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# The example reads the converted IFC back as OpenCheck does.
+opencheck-core.workspace = true

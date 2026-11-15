@@ -56,6 +56,14 @@ slower, and the page waits while a model loads or a check runs.
 - Load several IFC files (IFC2x3, IFC4, IFC4x3) into one federated model;
   drop files on the window or use *File → Add IFC models*. The discipline of
   each model is guessed from its file name and can be changed.
+- **WIP, features under development**: switched on in *File → Settings*, and
+  off until you do. With it off OpenCheck offers only what is stable. In WIP
+  now: the clearance rulesets (MEP near structure, cable trays, ventilation),
+  the visual checks of dimensions in pipe and duct systems and of the fall of
+  drain pipes, and adding Revit files (`.rvt`), converted to IFC by
+  [rvt-rs](https://github.com/DrunkOnJava/rvt-rs); see
+  [docs/revit-files.md](docs/revit-files.md). A ruleset or check already in a
+  project stays when WIP is switched off.
 - Switch models on and off, browse the spatial structure and read the
   properties, classifications, materials and systems of any element.
 - **Update a model** to a newer version of its IFC file with the ↻ button on
@@ -122,8 +130,9 @@ checkers.
     See [docs/information-requirements.md](docs/information-requirements.md).
   - *Clearance: MEP near structure*, *Electrical: cable tray clearances* and
     *Ventilation: clearances*. These three are **work in progress**: they are
-    offered apart, under *Work in progress* in the Add menu and *WIP* in the
-    Ruleset Manager, and marked WIP when added.
+    offered only with WIP switched on in *File → Settings*, apart, under
+    *Work in progress* in the Add menu and *WIP* in the Ruleset Manager, and
+    marked WIP when added.
 - **Free zones**: room an element needs along its whole length, such as the
   service area beside a cable tray, the headroom above it or the space in
   front of a vertical ladder. The zone may be interrupted over a set length
@@ -286,10 +295,12 @@ Each check is added on its own:
   in line from storey to storey share a colour; those out of line with the
   one above or below are red. Centre line or face alignment, with a
   tolerance.
-- **Dimensions in pipe and duct systems**: each kind of system in its own
+- **Dimensions in pipe and duct systems** (WIP, offered with WIP switched on
+  in *File → Settings*): each kind of system in its own
   muted colour; a pipe or duct larger than the piece before it, seen from
   the start of its system, is red.
-- **Fall of drain pipes**: drain pipes green with enough fall, yellow with
+- **Fall of drain pipes** (WIP, as above): drain pipes green with enough
+  fall, yellow with
   too little, red when flat or falling the wrong way; least fall overall
   and by pipe size.
 - **Storeys**: each storey in its own colour; elements standing on another
@@ -364,6 +375,7 @@ opencheck autorun \\server\share\project\OpenCheck\autorun.json
 | Crate | Purpose |
 |---|---|
 | `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine (clashes, clearances, duplicates, free zones, Rhai script rules), visual checks (alignment, pipe and duct systems with their port network, drain fall, storeys, rooms, levels), triage of findings (C402 categories, groups, pre-sorting), information requirements and IDS, BCF data and files, project files, autorun runs and the dashboard |
+| `opencheck-rvt` | Revit files (WIP): converts `.rvt` to IFC4 with rvt-rs; the only code that knows rvt-rs |
 | `opencheck-cli` | The `opencheck` command line tool, including `autorun` and the `mcp` server for Claude Desktop |
 | `opencheck-app` | The application, for the desktop and the browser: federated 3D viewer (egui + wgpu), checking, visual checks, issues, reports, BCF Live, the autorun setup and the Claude connection |
 
@@ -374,6 +386,12 @@ the ifc-lite API. The wiki's
 [Architecture](https://github.com/sparboom-git/opencheck/wiki/Architecture)
 page describes how the crates work together, what is stored where, and what
 leaves your computer (nothing, unless you switch a connection on).
+
+Revit files are read by [rvt-rs](https://github.com/DrunkOnJava/rvt-rs) by
+Griffin Long (Apache-2.0), which converts them to IFC4 without Revit. This is
+a feature under development, switched on with *File → Settings → WIP*;
+[docs/revit-files.md](docs/revit-files.md) says what it does, what to be
+careful about and how a new rvt-rs release is taken in.
 
 ## Building
 
@@ -415,6 +433,11 @@ Licensed under either of
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
 at your option. Dependencies carry their own licenses; ifc-lite is MPL-2.0.
+rvt-rs, copyright 2026 Griffin Long, is under the Apache License 2.0; its
+licence and notices are in
+[crates/opencheck-rvt/licenses](crates/opencheck-rvt/licenses). rvt-rs and
+OpenCheck are not affiliated with Autodesk; "Autodesk" and "Revit" are
+trademarks of Autodesk, Inc.
 The IBM Plex fonts are under the SIL Open Font License
 ([OFL.txt](crates/opencheck-app/assets/fonts/OFL.txt)).
 

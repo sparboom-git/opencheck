@@ -29,6 +29,14 @@ pub enum JobResult {
         replaces: Option<ModelId>,
         result: Result<Box<IfcModel>, String>,
     },
+    /// A Revit file was converted to IFC; its model follows. `message` says
+    /// what the converter read and what it left out.
+    #[cfg(not(target_arch = "wasm32"))]
+    Converted {
+        message: String,
+        /// The converter's own warnings, as it words them.
+        warnings: Vec<String>,
+    },
     ProjectOpened {
         path: PathBuf,
         result: Result<Box<ProjectContents>, String>,
@@ -163,6 +171,63 @@ impl Jobs {
             reporter.send(
                 JobResult::ModelLoaded {
                     source: ModelSource::File(path),
+                    entry: None,
+                    replaces,
+                    result,
+                },
+                true,
+            );
+        });
+    }
+
+    /// Converts a Revit file to IFC with rvt-rs and loads that IFC (WIP). The
+    /// IFC is kept in memory, and is written into the project when it is saved.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn load_revit_file(
+        &mut self,
+        path: PathBuf,
+        replaces: Option<ModelId>,
+        ctx: &egui::Context,
+    ) {
+        let file = file_name(&path);
+        let reporter = self.start(format!("Converting {file}"), ctx);
+        crate::platform::spawn(move || {
+            let converted = match opencheck_rvt::convert_file(&path) {
+                Ok(converted) => converted,
+                Err(e) => {
+                    reporter.send(
+                        JobResult::ModelLoaded {
+                            source: ModelSource::File(path),
+                            entry: None,
+                            replaces,
+                            result: Err(e.to_string()),
+                        },
+                        true,
+                    );
+                    return;
+                }
+            };
+            // Named as the IFC it now is, so the discipline is still guessed
+            // from the file name.
+            let name = file_name(&path.with_extension("ifc"));
+            let result = opencheck_core::load_ifc_bytes(&name, &converted.ifc)
+                .map(Box::new)
+                .map_err(|e| format!("the IFC converted from {file} could not be read: {e}"));
+            if result.is_ok() {
+                reporter.send(
+                    JobResult::Converted {
+                        message: converted.summary.message(&file),
+                        warnings: converted.summary.warnings.clone(),
+                    },
+                    false,
+                );
+            }
+            reporter.send(
+                JobResult::ModelLoaded {
+                    source: ModelSource::Memory {
+                        name,
+                        bytes: Arc::from(converted.ifc),
+                    },
                     entry: None,
                     replaces,
                     result,

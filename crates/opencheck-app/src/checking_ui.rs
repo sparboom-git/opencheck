@@ -141,7 +141,8 @@ fn builtin_list(wip: bool) -> Vec<(usize, Ruleset)> {
         .collect()
 }
 
-/// Said wherever rulesets still in progress are offered.
+/// Said wherever rulesets still in progress are offered: with WIP on in
+/// File → Settings. One already in a project stays and is marked.
 pub const WIP_NOTE: &str =
     "Not finished: the rules may miss things or report too much. Use the results with care.";
 
@@ -169,6 +170,8 @@ fn add_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 .small()
                 .color(theme::text_muted()),
         );
+        // Rulesets not finished yet are offered only with WIP on (Settings).
+        let wip_on = app.wip.on;
         let mut add = |ui: &mut egui::Ui, index: usize, ruleset: &Ruleset| {
             let added = app.checking.has_ruleset(&ruleset.ruleset.id);
             let button = egui::Button::new(&ruleset.ruleset.name);
@@ -184,9 +187,9 @@ fn add_menu(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         for (index, ruleset) in builtin_list(false) {
             add(ui, index, &ruleset);
         }
-        // Rulesets not finished yet, apart in a menu of their own.
+        // They are apart in a menu of their own.
         let wip = builtin_list(true);
-        if !wip.is_empty() {
+        if wip_on && !wip.is_empty() {
             ui.menu_button(wip_heading(), |ui| {
                 ui.set_min_width(280.0);
                 ui.label(RichText::new(WIP_NOTE).small().color(theme::text_muted()));
@@ -356,8 +359,9 @@ fn library(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     for (index, ruleset) in builtin_list(false) {
         card(app, ui, index, &ruleset);
     }
+    // Rulesets not finished yet are offered only with WIP on (Settings).
     let wip = builtin_list(true);
-    if !wip.is_empty() {
+    if app.wip.on && !wip.is_empty() {
         egui::CollapsingHeader::new(RichText::new(wip_heading()).strong())
             .id_salt("wip_rulesets")
             .default_open(false)

@@ -17,6 +17,12 @@ ifc-lite-core = "=20.4.0"
 ifc-lite-processing = "=20.4.0"
 ifc-lite-clash = "=20.4.0"
 
+# Revit files (work in progress): rvt-rs by Griffin Long (Apache-2.0) converts
+# .rvt to IFC4. Only opencheck-rvt uses it. Pinned: it releases often. To take
+# in a new release see docs/revit-files.md.
+rvt = "=0.20.0"
+opencheck-rvt = { path = "crates/opencheck-rvt" }
+
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 glam = "0.31"

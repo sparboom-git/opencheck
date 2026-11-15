@@ -133,6 +133,8 @@ pub struct OpenCheckApp {
     pub exclusions: crate::exclusions_ui::State,
     /// File → Settings is open.
     pub settings_open: bool,
+    /// Features under development, and whether they are switched on.
+    pub wip: crate::wip::Wip,
     /// The user's Excel template; `None` for the standard one.
     pub excel_template: Option<std::path::PathBuf>,
     /// The user's report template; `None` for the standard one.
@@ -242,6 +244,7 @@ impl OpenCheckApp {
                     .unwrap_or(false),
             welcome_never_again: false,
             settings_open: false,
+            wip: crate::wip::Wip::saved(),
             excel_template: crate::settings::saved_excel_template(),
             report_template: crate::settings::saved_path(crate::report::TEMPLATE_SETTING),
             initials: crate::settings::initials(),
@@ -262,6 +265,7 @@ impl OpenCheckApp {
             .unwrap_or_default();
         match extension.as_str() {
             "ifc" => self.jobs.load_file(path, None, ctx),
+            "rvt" => self.load_revit(path, None, ctx),
             PROJECT_EXTENSION => self.request(PendingAction::OpenProject(Some(path)), ctx),
             _ => self.errors.push(format!(
                 "{} is not an IFC file or OpenCheck project",
@@ -280,12 +284,55 @@ impl OpenCheckApp {
             );
             return;
         }
-        if let Some(paths) = platform::pick_files("Add IFC models", ("IFC model", &["ifc", "IFC"]))
+        if let Some(paths) = platform::pick_files(self.add_models_label(), self.wip.model_filter())
         {
             for path in paths {
-                self.jobs.load_file(path, None, ctx);
+                self.load_model_file(path, None, ctx);
             }
         }
+    }
+
+    /// "Add IFC models", also naming Revit while that is offered (WIP).
+    pub fn add_models_label(&self) -> &'static str {
+        if self.wip.revit() {
+            "Add IFC or Revit models"
+        } else {
+            "Add IFC models"
+        }
+    }
+
+    /// Loads a model file picked in a dialog: IFC, or Revit by its extension.
+    fn load_model_file(&mut self, path: PathBuf, replaces: Option<ModelId>, ctx: &egui::Context) {
+        let revit = path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("rvt"));
+        if revit {
+            self.load_revit(path, replaces, ctx);
+        } else {
+            self.jobs.load_file(path, replaces, ctx);
+        }
+    }
+
+    /// Converts a Revit file to IFC and loads that (WIP, desktop only).
+    fn load_revit(&mut self, path: PathBuf, replaces: Option<ModelId>, ctx: &egui::Context) {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        if platform::IS_WEB {
+            self.errors.push(format!(
+                "{name} is a Revit file; those can only be opened in the desktop app"
+            ));
+            return;
+        }
+        if !self.wip.on {
+            self.errors.push(format!(
+                "{name} is a Revit file. Opening Revit files is under development: switch on \
+                 WIP in File → Settings to try it."
+            ));
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.jobs.load_revit_file(path, replaces, ctx);
+        #[cfg(target_arch = "wasm32")]
+        let _ = (replaces, ctx);
     }
 
     // ---- Project commands ----------------------------------------------
@@ -448,6 +495,10 @@ impl OpenCheckApp {
                         source_label(&source)
                     )),
                 },
+                #[cfg(not(target_arch = "wasm32"))]
+                JobResult::Converted { message, warnings } => {
+                    self.wip.converted(message, warnings);
+                }
                 JobResult::ProjectOpened { path, result } => match result {
                     Ok(contents) => {
                         self.session.path = Some(path);
@@ -672,10 +723,17 @@ impl OpenCheckApp {
             return;
         }
         if let Some(path) = platform::pick_file(
-            &format!("Update {name}: choose the new IFC file"),
-            ("IFC model", &["ifc", "IFC"]),
+            &format!(
+                "Update {name}: choose the new {} file",
+                if self.wip.revit() {
+                    "IFC or Revit"
+                } else {
+                    "IFC"
+                }
+            ),
+            self.wip.model_filter(),
         ) {
-            self.jobs.load_file(path, Some(id), ctx);
+            self.load_model_file(path, Some(id), ctx);
         }
     }
 
@@ -1707,7 +1765,12 @@ impl OpenCheckApp {
                 ui.close();
             }
             ui.separator();
-            if item(ui, icon::PLUS, "Add IFC models…", None) {
+            if item(
+                ui,
+                icon::PLUS,
+                &format!("{}…", self.add_models_label()),
+                None,
+            ) {
                 self.open_file_dialog(&ctx);
                 ui.close();
             }
@@ -2134,6 +2197,7 @@ impl eframe::App for OpenCheckApp {
             crate::standard_editor::window(self, &ctx);
             crate::bcf_ui::window(self, &ctx);
             crate::settings::window(self, &ctx);
+            crate::wip::conversions_window(self, &ctx);
             crate::check_docs::window(self, &ctx);
             crate::exclusions_ui::window(self, &ctx);
             crate::issue_dialog::window(self, &ctx);

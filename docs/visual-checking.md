@@ -76,6 +76,10 @@ walls of different length on the same curve can show as out of line.
 
 ## Pipe and duct systems
 
+The dimension check and the drain fall check are work in progress: they are
+offered only with WIP switched on in *File → Settings*. A check already in a
+project stays and runs with WIP off.
+
 The dimension check and the drain fall check work on the same network of
 pipes, ducts, fittings, valves and equipment in the models of the chosen
 disciplines (*Ventilation*, *Plumbing* and *Sprinkler* by default).

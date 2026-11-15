@@ -40,6 +40,9 @@ jobs:
           New-Item -ItemType Directory -Path $name | Out-Null
           Copy-Item target/release/opencheck-app.exe, target/release/opencheck.exe, README.md, LICENSE-MIT, LICENSE-APACHE -Destination $name
           Copy-Item crates/opencheck-app/assets/fonts/OFL.txt -Destination "$name/OFL-fonts.txt"
+          # rvt-rs (Revit files) is Apache-2.0: its licence and notices go with the binaries.
+          Copy-Item crates/opencheck-rvt/licenses/rvt-rs-LICENSE -Destination "$name/rvt-rs-LICENSE.txt"
+          Copy-Item crates/opencheck-rvt/licenses/rvt-rs-NOTICE -Destination "$name/rvt-rs-NOTICE.txt"
           Compress-Archive -Path $name -DestinationPath "$name.zip"
       # The Microsoft Store package; skipped until packaging/msix/identity.json
       # holds the identity from Partner Center.
