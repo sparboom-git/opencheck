@@ -1,6 +1,6 @@
 {
   "_comment": "The package identity from Microsoft Partner Center > Product Identity. Copy the three values exactly. Until they are filled in, releases are made without the MSIX.",
-  "name": "",
-  "publisher": "",
-  "publisher_display_name": ""
+  "name": "SpockBoom.opencheck",
+  "publisher": "CN=6B0C8769-4BF8-4BD9-989F-AB2A64C810FC",
+  "publisher_display_name": "SpockBoom"
 }
