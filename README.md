@@ -11,10 +11,15 @@ source, drains without fall, elements on the wrong storey. Checks can also
 run on a schedule without the app, with a dashboard of how a project
 develops.
 
-> Status: early but usable. Viewing, checking (including free zones and
-> script rules), visual checks, information requirements, IDS, issues,
-> reports, BCF files, BCF Live with Dalux and autorun work, on the desktop
-> and largely in the browser. See [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next.
+> Status: under development and not yet ready for production use. Viewing,
+> checking (including free zones and script rules), visual checks,
+> information requirements, IDS, issues, reports, BCF files, BCF Live with
+> Dalux and autorun work, on the desktop and largely in the browser, but
+> expect bugs, unfinished parts and changes between versions. See
+> [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next.
+>
+> OpenCheck comes without warranty, and the use of it and of its results is
+> the user's own responsibility: see the [Disclaimer](#disclaimer).
 
 ## Download
 
@@ -461,6 +466,29 @@ sh scripts/fetch-testdata.sh
 cargo run -p opencheck-app -- testdata/ifc4/Building-*.ifc
 cargo run -p opencheck-cli -- check testdata/ifc4/Building-*.ifc --all
 ```
+
+## Disclaimer
+
+OpenCheck is under development and is not yet ready for production use. It
+is an aid to model checking. It does not replace the checking, the quality
+assurance and the professional judgement a project requires.
+
+- **No check is complete.** OpenCheck can miss clashes, missing information
+  and other errors in a model, and it can report things that are not errors.
+  A check without findings does not show that the models are free of errors.
+- **The results depend on what goes in.** What is found depends on the IFC
+  files as they were exported, on how OpenCheck reads their geometry and
+  properties, and on the rulesets, tolerances and exceptions chosen.
+- **The use is the user's responsibility.** Whoever uses OpenCheck is
+  responsible for how it is used, for verifying its results and for every
+  decision made from them. That holds for the reports, issues and BCF files
+  it writes as well.
+- **No warranty, no liability.** OpenCheck is provided "as is", without
+  warranty of any kind. To the extent the law allows, the authors and
+  contributors are not liable for any loss or damage arising from its use,
+  including errors a check did not find. The terms that apply are those of
+  the licences below: the MIT licence, and sections 7 and 8 of the Apache
+  License 2.0.
 
 ## License
 
