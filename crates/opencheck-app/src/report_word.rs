@@ -383,6 +383,9 @@ impl Writer {
                 for d in docs {
                     let card = self.info_card(d);
                     out.push_str(&card);
+                    if let Some(codes) = &d.classification {
+                        out.push_str(&self.code_card(codes));
+                    }
                 }
             }
             BlockKind::Properties
@@ -531,6 +534,57 @@ impl Writer {
                         },
                     ]);
                 }
+            }
+            out.push_str(&table(&w, &rows, true, true));
+        }
+        out
+    }
+
+    /// The check of classification codes: the system and edition, how it
+    /// was done and a table per model with what is wrong with its codes.
+    fn code_card(&self, d: &crate::reports::CodeDoc) -> String {
+        let mut out = para(
+            &run(&format!("Klassifikation: {}", d.system), "<w:b/>"),
+            &format!(
+                "<w:keepNext/><w:pBdr><w:top w:val=\"single\" w:sz=\"4\" w:space=\"6\" w:color=\"{RULE}\"/><w:left w:val=\"single\" w:sz=\"24\" w:space=\"6\" w:color=\"2B7FF6\"/></w:pBdr>\
+                 <w:spacing w:before=\"240\" w:after=\"80\"/>"
+            ),
+        );
+        let rows = vec![
+            (
+                "Kontrol",
+                "Klassifikationskoder findes i listen og passer til elementet".to_owned(),
+            ),
+            ("Grundlag", d.basis()),
+            ("Omfang", d.scope_da()),
+        ];
+        out.push_str(&self.facts(&rows, self.width * 7 / 10));
+        out.push_str(&self.paragraphs(&d.about));
+        let small = "<w:sz w:val=\"17\"/>";
+        let w = widths(self.width, &[0.58, 0.22, 0.2]);
+        for m in &d.models {
+            let mut rows = vec![vec![
+                cell_text(&m.name, &format!("<w:b/>{small}")),
+                cell_text(
+                    &format!("{} med kode", m.coded),
+                    &format!("{}{small}", muted()),
+                ),
+                cell_text(&m.percent(), &format!("<w:b/>{small}")),
+            ]];
+            for line in m.lines() {
+                let style = if line.quiet {
+                    format!("{}{small}", muted())
+                } else {
+                    small.to_owned()
+                };
+                rows.push(vec![
+                    para(
+                        &run(&line.label, &style),
+                        "<w:spacing w:before=\"0\" w:after=\"0\"/><w:ind w:left=\"220\"/>",
+                    ),
+                    cell_text(&line.count, &format!("{}{small}", muted())),
+                    cell_text("", small),
+                ]);
             }
             out.push_str(&table(&w, &rows, true, true));
         }
@@ -864,6 +918,22 @@ mod tests {
                         title: "Information: LOD DK".into(),
                         about: "Kontrollen er foretaget efter standarden.".into(),
                         notes: vec!["En <note>".into()],
+                        classification: Some(crate::reports::CodeDoc {
+                            system: "BIMTypeCode <2022> DK".into(),
+                            provenance: "2. udgave · BIM7AA & co.".into(),
+                            about: "Koderne er kontrolleret mod listen.".into(),
+                            models: vec![crate::reports::CodeModel {
+                                name: "ARK".into(),
+                                elements: 5,
+                                coded: 4,
+                                valid: 3,
+                                problems: vec![crate::reports::CodeRow {
+                                    label: "570: findes ikke i listen".into(),
+                                    count: 1,
+                                }],
+                            }],
+                            ..Default::default()
+                        }),
                         models: vec![crate::reports::InfoModel {
                             name: "ARK".into(),
                             elements: 3,
@@ -1139,6 +1209,49 @@ mod tests {
                             ],
                         }],
                         findings: 110,
+                        classification: Some({
+                            let system = opencheck_core::check::builtin_classification(
+                                "bimtypecode-2022-dk",
+                            )
+                            .unwrap();
+                            let row = |label: &str, count| crate::reports::CodeRow {
+                                label: label.into(),
+                                count,
+                            };
+                            crate::reports::CodeDoc {
+                                system: system.info.label(),
+                                provenance: system.info.provenance(),
+                                source: system.info.source.clone(),
+                                about: crate::reports::about_codes_da(&system.info),
+                                models: vec![
+                                    crate::reports::CodeModel {
+                                        name: "STR".into(),
+                                        elements: 368,
+                                        coded: 318,
+                                        valid: 318,
+                                        problems: Vec::new(),
+                                    },
+                                    crate::reports::CodeModel {
+                                        name: "VVS".into(),
+                                        elements: 2405,
+                                        coded: 2365,
+                                        valid: 1126,
+                                        problems: vec![
+                                            row("560: findes ikke i listen", 914),
+                                            row("530: findes ikke i listen", 159),
+                                            row("520: findes ikke i listen", 120),
+                                            row("N/A: findes ikke i listen", 46),
+                                            row("591 Metalrør i bygninger: på Wall", 3),
+                                        ],
+                                    },
+                                    crate::reports::CodeModel {
+                                        name: "LAND".into(),
+                                        elements: 42,
+                                        ..Default::default()
+                                    },
+                                ],
+                            }
+                        }),
                         ..Default::default()
                     }],
                     ..Default::default()

@@ -601,6 +601,36 @@ mod tests {
                             }],
                         }],
                         findings: 1,
+                        classification: Some(crate::reports::CodeDoc {
+                            system: "BIMTypeCode 2022 DK".into(),
+                            provenance: "2. udgave, 2023-06-30 · BIM7AA · CC BY-ND 4.0".into(),
+                            source: "https://example.org/list".into(),
+                            about: "Koderne er kontrolleret \"mod\" [listen] #x.\n\nAndet afsnit."
+                                .into(),
+                            models: vec![
+                                crate::reports::CodeModel {
+                                    name: "ARK".into(),
+                                    elements: 5,
+                                    coded: 4,
+                                    valid: 2,
+                                    problems: vec![
+                                        crate::reports::CodeRow {
+                                            label: "570: findes ikke i listen".into(),
+                                            count: 1,
+                                        },
+                                        crate::reports::CodeRow {
+                                            label: "591 Metalrør i bygninger: på Wall".into(),
+                                            count: 1,
+                                        },
+                                    ],
+                                },
+                                crate::reports::CodeModel {
+                                    name: "KON [uden] #koder".into(),
+                                    elements: 2,
+                                    ..Default::default()
+                                },
+                            ],
+                        }),
                     }],
                     ..Default::default()
                 },

@@ -13,8 +13,8 @@ mod mcp;
 use clap::{Parser, Subcommand};
 use opencheck_core::check::{
     BUILTIN_RULESETS, BUILTIN_STANDARDS, CheckJob, CheckModel, FindingKind, IDS_PREFIX, Ids, Rule,
-    RuleKind, Ruleset, RulesetInfo, Selector, Severity, builtin_standard, run_check,
-    standard_to_ids,
+    RuleKind, Ruleset, RulesetInfo, Selector, Severity, builtin_classification,
+    builtin_classifications, builtin_standard, run_check, standard_to_ids,
 };
 use opencheck_core::{Federation, IfcModel, SpatialNode, load_ifc_file};
 
@@ -68,9 +68,16 @@ enum Command {
         /// IDS 1.0 file to check the models against. Repeat for several.
         #[arg(long = "ids")]
         ids: Vec<PathBuf>,
+        /// Classification system whose codes information rules check, e.g.
+        /// bimtypecode-2022-dk (see `opencheck classifications`). Default:
+        /// the codes are not checked.
+        #[arg(long)]
+        classification: Option<String>,
     },
     /// List the built-in rulesets.
     Rulesets,
+    /// List the built-in classification systems.
+    Classifications,
     /// MCP server for Claude Desktop: lets Claude review the findings of the
     /// project open in the OpenCheck app (File → Claude connection).
     Mcp,
@@ -107,7 +114,30 @@ fn main() -> Result<()> {
             limit,
             level,
             ids,
-        } => check(&files, &rulesets, all, limit, level.as_deref(), &ids),
+            classification,
+        } => check(
+            &files,
+            &rulesets,
+            all,
+            limit,
+            level.as_deref(),
+            &ids,
+            classification.as_deref(),
+        ),
+        Command::Classifications => {
+            for system in builtin_classifications() {
+                let info = &system.info;
+                println!(
+                    "{:<24} {}  ({}; {} codes)",
+                    info.id,
+                    info.label(),
+                    info.provenance(),
+                    system.usable().count()
+                );
+                println!("{:<24} {}", "", info.source);
+            }
+            Ok(())
+        }
         Command::Rulesets => {
             for builtin in BUILTIN_RULESETS {
                 let ruleset = Ruleset::from_toml(builtin.toml)?;
@@ -208,7 +238,14 @@ fn check(
     limit: usize,
     level: Option<&str>,
     ids_files: &[PathBuf],
+    classification: Option<&str>,
 ) -> Result<()> {
+    let classification = match classification {
+        Some(id) => Some(builtin_classification(id).with_context(|| {
+            format!("unknown classification {id}; see `opencheck classifications`")
+        })?),
+        None => None,
+    };
     let mut rulesets = Vec::new();
     let mut documents = Vec::new();
     for path in ids_files {
@@ -262,6 +299,7 @@ fn check(
                 .unwrap_or_default(),
             ids: documents.clone(),
             standards: Vec::new(),
+            classification: classification.clone(),
         })
         .collect();
 
@@ -319,10 +357,53 @@ fn check(
                     }
                 }
             }
+            if let Some(codes) = rule
+                .information
+                .as_ref()
+                .and_then(|i| i.classification.as_ref())
+            {
+                println!(
+                    "    Classification: {} ({})",
+                    codes.info.label(),
+                    codes.info.provenance()
+                );
+                for model in &codes.models {
+                    println!(
+                        "    {:<36} {:>5} with a code, {:>5} in order, {:>5} wrong, {:>5} without",
+                        model.name,
+                        model.coded,
+                        model.valid,
+                        model.wrong(),
+                        model.without()
+                    );
+                    for problem in &model.problems {
+                        println!("        {:>5}  {}", problem.count, problem.label);
+                    }
+                    if !model.found_in.is_empty() {
+                        let places: Vec<String> = model
+                            .found_in
+                            .iter()
+                            .take(3)
+                            .map(|(place, n)| format!("{place} ({n})"))
+                            .collect();
+                        println!("            read from {}", places.join(", "));
+                    }
+                }
+            }
             for note in rule.notes.iter().take(limit.max(5)) {
                 println!("    note: {note}");
             }
-            for f in rule.findings.iter().take(limit) {
+            // Wrong codes are listed after missing information, each up to
+            // the limit.
+            let is_code =
+                |f: &&opencheck_core::check::Finding| f.kind == FindingKind::Classification;
+            let listed = rule
+                .findings
+                .iter()
+                .filter(|f| !is_code(f))
+                .take(limit)
+                .chain(rule.findings.iter().filter(is_code).take(limit));
+            for f in listed {
                 if f.kind != FindingKind::MissingInformation && !f.details.is_empty() {
                     let other = if f.is_single() {
                         String::new()

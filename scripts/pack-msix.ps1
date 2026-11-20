@@ -49,6 +49,7 @@ Copy-Item LICENSE-MIT, LICENSE-APACHE -Destination $layout
 Copy-Item crates/opencheck-app/assets/fonts/OFL.txt -Destination (Join-Path $layout "OFL-fonts.txt")
 Copy-Item crates/opencheck-rvt/licenses/rvt-rs-LICENSE -Destination (Join-Path $layout "rvt-rs-LICENSE.txt")
 Copy-Item crates/opencheck-rvt/licenses/rvt-rs-NOTICE -Destination (Join-Path $layout "rvt-rs-NOTICE.txt")
+Copy-Item crates/opencheck-core/classifications/BIMTypeCode-NOTICE.txt -Destination (Join-Path $layout "BIMTypeCode-NOTICE.txt")
 
 $escape = { param($s) [System.Security.SecurityElement]::Escape($s) }
 $manifest = (Get-Content packaging/msix/AppxManifest.xml -Raw).

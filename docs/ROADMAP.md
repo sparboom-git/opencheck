@@ -116,6 +116,11 @@ built.
 - **Information requirements, next steps**: allowed values and value
   patterns; choosing which items each part requires per level in the
   project.
+- **Classification codes, next steps** (in WIP: BIMTypeCode 2022 DK, the
+  code is in the list and fits the element): tuning which IFC classes a
+  code fits and accepting a combination per project; the project's own
+  codes; the code's description against the list; more systems (CCS, CCI),
+  also from a list the project brings itself.
 - **IDS, next steps**: `IFCRELNESTS`, voids and fills relations; predefined
   types and classification hierarchies from type objects; storeys and other
   spatial nodes as applicable elements.

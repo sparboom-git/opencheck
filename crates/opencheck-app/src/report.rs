@@ -203,6 +203,30 @@ const SHAPES: &str = r##"
     })
   }
 })
+// The check of classification codes: how it was done and a table per
+// model with what is wrong with its codes.
+#let code-card(title, rows, about, tables) = block(
+  width: 100%, stroke: (left: 3pt + accent, rest: 0.5pt + luma(205)), radius: 4pt,
+  inset: 9pt, above: 10pt, {
+  block(breakable: false, below: 8pt, text(weight: "bold", size: 1.05em, title))
+  facts(rows)
+  if about.len() > 0 { paragraphs(about) }
+  for (file, coded, percent, rate, items) in tables {
+    block(above: 8pt, {
+      set text(size: 0.85em)
+      table(columns: (1fr, auto, auto, auto), align: (left, right, right, left),
+        stroke: (x: none, y: 0.5pt + luma(215)),
+        table.header([#text(weight: "bold", file) #h(4pt) #text(fill: muted, coded)], [],
+          text(weight: "bold", percent),
+          // An empty bar keeps the columns of a model without codes in line.
+          if rate == none { box(width: 2.2cm) } else { fill-bar(rate, false) }),
+        ..items.map(((label, count, quiet)) => (
+          [#h(10pt)#if quiet { text(fill: muted, label) } else { label }],
+          text(fill: muted, count), [], [],
+        )).flatten())
+    })
+  }
+})
 #let none-text = text(fill: muted, style: "italic", "Ingen emner.")
 #let issue-card(number, title, code, note, picture, rows, description, components) = block(
   width: 100%, stroke: 0.5pt + luma(205), radius: 4pt, inset: 9pt, above: 10pt, {
@@ -822,6 +846,9 @@ fn block_typst(
             }
             for d in docs {
                 info_card(t, d);
+                if let Some(codes) = &d.classification {
+                    code_card(t, codes);
+                }
             }
         }
         BlockKind::Properties | BlockKind::Geometry | BlockKind::Clashes | BlockKind::Issues => {
@@ -1028,6 +1055,64 @@ fn info_card(t: &mut String, d: &crate::reports::InfoDoc) {
         list(&rows),
         list(&texts),
         list(&notes),
+        list(&tables),
+    ));
+}
+
+/// The check of classification codes: the system and edition, how it was
+/// done and, per model, what is wrong with the codes.
+fn code_card(t: &mut String, d: &crate::reports::CodeDoc) {
+    let list = |items: &[String]| {
+        if items.is_empty() {
+            "()".to_owned()
+        } else {
+            format!("({},)", items.join(", "))
+        }
+    };
+    let rows = [
+        (
+            "Kontrol",
+            s("Klassifikationskoder findes i listen og passer til elementet"),
+        ),
+        ("Grundlag", s(&d.basis())),
+        ("Omfang", s(&d.scope_da())),
+    ];
+    let rows: Vec<String> = rows
+        .iter()
+        .map(|(k, v)| format!("({}, {v})", s(k)))
+        .collect();
+    let texts: Vec<String> = d
+        .about
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(s)
+        .collect();
+    let tables: Vec<String> = d
+        .models
+        .iter()
+        .map(|m| {
+            let items: Vec<String> = m
+                .lines()
+                .iter()
+                .map(|l| format!("({}, {}, {})", s(&l.label), s(&l.count), l.quiet))
+                .collect();
+            format!(
+                "({}, {}, {}, {}, {})",
+                s(&m.name),
+                s(&format!("{} med kode", m.coded)),
+                s(&m.percent()),
+                m.rate()
+                    .map_or_else(|| "none".to_owned(), |r| format!("{r:.3}")),
+                list(&items)
+            )
+        })
+        .collect();
+    t.push_str(&format!(
+        "#code-card({}, {}, {}, {})\n",
+        s(&format!("Klassifikation: {}", d.system)),
+        list(&rows),
+        list(&texts),
         list(&tables),
     ));
 }

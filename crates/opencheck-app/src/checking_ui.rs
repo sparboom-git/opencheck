@@ -351,6 +351,11 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     let mut changed = false;
     let mut open_exclusions = None;
     let mut new_level = None;
+    // The classification system to check codes against, when changed.
+    let mut new_classification: Option<Option<String>> = None;
+    let classification = app.checking.classification.clone();
+    let systems = opencheck_core::check::builtin_classifications();
+    let wip_on = app.wip.on;
     let mut adapt = false;
     let adapted = app.checking.adapted.is_some();
     let model_ids = app.federation.ids();
@@ -502,6 +507,73 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
 "));
                         }
                     });
+                    // Still under development: offered with WIP on, and
+                    // shown whenever the project already uses it.
+                    if wip_on || classification.is_some() {
+                        ui.horizontal(|ui| {
+                            let mut on = classification.is_some();
+                            let tick = ui
+                                .checkbox(
+                                    &mut on,
+                                    RichText::new(format!("{}  Classification", icon::TAG)).small(),
+                                )
+                                .on_hover_text(
+                                    "Also check the classification codes themselves: that a \
+                                     code is in the chosen classification system and fits the \
+                                     element, e.g. no pipe code on a wall. Whether a code is \
+                                     there is checked as before.",
+                                );
+                            if tick.changed() {
+                                new_classification = Some(
+                                    on.then(|| systems.first().map(|s| s.info.id.clone()))
+                                        .flatten(),
+                                );
+                            }
+                            if let Some(chosen) = &classification {
+                                let known = systems.iter().find(|s| s.info.id == *chosen);
+                                let text = match known {
+                                    Some(system) => RichText::new(system.info.label()).small(),
+                                    None => RichText::new(format!("{chosen} (unknown)"))
+                                        .small()
+                                        .color(theme::danger()),
+                                };
+                                let combo =
+                                    egui::ComboBox::from_id_salt(("classification", &entry.path))
+                                        .selected_text(text)
+                                        .show_ui(ui, |ui| {
+                                            for system in systems {
+                                                let info = &system.info;
+                                                if ui
+                                                    .selectable_label(
+                                                        info.id == *chosen,
+                                                        info.label(),
+                                                    )
+                                                    .on_hover_text(info.provenance())
+                                                    .clicked()
+                                                {
+                                                    new_classification =
+                                                        Some(Some(info.id.clone()));
+                                                }
+                                            }
+                                        })
+                                        .response;
+                                match known {
+                                    Some(system) => combo.on_hover_text(format!(
+                                        "{}\n{}\n{}",
+                                        system.info.label(),
+                                        system.info.provenance(),
+                                        system.info.source
+                                    )),
+                                    None => combo.on_hover_text(
+                                        "The project names a classification system this \
+                                         version of OpenCheck does not have, so the codes are \
+                                         not checked.",
+                                    ),
+                                };
+                            }
+                            wip_tag(ui);
+                        });
+                    }
                     ui.horizontal(|ui| {
                         let text = if adapted {
                             format!("{}  Where to look (adapted)…", icon::SLIDERS_HORIZONTAL)
@@ -548,6 +620,10 @@ fn ruleset_cards(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     }
     if let Some(level) = new_level {
         app.checking.set_project_level(level);
+        app.session.dirty = true;
+    }
+    if let Some(classification) = new_classification {
+        app.checking.set_classification(classification);
         app.session.dirty = true;
     }
     if changed {

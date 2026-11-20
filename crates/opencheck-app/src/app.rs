@@ -1340,7 +1340,9 @@ impl OpenCheckApp {
                 } else {
                     (f.a.ifc_class.clone(), f.b.ifc_class.clone())
                 },
-                title: if f.is_single() {
+                title: if f.kind == opencheck_core::check::FindingKind::Classification {
+                    format!("{}: code {}", results_ui::element_label(&f.a), f.category)
+                } else if f.is_single() {
                     format!(
                         "{}: missing {}",
                         results_ui::element_label(&f.a),
@@ -1405,6 +1407,9 @@ impl OpenCheckApp {
             let same_classes = entries.iter().all(|e| e.classes == first.classes);
             let title = match (entries.len(), same_classes) {
                 (1, _) => first.title.clone(),
+                (n, true) if first.source.kind == "Classification" => {
+                    format!("{n} elements: code {}", first.classes.0)
+                }
                 (n, true) if first.single => {
                     format!("{n} elements: {} missing information", first.classes.0)
                 }

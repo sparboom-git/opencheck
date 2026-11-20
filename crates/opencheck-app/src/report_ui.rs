@@ -678,9 +678,14 @@ fn block_editor(
                         changed = true;
                     }
                     ui.label(&d.title);
+                    let codes = d
+                        .classification
+                        .as_ref()
+                        .map(|c| format!(" · {} with a wrong code ({})", c.wrong(), c.system))
+                        .unwrap_or_default();
                     ui.label(
                         RichText::new(format!(
-                            "{} models · {} with missing information",
+                            "{} models · {} with missing information{codes}",
                             d.models.len(),
                             d.findings
                         ))
@@ -1322,6 +1327,9 @@ fn preview_block(
             }
             for d in docs {
                 preview_information(ui, d, &paragraphs);
+                if let Some(codes) = &d.classification {
+                    preview_codes(ui, &d.id, codes, &paragraphs);
+                }
             }
         }
         BlockKind::Visual => {
@@ -1533,6 +1541,59 @@ fn preview_information(
                                 }
                                 ui.end_row();
                             }
+                        }
+                    });
+            }
+        });
+    ui.add_space(6.0);
+}
+
+/// The check of classification codes as the report shows it: a card of
+/// its own after the fill rates.
+fn preview_codes(
+    ui: &mut egui::Ui,
+    id: &str,
+    d: &crate::reports::CodeDoc,
+    paragraphs: &dyn Fn(&mut egui::Ui, &str),
+) {
+    egui::Frame::new()
+        .stroke(egui::Stroke::new(1.0, Color32::from_gray(215)))
+        .corner_radius(4)
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(format!("Klassifikation: {}", d.system)).strong());
+            ui.label(
+                RichText::new(format!("{} · {}", d.basis(), d.scope_da()))
+                    .small()
+                    .color(MUTED),
+            );
+            paragraphs(ui, &d.about);
+            for m in &d.models {
+                ui.add_space(4.0);
+                egui::Grid::new(("code_table", id, &m.name))
+                    .num_columns(3)
+                    .striped(true)
+                    .spacing([12.0, 2.0])
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(&m.name).small().strong());
+                        ui.label(
+                            RichText::new(format!("{} med kode", m.coded))
+                                .small()
+                                .color(MUTED),
+                        );
+                        ui.label(RichText::new(m.percent()).small().strong());
+                        ui.end_row();
+                        for line in m.lines() {
+                            let label = RichText::new(format!("    {}", line.label)).small();
+                            ui.label(if line.quiet {
+                                label.color(MUTED)
+                            } else {
+                                label
+                            });
+                            ui.label(RichText::new(&line.count).small().color(MUTED));
+                            ui.label("");
+                            ui.end_row();
                         }
                     });
             }

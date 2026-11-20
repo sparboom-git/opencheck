@@ -462,11 +462,23 @@ fn check(
         let doc = Ids::from_xml(&d.text).map_err(|e| anyhow::anyhow!("{}: {e}", d.path))?;
         ids.push((d.path.clone(), Arc::new(doc)));
     }
+    // A system this version does not know is left out, like an unknown
+    // information standard.
+    let classification = config
+        .classification
+        .as_deref()
+        .and_then(opencheck_core::check::builtin_classification);
+    // The project's changes go on top of the standard as its classification
+    // system reads it, as in the app.
     let mut standards = Vec::new();
     if let Some(text) = &config.information_changes {
         let changes = StandardOverrides::from_toml(text).context("information changes")?;
         if let Some(base) = builtin_standard(&changes.base) {
-            standards.push(Arc::new(changes.apply(base).0));
+            let standard = match &classification {
+                Some(system) => changes.apply(&system.applied_to(base)).0,
+                None => changes.apply(base).0,
+            };
+            standards.push(Arc::new(standard));
         }
     }
     let models: Vec<CheckModel> = federation
@@ -493,6 +505,7 @@ fn check(
                 .collect(),
             ids: ids.clone(),
             standards: standards.clone(),
+            classification: classification.clone(),
         })
         .collect();
     Ok(run_check(&models, &jobs, &|_| {}))

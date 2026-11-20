@@ -105,6 +105,199 @@ pub struct InfoDoc {
     pub models: Vec<InfoModel>,
     /// Elements with missing information.
     pub findings: usize,
+    /// The check of the classification codes themselves, when the project
+    /// had chosen a classification system.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classification: Option<CodeDoc>,
+}
+
+/// The check of classification codes as it was when the revision was made:
+/// the system and edition checked against and, per model, how many codes
+/// were in order and what was wrong with the rest.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CodeDoc {
+    /// System and version, e.g. `BIMTypeCode 2022 DK`.
+    pub system: String,
+    /// Edition, publisher and licence, e.g. `2. udgave, 2023-06-30 · BIM7AA
+    /// · CC BY-ND 4.0`.
+    pub provenance: String,
+    /// Where the list comes from.
+    pub source: String,
+    /// How the check was done, written by OpenCheck in Danish.
+    pub about: String,
+    pub models: Vec<CodeModel>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CodeModel {
+    pub name: String,
+    /// Elements checked.
+    pub elements: usize,
+    /// Of them, elements with a code of the system.
+    pub coded: usize,
+    /// Of those, elements whose code is in order.
+    pub valid: usize,
+    /// What is wrong, in Danish, most frequent first.
+    pub problems: Vec<CodeRow>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CodeRow {
+    /// E.g. `570: findes ikke i listen`.
+    pub label: String,
+    pub count: usize,
+}
+
+/// A line under a model in the report's table of classification codes.
+pub struct CodeLine {
+    pub label: String,
+    /// E.g. `120 elementer`.
+    pub count: String,
+    /// Shown subdued: not a problem with a code.
+    pub quiet: bool,
+}
+
+impl CodeDoc {
+    pub fn coded(&self) -> usize {
+        self.models.iter().map(|m| m.coded).sum()
+    }
+
+    pub fn wrong(&self) -> usize {
+        self.models.iter().map(|m| m.coded - m.valid).sum()
+    }
+
+    /// E.g. `BIMTypeCode 2022 DK, 2. udgave, 2023-06-30 · BIM7AA · CC BY-ND 4.0`.
+    pub fn basis(&self) -> String {
+        if self.provenance.is_empty() {
+            self.system.clone()
+        } else {
+            format!("{}, {}", self.system, self.provenance)
+        }
+    }
+
+    /// The scope of the check, e.g. `3955 elementer med kode i 5 modeller,
+    /// 1418 med fejl i koden`.
+    pub fn scope_da(&self) -> String {
+        let models = self.models.len();
+        format!(
+            "{} elementer med kode i {models} {}, {} med fejl i koden",
+            self.coded(),
+            if models == 1 { "model" } else { "modeller" },
+            self.wrong()
+        )
+    }
+}
+
+impl CodeModel {
+    /// Problems listed per model in a report; the rest is summed up.
+    const LISTED: usize = 12;
+
+    /// Share of the codes in order, e.g. `48 %`; a dash without codes.
+    pub fn percent(&self) -> String {
+        if self.coded == 0 {
+            "–".to_owned()
+        } else {
+            percent(self.valid, self.coded)
+        }
+    }
+
+    /// Share of the codes in order; None without codes.
+    pub fn rate(&self) -> Option<f64> {
+        (self.coded > 0).then(|| fill_rate(self.valid, self.coded))
+    }
+
+    /// The lines under the model: the most frequent problems, the rest in
+    /// one line, and the elements without a code.
+    pub fn lines(&self) -> Vec<CodeLine> {
+        let elements = |n: usize| format!("{n} {}", if n == 1 { "element" } else { "elementer" });
+        let mut lines: Vec<CodeLine> = self
+            .problems
+            .iter()
+            .take(Self::LISTED)
+            .map(|p| CodeLine {
+                label: p.label.clone(),
+                count: elements(p.count),
+                quiet: false,
+            })
+            .collect();
+        let rest = self.problems.get(Self::LISTED..).unwrap_or_default();
+        if !rest.is_empty() {
+            lines.push(CodeLine {
+                label: format!("Øvrige fejl ({} forskellige)", rest.len()),
+                count: elements(rest.iter().map(|p| p.count).sum()),
+                quiet: false,
+            });
+        }
+        if self.coded > 0 && self.problems.is_empty() {
+            lines.push(CodeLine {
+                label: "Ingen fejl i koderne".to_owned(),
+                count: String::new(),
+                quiet: true,
+            });
+        }
+        if self.elements > self.coded {
+            lines.push(CodeLine {
+                label: "Uden kode i systemet".to_owned(),
+                count: elements(self.elements - self.coded),
+                quiet: true,
+            });
+        }
+        lines
+    }
+}
+
+/// A problem with a classification code as a report words it, e.g. `570:
+/// findes ikke i listen`.
+pub fn code_problem_da(problem: &opencheck_core::check::CodeProblemCount) -> String {
+    use opencheck_core::check::CodeProblem;
+    let code = &problem.code;
+    let named = if problem.name.is_empty() {
+        code.clone()
+    } else {
+        format!("{code} {}", problem.name)
+    };
+    match problem.kind {
+        CodeProblem::Unknown => format!("{code}: findes ikke i listen"),
+        CodeProblem::Heading => format!("{named}: gruppe, ikke en kode"),
+        CodeProblem::Unused => format!("{code}: reserveret, ikke i brug"),
+        CodeProblem::Identifier => format!("{code}: type-ID begynder ikke med koden"),
+        CodeProblem::Element => format!(
+            "{named}: på {}",
+            problem.class.strip_prefix("Ifc").unwrap_or(&problem.class)
+        ),
+    }
+}
+
+/// How the classification codes were checked, in Danish.
+pub fn about_codes_da(info: &opencheck_core::check::ClassificationInfo) -> String {
+    let system = info.label();
+    let mut basis = system.clone();
+    if !info.edition.is_empty() {
+        basis.push_str(&format!(", {}", info.edition));
+    }
+    if !info.publisher.is_empty() {
+        basis.push_str(&format!(", udgivet af {}", info.publisher));
+    }
+    let mut text = format!(
+        "Klassifikationskoderne er kontrolleret mod {basis}. For hvert element med en kode er \
+         det kontrolleret, at koden findes i listen på det niveau, elementer kodes på, at \
+         elementets type-ID begynder med koden, og at koden passer til elementets IFC-klasse. \
+         Koder, der i listen er reserveret til senere udgaver, regnes ikke som gyldige. \
+         Elementer uden kode i systemet indgår ikke i andelen; om en klassifikationskode er \
+         udfyldt, fremgår af udfyldningsgraden.\n\nHvilke IFC-klasser en kode hører til, \
+         fremgår ikke af {system}. Den vurdering er OpenChecks egen og er holdt bred, så kun \
+         klare uoverensstemmelser er medtaget."
+    );
+    if !info.licence.is_empty() {
+        text.push_str(&format!(
+            " Listen er anvendt uændret under licensen {}.",
+            info.licence
+        ));
+    }
+    text
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -471,7 +664,7 @@ pub fn section_of(issue: &Issue) -> BlockKind {
         BlockKind::Clashes
     } else if kinds.iter().any(|k| *k == "Duplicate" || *k == "Clearance") {
         BlockKind::Geometry
-    } else if kinds.contains(&"Missing information") {
+    } else if kinds.contains(&"Missing information") || kinds.contains(&"Classification") {
         BlockKind::Properties
     } else {
         BlockKind::Clashes
@@ -992,6 +1185,31 @@ impl OpenCheckApp {
                     })
                     .collect();
                 let accepted = models.iter().any(InfoModel::has_accepted);
+                let classification = summary.classification.as_ref().map(|codes| CodeDoc {
+                    system: codes.info.label(),
+                    provenance: codes.info.provenance(),
+                    source: codes.info.source.clone(),
+                    about: about_codes_da(&codes.info),
+                    models: codes
+                        .models
+                        .iter()
+                        .filter(|m| m.elements > 0)
+                        .map(|m| CodeModel {
+                            name: m.name.clone(),
+                            elements: m.elements,
+                            coded: m.coded,
+                            valid: m.valid,
+                            problems: m
+                                .problems
+                                .iter()
+                                .map(|p| CodeRow {
+                                    label: code_problem_da(p),
+                                    count: p.count,
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                });
                 docs.push(InfoDoc {
                     id: format!("{}/{}", rs.info.id, rule.rule.id),
                     title: rs.info.name.clone(),
@@ -1001,7 +1219,13 @@ impl OpenCheckApp {
                     levels,
                     notes: summary.notes.clone(),
                     models,
-                    findings: rule.findings.len(),
+                    // Wrong codes are counted in the classification check.
+                    findings: rule
+                        .findings
+                        .iter()
+                        .filter(|f| f.kind != opencheck_core::check::FindingKind::Classification)
+                        .count(),
+                    classification,
                 });
             }
         }

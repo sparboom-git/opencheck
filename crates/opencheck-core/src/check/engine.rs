@@ -16,6 +16,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sha2::{Digest, Sha256};
 
+use super::classification::{ClassificationModel, ClassificationSummary, ClassificationSystem};
 use super::freezone::{RunFrame, ZoneBox, covered, intersect, merge, subtract};
 use super::geom::{
     Triangle, closest_point_on_triangle, point_in_mesh, triangle_aabb, triangle_intersection,
@@ -63,6 +64,9 @@ pub struct CheckJob {
     /// Information standards the project has adapted; they replace the
     /// built-in standard with the same id.
     pub standards: Vec<Arc<InformationStandard>>,
+    /// Information rules: the classification system the project uses. With
+    /// one, the codes themselves are checked too; None leaves that out.
+    pub classification: Option<Arc<ClassificationSystem>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -77,6 +81,9 @@ pub enum FindingKind {
     Duplicate,
     /// Required information is missing on the element.
     MissingInformation,
+    /// The element's classification code is not in the project's
+    /// classification system or does not fit the element.
+    Classification,
     /// A zone the element needs is blocked.
     FreeZone,
     /// Reported by a script rule.
@@ -91,6 +98,7 @@ impl FindingKind {
             FindingKind::Clearance => "Clearance",
             FindingKind::Duplicate => "Duplicate",
             FindingKind::MissingInformation => "Missing information",
+            FindingKind::Classification => "Classification",
             FindingKind::FreeZone => "Free zone",
             FindingKind::Script => "Script",
         }
@@ -120,12 +128,15 @@ pub struct Finding {
     pub region: Aabb,
     /// Clash: estimated penetration depth. Clearance: actual distance.
     /// Duplicate: largest offset between the copies. Metres.
-    /// Missing information: how many items are missing.
+    /// Missing information: how many items are missing. Classification: how
+    /// many things are wrong with the code.
     pub magnitude: f32,
     /// Missing information: the kind of building part, e.g. "Cable carriers".
+    /// Classification: the problem alike findings share, e.g. "570 · not in
+    /// the list".
     pub category: String,
-    /// Missing information: names of the missing items. Free zones and
-    /// scripts: what is wrong, in lines.
+    /// Missing information: names of the missing items. Classification, free
+    /// zones and scripts: what is wrong, in lines.
     pub details: Vec<String>,
     /// Free zones: the blocked part of the zone as boxes (8 corners each,
     /// federation frame), for drawing.
@@ -929,11 +940,20 @@ fn check_information(
         .standards
         .iter()
         .find(|s| s.standard.id == rule.standard);
-    let Some(standard) = adapted
-        .map(|s| s.as_ref())
-        .or_else(|| builtin_standard(&rule.standard))
-    else {
-        return (Vec::new(), InformationSummary::default(), 0);
+    // With a classification system chosen, the classification code and the
+    // type id are read where that system keeps them. A standard the job
+    // brings is taken as it is: whoever adapted it built on the same.
+    let narrowed;
+    let standard = match (adapted, builtin_standard(&rule.standard)) {
+        (Some(adapted), _) => adapted.as_ref(),
+        (None, Some(builtin)) => match &job.classification {
+            Some(system) => {
+                narrowed = system.applied_to(builtin);
+                &narrowed
+            }
+            None => builtin,
+        },
+        (None, None) => return (Vec::new(), InformationSummary::default(), 0),
     };
     let mut summary = InformationSummary {
         standard: standard.standard.name.clone(),
@@ -1053,22 +1073,8 @@ fn check_information(
             }
 
             let element = &model.elements[e];
-            let mut bounds = element.bounds;
-            for part_id in &element.parts {
-                if let Some(child) = model.element(*part_id) {
-                    bounds = bounds.union(&child.bounds);
-                }
-            }
-            if bounds.is_empty() {
+            let Some((found, region)) = single_element(check_model, element) else {
                 continue;
-            }
-            let region = bounds.transformed(&check_model.transform.as_dmat4());
-            let found = FindingElement {
-                model: check_model.id,
-                express_id: element.express_id,
-                global_id: element.global_id.clone(),
-                name: element.name.clone(),
-                ifc_class: element.ifc_class.clone(),
             };
             findings.push(Finding {
                 id: finding_id(ruleset_id, &rule.id, &element.global_id, &element.global_id),
@@ -1099,7 +1105,134 @@ fn check_information(
     for model in &mut summary.models {
         tidy_parts(&mut model.parts, order);
     }
+    // The codes themselves, apart from whether they are there.
+    if let Some(system) = &job.classification {
+        let (wrong, classification) =
+            check_classification(models, job, rule, ruleset_id, system, standard);
+        findings.extend(wrong);
+        summary.classification = Some(classification);
+    }
     (findings, summary, checked)
+}
+
+/// The element of a finding about one element, and the finding's extent in
+/// the federation frame: the element with its parts. None when it has no
+/// extent to show.
+fn single_element(
+    check_model: &CheckModel,
+    element: &crate::Element,
+) -> Option<(FindingElement, Aabb)> {
+    let model = &check_model.model;
+    let mut bounds = element.bounds;
+    for part_id in &element.parts {
+        if let Some(child) = model.element(*part_id) {
+            bounds = bounds.union(&child.bounds);
+        }
+    }
+    if bounds.is_empty() {
+        return None;
+    }
+    let region = bounds.transformed(&check_model.transform.as_dmat4());
+    let found = FindingElement {
+        model: check_model.id,
+        express_id: element.express_id,
+        global_id: element.global_id.clone(),
+        name: element.name.clone(),
+        ifc_class: element.ifc_class.clone(),
+    };
+    Some((found, region))
+}
+
+/// Checks the classification codes in the job's models against the
+/// project's system: the code is in the list and fits the element. Elements
+/// without a code of the system are counted, not reported; whether a code
+/// is there is the information rule's own matter.
+fn check_classification(
+    models: &[CheckModel],
+    job: &CheckJob,
+    rule: &Rule,
+    ruleset_id: &str,
+    system: &ClassificationSystem,
+    standard: &InformationStandard,
+) -> (Vec<Finding>, ClassificationSummary) {
+    let mut summary = ClassificationSummary {
+        info: system.info.clone(),
+        models: Vec::new(),
+    };
+    let mut findings = Vec::new();
+    // Tells the finding from the missing information finding of the same
+    // rule and element.
+    let rule_id = format!("{}/classification", rule.id);
+    for check_model in models.iter().filter(|m| job.models.contains(&m.id)) {
+        let model = &check_model.model;
+        let facts = ModelFacts::new(model);
+        let judged: Vec<_> = model
+            .elements
+            .par_iter()
+            .enumerate()
+            .filter_map(|(e, element)| {
+                // The same elements as the information check, less those
+                // that carry no code (spaces, openings).
+                if !check_model.includes(e)
+                    || !is_checked(element)
+                    || SPATIAL_CLASSES
+                        .iter()
+                        .any(|c| element.ifc_class.eq_ignore_ascii_case(c))
+                    || !rule.a.matches(model, element)
+                    || !system.checks(model, element)
+                {
+                    return None;
+                }
+                // The code is read where the information rule reads it.
+                Some((e, system.judge(Some(standard), model, &facts, element)))
+            })
+            .collect();
+        let mut row = ClassificationModel {
+            model: check_model.id,
+            name: model.short_name.clone(),
+            elements: 0,
+            coded: 0,
+            valid: 0,
+            problems: Vec::new(),
+            found_in: Vec::new(),
+        };
+        for (e, judgement) in &judged {
+            row.count(judgement.as_ref());
+            let Some(judgement) = judgement else {
+                continue;
+            };
+            let Some(first) = judgement.problems.first() else {
+                continue;
+            };
+            let element = &model.elements[*e];
+            let Some((found, region)) = single_element(check_model, element) else {
+                continue;
+            };
+            // A line per problem, then the help to put it right.
+            let mut details: Vec<String> = judgement
+                .problems
+                .iter()
+                .flat_map(|p| std::iter::once(&p.detail).chain(&p.hint))
+                .cloned()
+                .collect();
+            details.push(format!("The code is read from {}.", judgement.place));
+            findings.push(Finding {
+                id: finding_id(ruleset_id, &rule_id, &element.global_id, &element.global_id),
+                kind: FindingKind::Classification,
+                a: found.clone(),
+                b: found,
+                point: region.center(),
+                region,
+                magnitude: judgement.problems.len() as f32,
+                category: first.label.clone(),
+                details,
+                zones: Vec::new(),
+            });
+        }
+        row.tidy();
+        summary.models.push(row);
+    }
+    (findings, summary)
 }
 
 /// UUID-formatted hash of the rule and the (unordered) element pair.

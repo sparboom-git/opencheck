@@ -89,6 +89,7 @@ pub fn magnitude_text(f: &Finding) -> String {
         FindingKind::Clearance => format!("distance {mm:.0} mm"),
         FindingKind::Duplicate => format!("offset {mm:.0} mm"),
         FindingKind::MissingInformation => format!("{:.0} missing", f.magnitude),
+        FindingKind::Classification => String::new(),
         FindingKind::FreeZone => format!("blocked {:.2} m", f.magnitude),
         FindingKind::Script if f.magnitude > 0.0 => format!("{:.2} m", f.magnitude),
         FindingKind::Script => String::new(),
@@ -124,7 +125,21 @@ struct Pair<'a> {
     count: usize,
     groups: Vec<Group<'a>>,
     /// Missing information: one discipline, grouped by building part.
+    /// Wrong classification codes are laid out the same way, grouped by
+    /// what is wrong.
     information: bool,
+    /// Wrong classification codes, in the section of their own.
+    classification: bool,
+}
+
+/// The findings of one ruleset as the list shows them, each kind per
+/// discipline: geometric pairs, missing information and wrong
+/// classification codes.
+struct Shown<'a> {
+    ruleset: &'a RulesetResult,
+    pairs: Vec<Pair<'a>>,
+    info: Vec<Pair<'a>>,
+    codes: Vec<Pair<'a>>,
 }
 
 fn issue_findings(app: &OpenCheckApp) -> FxHashSet<&str> {
@@ -254,6 +269,7 @@ fn layout<'a>(
                 count: rows.len(),
                 groups,
                 information,
+                classification: false,
             }
         })
         .collect();
@@ -420,8 +436,9 @@ fn results(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         })
         .collect();
     let single = shown.len() == 1;
-    // Per ruleset: its geometric pairs and its information pairs.
-    let sections: Vec<(&RulesetResult, Vec<Pair>, Vec<Pair>)> = shown
+    // Per ruleset: its geometric pairs, its information pairs and its
+    // pairs of wrong classification codes.
+    let sections: Vec<Shown> = shown
         .iter()
         .map(|rs| {
             let own: Vec<Row> = rows
@@ -429,20 +446,30 @@ fn results(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
                 .filter(|r| std::ptr::eq(r.ruleset, *rs))
                 .copied()
                 .collect();
+            let (code_rows, own): (Vec<Row>, Vec<Row>) = own
+                .into_iter()
+                .partition(|r| r.finding.kind == FindingKind::Classification);
             let (info_rows, geo_rows): (Vec<Row>, Vec<Row>) = own
                 .into_iter()
                 .partition(|r| r.finding.kind == FindingKind::MissingInformation);
-            (
-                *rs,
-                layout(app, &rs.info.id, &geo_rows, false),
-                layout(app, &rs.info.id, &info_rows, true),
-            )
+            let mut codes = layout(app, &rs.info.id, &code_rows, true);
+            for pair in &mut codes {
+                pair.classification = true;
+            }
+            Shown {
+                ruleset: rs,
+                pairs: layout(app, &rs.info.id, &geo_rows, false),
+                info: layout(app, &rs.info.id, &info_rows, true),
+                codes,
+            }
         })
         .collect();
+    // The order the list shows them in: codes come before missing information.
     let mut ordered = Vec::new();
-    for (_, pairs, info_pairs) in &sections {
-        ordered.extend(order(pairs));
-        ordered.extend(order(info_pairs));
+    for shown in &sections {
+        ordered.extend(order(&shown.pairs));
+        ordered.extend(order(&shown.codes));
+        ordered.extend(order(&shown.info));
     }
     let mut actions = Actions::default();
     if app.checking.tab == ResultsTab::Presort {
@@ -473,12 +500,12 @@ fn results(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
             if sections.is_empty() {
                 ui.label(RichText::new("No rulesets ran.").color(theme::text_muted()));
             }
-            for (rs, pairs, info_pairs) in &sections {
+            for shown in &sections {
                 if single {
-                    ruleset_heading(app, ui, rs);
-                    ruleset_body(app, ui, rs, pairs, info_pairs, &mut actions);
+                    ruleset_heading(app, ui, shown.ruleset);
+                    ruleset_body(app, ui, shown, &mut actions);
                 } else {
-                    ruleset_card(app, ui, rs, pairs, info_pairs, &mut actions);
+                    ruleset_card(app, ui, shown, &mut actions);
                 }
             }
         });
@@ -631,16 +658,16 @@ fn ruleset_scope(app: &OpenCheckApp, ui: &mut egui::Ui, rs: &RulesetResult) {
 }
 
 /// One ruleset as a card in the "All" view, collapsible.
-fn ruleset_card(
-    app: &OpenCheckApp,
-    ui: &mut egui::Ui,
-    rs: &RulesetResult,
-    pairs: &[Pair],
-    info_pairs: &[Pair],
-    actions: &mut Actions,
-) {
+fn ruleset_card(app: &OpenCheckApp, ui: &mut egui::Ui, list: &Shown, actions: &mut Actions) {
+    let rs = list.ruleset;
     let total: usize = rs.rules.iter().map(|r| r.findings.len()).sum();
-    let shown: usize = pairs.iter().chain(info_pairs).map(|p| p.count).sum();
+    let shown: usize = list
+        .pairs
+        .iter()
+        .chain(&list.info)
+        .chain(&list.codes)
+        .map(|p| p.count)
+        .sum();
     let id = ui.make_persistent_id(("ruleset_card", &rs.info.id));
     let mut state =
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, total > 0);
@@ -699,21 +726,16 @@ fn ruleset_card(
                 })
                 .body(|ui| {
                     ruleset_scope(app, ui, rs);
-                    ruleset_body(app, ui, rs, pairs, info_pairs, actions);
+                    ruleset_body(app, ui, list, actions);
                 });
         });
     ui.add_space(6.0);
 }
 
 /// The overview and findings of one ruleset.
-fn ruleset_body(
-    app: &OpenCheckApp,
-    ui: &mut egui::Ui,
-    rs: &RulesetResult,
-    pairs: &[Pair],
-    info_pairs: &[Pair],
-    actions: &mut Actions,
-) {
+fn ruleset_body(app: &OpenCheckApp, ui: &mut egui::Ui, list: &Shown, actions: &mut Actions) {
+    let rs = list.ruleset;
+    let (pairs, info_pairs, code_pairs) = (&list.pairs, &list.info, &list.codes);
     let has_geometry_rules = rs.rules.iter().any(|r| r.information.is_none());
     let has_information = rs.rules.iter().any(|r| r.information.is_some());
     let total: usize = rs.rules.iter().map(|r| r.findings.len()).sum();
@@ -767,6 +789,10 @@ fn ruleset_body(
     if has_information {
         section_label(ui, "INFORMATION: FILL RATE PER BUILDING PART");
         information_overview(app, ui, rs, info_pairs, actions);
+        // The codes themselves, when the project checks them: a section of
+        // its own, so the fill rates above and the missing information
+        // below read as they always did.
+        classification_section(app, ui, rs, code_pairs, actions);
         section_label(ui, "MISSING INFORMATION PER DISCIPLINE");
         if info_pairs.is_empty() {
             ui.label(
@@ -1145,6 +1171,188 @@ fn information_overview(
     }
 }
 
+/// The check of the classification codes themselves: per model how many
+/// codes are in order and what is wrong with the rest, then the elements
+/// with a wrong code per discipline. Nothing when the project does not
+/// check the codes.
+fn classification_section(
+    app: &OpenCheckApp,
+    ui: &mut egui::Ui,
+    ruleset: &RulesetResult,
+    code_pairs: &[Pair],
+    actions: &mut Actions,
+) {
+    /// Kinds of problem listed per model; the rest is under the disciplines.
+    const SHOWN: usize = 8;
+    let summaries: Vec<_> = ruleset
+        .rules
+        .iter()
+        .filter_map(|r| r.information.as_ref()?.classification.as_ref())
+        .collect();
+    if summaries.is_empty() {
+        return;
+    }
+    for summary in &summaries {
+        let info = &summary.info;
+        section_label(
+            ui,
+            &format!("CLASSIFICATION: {}", info.label().to_uppercase()),
+        );
+        egui::Frame::new()
+            .stroke(egui::Stroke::new(1.0, theme::border()))
+            .corner_radius(6)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new(info.label()).small().strong())
+                    .on_hover_text(&info.source);
+                ui.label(
+                    RichText::new(info.provenance())
+                        .small()
+                        .color(theme::text_muted()),
+                )
+                .on_hover_text(
+                    "The edition of the classification system the codes are checked against, \
+                     its publisher and its licence",
+                );
+                if summary.coded() == 0 {
+                    ui.label(
+                        RichText::new("No element has a code of this system.")
+                            .small()
+                            .color(severity_color(Severity::Moderate)),
+                    );
+                }
+                for model in summary.models.iter().filter(|m| m.elements > 0) {
+                    let share = model.rate() as f32;
+                    let id =
+                        ui.make_persistent_id(("codes_model", &ruleset.info.id, model.model.0));
+                    egui::collapsing_header::CollapsingState::load_with_default_open(
+                        ui.ctx(),
+                        id,
+                        model.wrong() > 0,
+                    )
+                    .show_header(ui, |ui| {
+                        let name = ui.label(RichText::new(&model.name).strong());
+                        if !model.found_in.is_empty() {
+                            name.on_hover_ui(|ui| {
+                                ui.label(RichText::new("Codes read from").small().strong());
+                                for (place, n) in model.found_in.iter().take(8) {
+                                    ui.label(
+                                        RichText::new(format!("{n:>6}  {place}"))
+                                            .small()
+                                            .monospace(),
+                                    );
+                                }
+                            });
+                        }
+                        ui.label(
+                            RichText::new(format!("{} codes", model.coded))
+                                .small()
+                                .color(theme::text_muted()),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if model.coded == 0 {
+                                ui.label(
+                                    RichText::new("no codes").small().color(theme::text_muted()),
+                                );
+                                return;
+                            }
+                            ui.label(
+                                RichText::new(format!("{:.0} %", share * 100.0))
+                                    .small()
+                                    .color(theme::text_muted()),
+                            )
+                            .on_hover_text(format!(
+                                "{} of {} codes are in the list and fit their element",
+                                model.valid, model.coded
+                            ));
+                            fill_bar(ui, share, false);
+                        });
+                    })
+                    .body(|ui| {
+                        for problem in model.problems.iter().take(SHOWN) {
+                            ui.horizontal(|ui| {
+                                let label = bounded(ui, 60.0, |ui| {
+                                    ui.add(
+                                        egui::Label::new(RichText::new(&problem.label).small())
+                                            .sense(egui::Sense::click())
+                                            .truncate(),
+                                    )
+                                })
+                                .on_hover_text("Show the elements with this code in 3D");
+                                if label.clicked() {
+                                    let ids: Vec<String> = code_pairs
+                                        .iter()
+                                        .flat_map(|p| &p.groups)
+                                        .filter(|g| g.class == problem.label)
+                                        .flat_map(|g| &g.rows)
+                                        .filter(|r| r.finding.a.model == model.model)
+                                        .map(|r| r.finding.id.clone())
+                                        .collect();
+                                    if !ids.is_empty() {
+                                        actions.show_group = Some(ids);
+                                    }
+                                }
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new(problem.count.to_string())
+                                                .small()
+                                                .color(theme::text_muted()),
+                                        );
+                                    },
+                                );
+                            });
+                        }
+                        if model.problems.len() > SHOWN {
+                            ui.label(
+                                RichText::new(format!(
+                                    "… {} more kinds, listed per discipline below",
+                                    model.problems.len() - SHOWN
+                                ))
+                                .small()
+                                .color(theme::text_muted()),
+                            );
+                        }
+                        if model.wrong() == 0 && model.coded > 0 {
+                            ui.label(
+                                RichText::new("Every code is in the list and fits its element.")
+                                    .small()
+                                    .color(theme::text_muted()),
+                            );
+                        }
+                        if model.without() > 0 {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} elements without a code of the system",
+                                    model.without()
+                                ))
+                                .small()
+                                .color(theme::text_muted()),
+                            )
+                            .on_hover_text(
+                                "They are counted, not reported here: whether a classification \
+                                 code is there is part of the fill rates above",
+                            );
+                        }
+                    });
+                }
+            });
+    }
+    let wrong: usize = summaries.iter().map(|s| s.wrong()).sum();
+    if wrong == 0 {
+        return;
+    }
+    section_label(ui, "WRONG CLASSIFICATION PER DISCIPLINE");
+    if code_pairs.is_empty() {
+        ui.label(RichText::new("No findings match the filters.").color(theme::text_muted()));
+    }
+    for pair in code_pairs {
+        pair_section(app, ui, pair, actions);
+    }
+}
+
 /// One building part's fill rate with its items, for one model or for all.
 /// A click on the part shows its findings in 3D.
 fn part_coverage(
@@ -1328,7 +1536,14 @@ fn count_badge(ui: &mut egui::Ui, n: usize) {
 
 fn pair_section(app: &OpenCheckApp, ui: &mut egui::Ui, pair: &Pair, actions: &mut Actions) {
     let (d1, d2) = pair.key;
-    let id = ui.make_persistent_id(("pair", pair.scope, d1 as u8, d2 as u8, pair.information));
+    let id = ui.make_persistent_id((
+        "pair",
+        pair.scope,
+        d1 as u8,
+        d2 as u8,
+        pair.information,
+        pair.classification,
+    ));
     let mut state =
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true);
     let reveal = app
@@ -1408,6 +1623,7 @@ fn group_section(
         pair.group_by as u8,
         group.class,
         pair.information,
+        pair.classification,
         pair.scope,
     ));
     egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
@@ -1585,7 +1801,9 @@ fn finding_row(app: &OpenCheckApp, ui: &mut egui::Ui, row: &Row, actions: &mut A
         .on_hover_text(hover);
         let size = match f.kind {
             FindingKind::MissingInformation => format!("{} missing", f.details.len()),
-            FindingKind::FreeZone | FindingKind::Script => magnitude_text(f),
+            FindingKind::Classification | FindingKind::FreeZone | FindingKind::Script => {
+                magnitude_text(f)
+            }
             _ => format!("{:.0} mm", f.magnitude * 1000.0),
         };
         ui.label(RichText::new(size).small().color(theme::text_muted()));
@@ -1837,32 +2055,34 @@ fn finding_detail(app: &OpenCheckApp, ui: &mut egui::Ui, id: &str, actions: &mut
     });
     ui.label(RichText::new(&rule.rule.name).color(theme::text_muted()))
         .on_hover_text(&ruleset.info.name);
-    let sides: &[(&FindingElement, Color32)] =
-        if matches!(f.kind, FindingKind::FreeZone | FindingKind::Script) {
-            for line in &f.details {
-                ui.label(RichText::new(line).color(severity_color(rule.rule.severity)));
-            }
-            if f.is_single() {
-                &[(&f.a, FOCUS_A)]
-            } else {
-                &[(&f.a, FOCUS_A), (&f.b, FOCUS_B)]
-            }
-        } else if f.is_single() {
-            if crate::checking::uses_levels(&rule.rule) {
-                let level = crate::checking::level_label(&app.checking.level_of(f.a.model));
-                ui.label(RichText::new(format!("{} · {level}", f.category)).strong());
-            } else {
-                ui.label(RichText::new(&f.category).strong());
-            }
-            ui.label(
-                RichText::new(format!("Missing: {}", f.details.join(", ")))
-                    .color(severity_color(rule.rule.severity)),
-            );
+    let sides: &[(&FindingElement, Color32)] = if matches!(
+        f.kind,
+        FindingKind::Classification | FindingKind::FreeZone | FindingKind::Script
+    ) {
+        for line in &f.details {
+            ui.label(RichText::new(line).color(severity_color(rule.rule.severity)));
+        }
+        if f.is_single() {
             &[(&f.a, FOCUS_A)]
         } else {
-            ui.label(magnitude_text(f));
             &[(&f.a, FOCUS_A), (&f.b, FOCUS_B)]
-        };
+        }
+    } else if f.is_single() {
+        if crate::checking::uses_levels(&rule.rule) {
+            let level = crate::checking::level_label(&app.checking.level_of(f.a.model));
+            ui.label(RichText::new(format!("{} · {level}", f.category)).strong());
+        } else {
+            ui.label(RichText::new(&f.category).strong());
+        }
+        ui.label(
+            RichText::new(format!("Missing: {}", f.details.join(", ")))
+                .color(severity_color(rule.rule.severity)),
+        );
+        &[(&f.a, FOCUS_A)]
+    } else {
+        ui.label(magnitude_text(f));
+        &[(&f.a, FOCUS_A), (&f.b, FOCUS_B)]
+    };
     for &(element, _) in sides {
         let color = app.model_color(element.model);
         ui.horizontal(|ui| {

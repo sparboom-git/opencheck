@@ -50,6 +50,10 @@ pub struct AutorunConfig {
     /// Information level (LOD) for information rules.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<String>,
+    /// Id of the classification system whose codes information rules check,
+    /// e.g. `bimtypecode-2022-dk`; omitted: the codes are not checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification: Option<String>,
     #[serde(default)]
     pub schedule: Schedule,
     /// Seconds a file's size must stay the same before it is read, so a
@@ -147,6 +151,7 @@ impl AutorunConfig {
             ids: Vec::new(),
             information_changes: None,
             level: None,
+            classification: None,
             schedule: Schedule::default(),
             settle_seconds: settle(),
         }
@@ -473,6 +478,7 @@ pub fn check_type(kind: FindingKind) -> &'static str {
         FindingKind::Duplicate => "duplicate",
         FindingKind::FreeZone => "free_zone",
         FindingKind::MissingInformation => "information",
+        FindingKind::Classification => "classification",
         FindingKind::Script => "script",
     }
 }
@@ -532,7 +538,7 @@ pub fn run_findings(
                     });
                 }
                 let value = match f.kind {
-                    FindingKind::MissingInformation => None,
+                    FindingKind::MissingInformation | FindingKind::Classification => None,
                     FindingKind::Script if f.magnitude == 0.0 => None,
                     _ => Some((f64::from(f.magnitude) * 1000.0).round()),
                 };

@@ -19,8 +19,8 @@ solved since the run before, per pair of disciplines.
    machines. A path with no file behind it is shown in red; a run skips the
    file and says so in the log.
 2. **Checks**: the project's rulesets to run. Their settings, the project's
-   changes to the information requirements, its LOD level and its IDS files
-   are copied into the configuration when it is saved; save again after
+   changes to the information requirements, its LOD level, its classification
+   system and its IDS files are copied into the configuration when it is saved; save again after
    changing them. The visual checks ticked in the Visual Check tab run too
    (see [visual-checking.md](visual-checking.md)).
 3. **Output folder**: history, dashboard, log and lock file go here. On the

@@ -560,6 +560,7 @@ fn save(app: &mut OpenCheckApp) -> Option<PathBuf> {
     let changes = checking.overrides();
     config.information_changes = (!changes.is_empty()).then(|| changes.to_toml());
     config.level = Some(checking.project_level());
+    config.classification = checking.classification.clone();
 
     let output = PathBuf::from(&config.output);
     let result = std::fs::create_dir_all(&output)

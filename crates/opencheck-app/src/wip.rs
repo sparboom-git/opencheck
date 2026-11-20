@@ -10,6 +10,8 @@
 //! - the built-in rulesets marked `work_in_progress` (`checking_ui`,
 //!   `ruleset_manager`);
 //! - the visual checks whose kind is `work_in_progress` (`visual_ui`);
+//! - the check of classification codes against a classification system, on
+//!   the card of an information ruleset (`checking_ui`);
 //! - Revit files, converted to IFC with rvt-rs (`opencheck-rvt`).
 //!
 //! The switch decides what is offered, never what a project holds: a ruleset
@@ -106,6 +108,14 @@ const FEATURES: &[Feature] = &[
         name: "Visual checks: pipes and ducts",
         what: "Two checks on the Visual Check tab: Dimensions in pipe and duct systems, and \
                Fall of drain pipes.",
+    },
+    Feature {
+        name: "Classification codes",
+        what: "A tick on the card of the Information: LOD DK ruleset: also check the \
+               classification codes themselves against a classification system (BIMTypeCode \
+               2022 DK), that a code is in the list and fits the element. The results get a \
+               section of their own. Which IFC classes a code belongs on is OpenCheck's own \
+               judgement and still being tuned.",
     },
     REVIT,
 ];

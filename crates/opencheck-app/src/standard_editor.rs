@@ -5,13 +5,12 @@
 use eframe::egui::{self, RichText};
 use egui_phosphor::regular as icon;
 use opencheck_core::check::{
-    InformationStandard, ModelFacts, Source, StandardOverrides, builtin_standard, exact_name,
-    exact_pattern, validate_sources,
+    InformationStandard, ModelFacts, Source, StandardOverrides, exact_name, exact_pattern,
+    validate_sources,
 };
 use rustc_hash::FxHashMap;
 
 use crate::app::OpenCheckApp;
-use crate::checking::INFORMATION_STANDARD;
 use crate::scene::ElementRef;
 use crate::theme;
 
@@ -82,7 +81,15 @@ impl Draft {
             let kind = if source.type_name {
                 Kind::TypeName
             } else if source.classification {
-                Kind::Classification
+                // The name of a classification source is the system its
+                // references belong to; empty: any system.
+                return Self {
+                    kind: Kind::Classification,
+                    name: split(&source.scheme).0,
+                    name_pattern: split(&source.scheme).1,
+                    set: String::new(),
+                    set_pattern: false,
+                };
             } else if source.material {
                 Kind::Material
             } else if source.system {
@@ -122,7 +129,12 @@ impl Draft {
             }
             Kind::Attribute => source.attribute = Some(pattern(&self.name, self.name_pattern)),
             Kind::TypeName => source.type_name = true,
-            Kind::Classification => source.classification = true,
+            Kind::Classification => {
+                source.classification = true;
+                if !self.name.trim().is_empty() {
+                    source.scheme = Some(pattern(&self.name, self.name_pattern));
+                }
+            }
             Kind::Material => source.material = true,
             Kind::System => source.system = true,
             Kind::Storey => source.storey = true,
@@ -267,9 +279,12 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
     let Some(mut state) = app.checking.editor.take() else {
         return;
     };
-    let Some(base) = builtin_standard(INFORMATION_STANDARD) else {
+    // The standard as the project's classification system reads it: what
+    // "back to standard" goes back to.
+    let Some(base) = app.checking.base_standard() else {
         return;
     };
+    let base = base.as_ref();
     if state.minimized {
         if minimized_bar(ctx, &mut state, base) {
             app.checking.editor = Some(state);
@@ -632,6 +647,23 @@ fn source_editor(
                                     .on_hover_text(
                                         "Off: the exact name (case and spaces do not matter). \
                                          On: a regular expression, e.g. ^(Width|Bredde)$",
+                                    );
+                            }
+                            if draft.kind == Kind::Classification {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut draft.name)
+                                        .hint_text("of any classification system")
+                                        .desired_width(200.0),
+                                )
+                                .on_hover_text(
+                                    "The classification system the reference must belong to, \
+                                     e.g. BIMTypeCode. Empty: a reference of any system counts.",
+                                );
+                                ui.checkbox(&mut draft.name_pattern, "Pattern")
+                                    .on_hover_text(
+                                        "Off: the exact name of the system (case does not \
+                                         matter). On: a regular expression, e.g. \
+                                         ^(BIMTypeCode|Uniformat)",
                                     );
                             }
                             ui.with_layout(

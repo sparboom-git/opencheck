@@ -1,0 +1,31 @@
+BIMTypeCode 2022 DK
+===================
+
+OpenCheck includes the list of codes of BIMTypeCode 2022 DK, to check the
+type codes in building models against it.
+
+  Title:    BIMTypeCode 2022 publications
+  Creator:  BIM7AA, http://BIM7AA.dk
+  Edition:  V.2022 DK, 2. udgave, 2023-06-30
+  Source:   https://github.com/bimtypecode/bimtypecode
+            file "dk/BIMTypeCode - Assembly Codes - 2022DK.txt"
+            revision e8ba47254e1394e768c41635ddae9ae6717eef14
+  Licence:  Creative Commons Attribution-NoDerivatives 4.0 International
+            (CC BY-ND 4.0)
+            https://creativecommons.org/licenses/by-nd/4.0/
+
+The list is included as published: every code, name and level is unchanged.
+Only the character encoding and the line endings of the file were changed,
+from Windows-1252 to UTF-8 and from CRLF to LF. In the source of OpenCheck it
+is the file
+crates/opencheck-core/classifications/bimtypecode-2022-dk.txt.
+
+Two files next to it are OpenCheck's own work, under OpenCheck's licence, and
+not part of BIMTypeCode:
+
+  bimtypecode-2022-dk.toml         what the list is and where a model keeps
+                                   the code
+  bimtypecode-2022-dk.expect.toml  which IFC classes OpenCheck expects a code
+                                   on
+
+BIM7AA has not reviewed or endorsed OpenCheck or these two files.

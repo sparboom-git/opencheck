@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use opencheck_core::check::{
-    BUILTIN_RULESETS, CheckJob, CheckReport, Finding, IDS_PREFIX, Ids, InformationStandard, Rule,
-    RuleKind, RuleResult, Ruleset, RulesetInfo, RulesetResult, Selector, Severity,
-    StandardOverrides, builtin_standard, ids_path,
+    BUILTIN_RULESETS, CheckJob, CheckReport, ClassificationSystem, Finding, IDS_PREFIX, Ids,
+    InformationStandard, Rule, RuleKind, RuleResult, Ruleset, RulesetInfo, RulesetResult, Selector,
+    Severity, StandardOverrides, builtin_classification, builtin_standard, ids_path,
 };
 use opencheck_core::project::RulesetFile;
 use opencheck_core::{Discipline, ModelId};
@@ -271,6 +271,11 @@ pub struct Checking {
     pub requirements: Vec<ProjectIds>,
     /// The project's changes to where the information standard looks.
     pub adapted: Option<Adapted>,
+    /// The built-in standard as it reads with the project's classification
+    /// system: the classification code and the type id are read where that
+    /// system keeps them. None while no system is chosen. The project's
+    /// changes (`adapted`) build on it.
+    narrowed: Option<Arc<InformationStandard>>,
     /// The window that edits them, when open.
     pub editor: Option<crate::standard_editor::EditorState>,
     pub report: Option<Arc<CheckReport>>,
@@ -305,6 +310,10 @@ pub struct Checking {
     pub level: Option<String>,
     /// Models that use another level than the project.
     pub model_levels: FxHashMap<ModelId, String>,
+    /// Id of the classification system, in one edition, whose codes the
+    /// information rules check (`bimtypecode-2022-dk`); None: the codes
+    /// themselves are not checked.
+    pub classification: Option<String>,
     /// Working area: only elements touching it are shown and checked.
     pub area: Option<opencheck_core::area::WorkArea>,
     /// Scheduled runs without the app, as last saved from File > Autorun.
@@ -333,6 +342,9 @@ struct SavedChecking {
     /// Per-model levels, by model position in the manifest.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     model_levels: Vec<SavedLevel>,
+    /// Classification system whose codes are checked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    classification: Option<String>,
     /// Working area in world coordinates.
     #[serde(skip_serializing_if = "Option::is_none")]
     area: Option<opencheck_core::area::WorkArea>,
@@ -548,15 +560,68 @@ impl Checking {
                 .iter()
                 .map(|r| (r.path.clone(), r.ids.clone()))
                 .collect(),
-            standards: self.adapted.iter().map(|a| a.standard.clone()).collect(),
+            standards: self
+                .adapted
+                .as_ref()
+                .map(|a| a.standard.clone())
+                .or_else(|| self.narrowed.clone())
+                .into_iter()
+                .collect(),
+            classification: self.classification_system(),
         }
+    }
+
+    /// The classification system the project checks codes against; None
+    /// when it checks none, or names one this version does not have.
+    pub fn classification_system(&self) -> Option<Arc<ClassificationSystem>> {
+        self.classification
+            .as_deref()
+            .and_then(builtin_classification)
+    }
+
+    /// Chooses the classification system; None stops checking the codes.
+    /// The choice also decides where the information rule reads the
+    /// classification code and the type id.
+    pub fn set_classification(&mut self, id: Option<String>) {
+        if self.classification != id {
+            self.classification = id;
+            self.rebase();
+            self.information_changed();
+        }
+    }
+
+    /// Reads the standard anew with the classification system now chosen,
+    /// and puts the project's changes on top of it again.
+    fn rebase(&mut self) {
+        self.narrowed = match (
+            self.classification_system(),
+            builtin_standard(INFORMATION_STANDARD),
+        ) {
+            (Some(system), Some(builtin)) => Some(Arc::new(system.applied_to(builtin))),
+            _ => None,
+        };
+        if let Some(adapted) = self.adapted.take() {
+            // What no longer fits was reported when the changes were made.
+            self.set_overrides(adapted.overrides);
+        }
+    }
+
+    /// The standard the project's changes build on: the built-in one, read
+    /// with the project's classification system when it has chosen one.
+    pub fn base_standard(&self) -> Option<Arc<InformationStandard>> {
+        static BUILTIN: std::sync::LazyLock<Option<Arc<InformationStandard>>> =
+            std::sync::LazyLock::new(|| {
+                builtin_standard(INFORMATION_STANDARD).map(|s| Arc::new(s.clone()))
+            });
+        self.narrowed.clone().or_else(|| BUILTIN.clone())
     }
 
     /// The information standard as the project uses it, with its changes.
     pub fn information_standard(&self) -> Option<&InformationStandard> {
-        match &self.adapted {
-            Some(a) => Some(&a.standard),
-            None => builtin_standard(INFORMATION_STANDARD),
+        match (&self.adapted, &self.narrowed) {
+            (Some(a), _) => Some(&a.standard),
+            (None, Some(narrowed)) => Some(narrowed),
+            (None, None) => builtin_standard(INFORMATION_STANDARD),
         }
     }
 
@@ -582,7 +647,12 @@ impl Checking {
             self.information_changed();
             return Vec::new();
         }
-        let (standard, skipped) = overrides.apply(base);
+        // The changes go on top of the standard as the project's
+        // classification system reads it.
+        let narrowed = (overrides.base == INFORMATION_STANDARD)
+            .then(|| self.narrowed.clone())
+            .flatten();
+        let (standard, skipped) = overrides.apply(narrowed.as_deref().unwrap_or(base));
         self.adapted = Some(Adapted {
             overrides,
             standard: Arc::new(standard),
@@ -847,6 +917,7 @@ impl Checking {
                 list
             },
             level: self.level.clone(),
+            classification: self.classification.clone(),
             area: self.area,
             autorun: self.autorun.clone(),
             visual: self.visual.clone(),
@@ -961,6 +1032,8 @@ impl Checking {
             .map(|d| (d.finding, d.decision))
             .collect();
         self.level = saved.level;
+        self.classification = saved.classification;
+        self.rebase();
         self.area = saved.area;
         self.autorun = saved.autorun;
         self.visual = saved.visual;
@@ -1351,5 +1424,92 @@ mod standard_tests {
 
         checking.set_model_level(b, None);
         assert_eq!(checking.level_of(b), "325");
+    }
+
+    #[test]
+    fn the_classification_system_decides_where_the_code_is_read() {
+        use opencheck_core::check::Source;
+        // Where the project reads an item, in words.
+        let reads = |checking: &Checking, item: &str| -> String {
+            let standard = checking.information_standard().unwrap();
+            let labels: Vec<String> = standard
+                .item(item)
+                .unwrap()
+                .any
+                .iter()
+                .map(Source::label)
+                .collect();
+            labels.join("; ")
+        };
+        let job = |checking: &Checking| {
+            checking
+                .rulesets
+                .iter()
+                .find(|r| r.ruleset.ruleset.id == INFORMATION_STANDARD)
+                .map(|r| checking.job(r, &[ModelId(1)]))
+                .unwrap()
+        };
+        let mut checking = Checking::default();
+        checking.add_builtin_file("information-lod-dk.toml");
+        // Without a system, a code of any system counts.
+        assert!(reads(&checking, "classification-code").contains("CCS"));
+        assert!(job(&checking).standards.is_empty());
+        assert!(job(&checking).classification.is_none());
+
+        // With BIMTypeCode chosen, only its own places are read, and the
+        // jobs check with that standard.
+        checking.stale = false;
+        checking.set_classification(Some("bimtypecode-2022-dk".into()));
+        assert!(checking.stale);
+        let code = reads(&checking, "classification-code");
+        assert!(code.contains("TypeCode") && !code.contains("CCS"), "{code}");
+        assert!(!reads(&checking, "type-id").contains("CCS"));
+        assert_eq!(job(&checking).standards.len(), 1);
+        assert!(job(&checking).classification.is_some());
+        assert!(
+            checking
+                .base_standard()
+                .unwrap()
+                .item("classification-code")
+                .unwrap()
+                .description
+                .contains("BIMTypeCode 2022 DK")
+        );
+
+        // The project's own changes go on top of it.
+        let mut overrides = checking.overrides();
+        overrides.items.insert(
+            "width".into(),
+            vec![Source {
+                property: Some("^Bredde$".into()),
+                ..Source::default()
+            }],
+        );
+        assert!(checking.set_overrides(overrides).is_empty());
+        assert_eq!(reads(&checking, "width"), "Property Bredde");
+        assert!(!reads(&checking, "classification-code").contains("CCS"));
+
+        // Saved with the project and read back, in whichever order the
+        // changes and the choice arrive.
+        let json = checking.to_json(&[]);
+        let mut loaded = Checking::default();
+        loaded.load(
+            checking.ruleset_files(),
+            checking.requirement_files(),
+            Some(json),
+        );
+        loaded.apply_pending(&[]);
+        assert_eq!(
+            loaded.classification.as_deref(),
+            Some("bimtypecode-2022-dk")
+        );
+        assert_eq!(reads(&loaded, "width"), "Property Bredde");
+        assert!(!reads(&loaded, "classification-code").contains("CCS"));
+
+        // Without a system the standard reads as before; the project's
+        // changes stay.
+        checking.set_classification(None);
+        assert!(reads(&checking, "classification-code").contains("CCS"));
+        assert_eq!(reads(&checking, "width"), "Property Bredde");
     }
 }

@@ -1,0 +1,174 @@
+# Which elements a BIMTypeCode is expected on.
+#
+# This file is OpenCheck's own work and not part of BIMTypeCode: the list
+# says what a code means, not which IFC classes it belongs on. The
+# expectations are kept wide on purpose, so only a clear mismatch is
+# reported, e.g. a pipe code on a wall or a wall code on a duct.
+#
+# `codes` are prefixes: "5" covers every code that begins with 5, "57" the
+# group 57 and "599" one code. The longest prefix that fits a code decides.
+# A code no prefix fits is not judged. `classes` are IFC classes, subtypes
+# included; "@name" stands for a set from [sets]. A generic IFC2x3 element
+# (IfcFlowSegment, IfcFlowTerminal, ...) passes where one of its subtypes is
+# expected, since the model does not say which it is.
+
+# Elements of these classes are never judged on whether the code fits: a
+# proxy says nothing about what the element is.
+not_judged = ["IfcBuildingElementProxy"]
+
+[sets]
+# Parts that occur anywhere: assemblies, fasteners, accessories, built-in parts.
+parts = ["IfcElementAssembly", "IfcElementComponent"]
+# The building itself: walls, slabs, beams, columns, roofs, stairs, doors,
+# windows, coverings, railings, foundations and so on.
+building = ["IfcBuildingElement", "@parts"]
+# Works in the terrain.
+terrain = ["IfcCivilElement", "IfcGeographicElement"]
+# Building services of any kind. Insulation is exported as a covering.
+services = ["IfcDistributionElement", "IfcCovering", "@parts"]
+# What a pipe system, a duct system and a cable route share.
+equipment = [
+    "IfcFlowController",
+    "IfcFlowMovingDevice",
+    "IfcFlowStorageDevice",
+    "IfcFlowTreatmentDevice",
+    "IfcFlowTerminal",
+    "IfcEnergyConversionDevice",
+    "IfcDistributionChamberElement",
+    "IfcDistributionControlElement",
+    "IfcCovering",
+    "@parts",
+]
+
+# ---- 1 Bygningsbasis ------------------------------------------------------
+
+[[expect]]
+codes = ["1"]
+classes = ["@building", "@terrain"]
+
+# ---- 2 Primære bygningsdele -----------------------------------------------
+
+[[expect]]
+codes = ["2"]
+classes = ["@building", "@terrain"]
+
+# 21 Ydervægge, 22 Indervægge. Not 218 (lyskasser) and the "øvrigt" codes,
+# which stay with the whole group.
+[[expect]]
+codes = ["211", "212", "213", "214", "215", "216", "217", "221", "222", "223", "224", "225", "226"]
+classes = ["IfcWall", "IfcCurtainWall", "IfcPlate", "IfcMember", "IfcCovering", "IfcColumn", "IfcBeam", "@parts"]
+
+# 23 Dæk.
+[[expect]]
+codes = ["231", "232", "233", "234"]
+classes = ["IfcSlab", "IfcRoof", "IfcPlate", "IfcMember", "IfcBeam", "IfcCovering", "IfcRamp", "@parts"]
+
+# 24 Trapper og ramper.
+[[expect]]
+codes = ["241", "242", "243", "244", "245", "246", "247"]
+classes = ["IfcStair", "IfcStairFlight", "IfcRamp", "IfcRampFlight", "IfcSlab", "IfcMember", "IfcPlate", "IfcBeam", "IfcRailing", "@parts"]
+
+# 25 Bjælker og søjler.
+[[expect]]
+codes = ["251", "252", "253", "255", "256", "257"]
+classes = ["IfcBeam", "IfcColumn", "IfcMember", "IfcPlate", "@parts"]
+
+# 27 Tage.
+[[expect]]
+codes = ["271", "272", "273", "274", "275", "276"]
+classes = ["IfcRoof", "IfcSlab", "IfcBeam", "IfcMember", "IfcPlate", "IfcCovering", "IfcCurtainWall", "IfcWindow", "IfcColumn", "@parts"]
+
+# ---- 3 Kompletterende bygningsdele ----------------------------------------
+
+[[expect]]
+codes = ["3"]
+classes = ["@building", "@terrain", "IfcFurnishingElement"]
+
+# 31 and 32: doors, windows, glazing and screens in walls.
+[[expect]]
+codes = ["311", "312", "313", "314", "315", "316", "321", "322", "323", "324", "325", "326"]
+classes = ["IfcDoor", "IfcWindow", "IfcCurtainWall", "IfcPlate", "IfcMember", "IfcShadingDevice", "@parts"]
+
+# ---- 4 Overfladebygningsdele ----------------------------------------------
+
+[[expect]]
+codes = ["4"]
+classes = ["@building", "@terrain"]
+
+# ---- 5 VVS- og ventilationsanlæg ------------------------------------------
+
+[[expect]]
+codes = ["5"]
+classes = ["@services", "IfcFurnishingElement"]
+
+# 50 VVS-anlæg, terræn.
+[[expect]]
+codes = ["50"]
+classes = ["@services", "@terrain"]
+
+# 57 Ventilation: ducts and what sits in them, not pipes or cable routes.
+[[expect]]
+codes = ["57"]
+classes = ["IfcDuctSegment", "IfcDuctFitting", "@equipment"]
+
+# 59 Tværgående komponenter, VVS: pipes and what sits in them, not ducts or
+# cable routes.
+[[expect]]
+codes = ["59"]
+classes = ["IfcPipeSegment", "IfcPipeFitting", "@equipment"]
+
+# 599 Bæringer, udsparinger og øvrige: supports are often modelled as
+# beams and members.
+[[expect]]
+codes = ["599"]
+classes = ["@services", "@building"]
+
+# ---- 6 El- og mekaniske anlæg ---------------------------------------------
+
+[[expect]]
+codes = ["6"]
+classes = ["@services", "IfcTransportElement", "IfcFurnishingElement"]
+
+# 60 El- og mekaniske anlæg, terræn.
+[[expect]]
+codes = ["60"]
+classes = ["@services", "@terrain", "IfcTransportElement", "IfcFurnishingElement"]
+
+# 61 Føringsveje: cable routes, not pipes or ducts.
+[[expect]]
+codes = ["61"]
+classes = ["IfcCableCarrierSegment", "IfcCableCarrierFitting", "IfcCableSegment", "IfcCableFitting", "@equipment"]
+
+# 615 Bæringer, udsparinger og øvrige.
+[[expect]]
+codes = ["615"]
+classes = ["@services", "@building"]
+
+# ---- 7 Inventar og teknisk udstyr -----------------------------------------
+# Furniture, and equipment that is exported as building services: lamps,
+# appliances, fire extinguishers. Curtains and blinds are shading devices.
+
+[[expect]]
+codes = ["7"]
+classes = [
+    "IfcFurnishingElement",
+    "IfcDistributionElement",
+    "IfcShadingDevice",
+    "IfcRailing",
+    "IfcCovering",
+    "IfcTransportElement",
+    "@terrain",
+    "@parts",
+]
+
+# 70 Inventar, terræn: screens and play equipment are modelled in many ways.
+[[expect]]
+codes = ["70"]
+classes = ["IfcFurnishingElement", "IfcDistributionElement", "IfcTransportElement", "@building", "@terrain"]
+
+# ---- 8 Beplantning --------------------------------------------------------
+# Soil, grass and green roofs are often modelled as slabs and roofs.
+
+[[expect]]
+codes = ["8"]
+classes = ["@terrain", "@building", "IfcFurnishingElement"]

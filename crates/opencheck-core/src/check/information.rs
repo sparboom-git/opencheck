@@ -68,6 +68,10 @@ pub struct Source {
     /// A classification reference on the element or its type.
     #[serde(skip_serializing_if = "is_false")]
     pub classification: bool,
+    /// Limits `classification` to references of a classification system
+    /// whose name matches, e.g. `^BIMTypeCode`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheme: Option<String>,
     /// A material on the element or its type.
     #[serde(skip_serializing_if = "is_false")]
     pub material: bool,
@@ -105,10 +109,22 @@ impl Source {
     }
 
     fn patterns(&self) -> impl Iterator<Item = &String> {
-        [&self.property, &self.pset, &self.attribute]
+        [&self.property, &self.pset, &self.attribute, &self.scheme]
             .into_iter()
             .flatten()
     }
+}
+
+/// What an item of information is to a classification system. When the
+/// project has chosen a system, these items are read where that system
+/// keeps them, and the code they hold is checked against its list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemRole {
+    /// The classification code, e.g. `224`.
+    Code,
+    /// The type id: the code followed by a running number, e.g. `224019`.
+    TypeId,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -121,6 +137,9 @@ pub struct InformationItem {
     pub description: String,
     /// The item is present when any of these has a value.
     pub any: Vec<Source>,
+    /// The item holds the classification code or the type id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<ItemRole>,
     /// The project accepts that the item is missing in the models: no
     /// findings, and the fill rates show it as accepted rather than filled.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -167,6 +186,25 @@ impl InformationStandard {
 
     pub fn item(&self, id: &str) -> Option<&InformationItem> {
         self.items.iter().find(|i| i.id == id)
+    }
+
+    /// The item that holds the classification code or the type id.
+    pub fn item_with_role(&self, role: ItemRole) -> Option<&InformationItem> {
+        self.items.iter().find(|i| i.role == Some(role))
+    }
+
+    /// Where an item is read on an element: the sources of the element's
+    /// part for it, or the item's own when no part applies.
+    pub fn sources_on<'a>(
+        &'a self,
+        model: &IfcModel,
+        element: &Element,
+        item: &'a InformationItem,
+    ) -> &'a [Source] {
+        match self.part_of(model, element) {
+            Some(part) => self.sources_for(part, item),
+            None => &item.any,
+        }
     }
 
     /// Where an item is found for a part: the part's own sources for it, or
@@ -267,6 +305,9 @@ pub fn validate_sources(context: &str, sources: &[Source]) -> Result<(), Ruleset
         if source.pset.is_some() && source.property.is_none() {
             return invalid(format!("{context}: pset needs property"));
         }
+        if source.scheme.is_some() && !source.classification {
+            return invalid(format!("{context}: scheme needs classification"));
+        }
         for pattern in source.patterns() {
             if let Err(e) = Regex::new(pattern) {
                 return invalid(format!("{context}: bad pattern {pattern:?}: {e}"));
@@ -329,7 +370,7 @@ pub(crate) fn matches_pattern(pattern_text: &str, value: &str) -> bool {
 /// Matches a property or attribute name as written and with spaces and
 /// underscores removed, so `^InsulationThickness$` also finds Revit's
 /// "Insulation Thickness".
-fn matches_name(pattern_text: &str, name: &str) -> bool {
+pub(crate) fn matches_name(pattern_text: &str, name: &str) -> bool {
     if matches_pattern(pattern_text, name) {
         return true;
     }
@@ -340,7 +381,7 @@ fn matches_name(pattern_text: &str, name: &str) -> bool {
     compact.len() != name.len() && matches_pattern(pattern_text, &compact)
 }
 
-fn has_value(value: &PropertyValue) -> bool {
+pub(crate) fn has_value(value: &PropertyValue) -> bool {
     match value {
         PropertyValue::Text(s) => !s.trim().is_empty(),
         PropertyValue::List(items) => items.iter().any(has_value),
@@ -363,6 +404,16 @@ impl ModelFacts {
     }
 }
 
+/// A value as the text it holds: `571`, also when the model stores the
+/// code as a number.
+fn value_text(value: &PropertyValue) -> String {
+    match value {
+        PropertyValue::Text(s) => s.trim().to_owned(),
+        PropertyValue::Real(v) if v.fract() == 0.0 && v.abs() < 1e15 => format!("{v:.0}"),
+        other => other.to_string().trim().to_owned(),
+    }
+}
+
 impl Source {
     /// Where the element has this information, e.g. `Pset_WallCommon.Width`
     /// or `Classification CCS`; None when it does not have it.
@@ -372,6 +423,18 @@ impl Source {
         facts: &ModelFacts,
         element: &Element,
     ) -> Option<String> {
+        self.value(model, facts, element).map(|(_, place)| place)
+    }
+
+    /// The information itself and where the element has it, e.g. `("224",
+    /// "BIMTypeCode.BIMTypeCode")`; None when it does not have it. Sources
+    /// that are no text (storey, geometry) give an empty value.
+    pub(crate) fn value(
+        &self,
+        model: &IfcModel,
+        facts: &ModelFacts,
+        element: &Element,
+    ) -> Option<(String, String)> {
         if let Some(name) = &self.property {
             return model.property_sets_of(element).find_map(|pset| {
                 if !self
@@ -384,7 +447,7 @@ impl Source {
                 pset.properties
                     .iter()
                     .find(|p| matches_name(name, &p.name) && has_value(&p.value))
-                    .map(|p| format!("{}.{}", pset.name, p.name))
+                    .map(|p| (value_text(&p.value), format!("{}.{}", pset.name, p.name)))
             });
         }
         if let Some(name) = &self.attribute {
@@ -392,42 +455,61 @@ impl Source {
                 .attributes
                 .iter()
                 .find(|(n, v)| matches_name(name, n) && has_value(v))
-                .map(|(n, _)| format!("Attribute {n}"));
+                .map(|(n, v)| (value_text(v), format!("Attribute {n}")));
         }
         if self.type_name {
             return element
                 .type_object
                 .as_ref()
                 .filter(|(_, name)| !name.trim().is_empty())
-                .map(|_| "Type name".to_owned());
+                .map(|(_, name)| (name.trim().to_owned(), "Type name".to_owned()));
         }
         if self.classification {
             return element
                 .classifications
                 .iter()
-                .find(|c| !c.code.is_empty() || !c.name.is_empty())
+                .filter(|c| {
+                    self.scheme
+                        .as_ref()
+                        .is_none_or(|s| matches_pattern(s, &c.system))
+                })
+                .find(|c| !c.code.trim().is_empty() || !c.name.trim().is_empty())
                 .map(|c| {
-                    if c.system.is_empty() {
+                    let value = if c.code.trim().is_empty() {
+                        c.name.trim()
+                    } else {
+                        c.code.trim()
+                    };
+                    let place = if c.system.is_empty() {
                         "Classification".to_owned()
                     } else {
                         format!("Classification {}", c.system)
-                    }
+                    };
+                    (value.to_owned(), place)
                 });
         }
         if self.material {
-            return (!element.materials.is_empty()).then(|| "Material".to_owned());
+            return element
+                .materials
+                .first()
+                .map(|m| (m.clone(), "Material".to_owned()));
         }
         if self.system {
-            return (!element.systems.is_empty()).then(|| "System".to_owned());
+            return element
+                .systems
+                .first()
+                .map(|s| (s.clone(), "System".to_owned()));
         }
         if self.storey {
             return element
                 .container
                 .is_some_and(|c| facts.storeys.contains(&c))
-                .then(|| "Storey".to_owned());
+                .then(|| (String::new(), "Storey".to_owned()));
         }
         if self.geometry {
-            return element.has_geometry().then(|| "Geometry".to_owned());
+            return element
+                .has_geometry()
+                .then(|| (String::new(), "Geometry".to_owned()));
         }
         None
     }
@@ -446,6 +528,9 @@ impl Source {
         }
         if let Some(name) = &self.attribute {
             return format!("Attribute {}", display_pattern(name));
+        }
+        if let (true, Some(scheme)) = (self.classification, &self.scheme) {
+            return format!("Classification of {}", display_pattern(scheme));
         }
         let label = if self.type_name {
             "Type name"
@@ -670,6 +755,9 @@ pub struct InformationSummary {
     /// Problems that concern no single element, e.g. a missing IDS file or
     /// an IDS specification that requires elements the models lack.
     pub notes: Vec<String>,
+    /// The check of the classification codes themselves, when the project
+    /// has chosen a classification system.
+    pub classification: Option<super::classification::ClassificationSummary>,
 }
 
 /// A project's changes to a built-in standard: where items are found, for
@@ -815,6 +903,30 @@ impl StandardOverrides {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn values_read_as_text() {
+        assert_eq!(value_text(&PropertyValue::Text(" 571 ".into())), "571");
+        assert_eq!(value_text(&PropertyValue::Integer(571)), "571");
+        assert_eq!(value_text(&PropertyValue::Real(571.0)), "571");
+    }
+
+    #[test]
+    fn a_scheme_needs_a_classification_source() {
+        let ok = [Source {
+            classification: true,
+            scheme: Some("^BIMTypeCode".into()),
+            ..Source::default()
+        }];
+        assert!(validate_sources("x", &ok).is_ok());
+        assert_eq!(ok[0].label(), "Classification of /^BIMTypeCode/");
+        let bad = [Source {
+            property: Some("^Code$".into()),
+            scheme: Some("^BIMTypeCode".into()),
+            ..Source::default()
+        }];
+        assert!(validate_sources("x", &bad).is_err());
+    }
 
     #[test]
     fn builtin_standards_parse() {

@@ -23,11 +23,14 @@ default_level = "300"
 [[item]]
 id = "classification-code"
 name = "Klassifikationskode"
-description = "Classification code, e.g. a CCS, CCI or BIM7AA code."
+description = "Classification code, e.g. a CCS, CCI or BIMTypeCode code."
+# With a classification system chosen for the project, the code is read
+# where that system keeps it instead of in the sources below.
+role = "code"
 any = [
     { classification = true },
     { property = "^(CCS|CCI|SfB|FK)?(Classification|ClassCode)$" },
-    { property = "^BIM7AA(Type)?Code$" },
+    { property = "^BIM(7AA)?(Type)?Code$" },
     { property = "^Klassifikation(skode)?$" },
 ]
 
@@ -35,8 +38,9 @@ any = [
 id = "type-id"
 name = "Type (-kode/-ID)"
 description = "Type code or type ID in the classification system."
+role = "type_id"
 any = [
-    { property = "^(CCS|CCI|BIM7AA)(Main)?TypeID$" },
+    { property = "^(CCS|CCI|BIM7AA|BIM)(Main)?TypeID$" },
     { property = "^Type ?(kode|id)$" },
 ]
 

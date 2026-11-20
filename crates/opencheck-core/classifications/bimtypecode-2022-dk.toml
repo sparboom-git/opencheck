@@ -1,0 +1,53 @@
+# BIMTypeCode 2022 DK: what the list is, where it comes from and where a
+# model keeps the code.
+#
+# The codes themselves are in bimtypecode-2022-dk.txt, which is the
+# publisher's own list (see README.md in this folder for its licence).
+# OpenCheck's expectations of which elements a code belongs on are its own
+# work and live apart, in bimtypecode-2022-dk.expect.toml.
+
+[classification]
+id = "bimtypecode-2022-dk"
+name = "BIMTypeCode"
+version = "2022 DK"
+edition = "2. udgave, 2023-06-30"
+publisher = "BIM7AA"
+source = "https://github.com/bimtypecode/bimtypecode"
+revision = "e8ba47254e1394e768c41635ddae9ae6717eef14"
+licence = "CC BY-ND 4.0"
+licence_url = "https://creativecommons.org/licenses/by-nd/4.0/"
+# The list has three levels (5, 57, 571); an element carries a code of the
+# third.
+code_level = 3
+# Codes with this name are reserved for later editions and not in use.
+unused = ["FRI"]
+# These carry no type code and are not checked.
+not_checked = [
+    "IfcSpace",
+    "IfcSpatialZone",
+    "IfcOpeningElement",
+    "IfcVirtualElement",
+    "IfcAnnotation",
+    "IfcGrid",
+]
+
+# Where the code is read, first match first, written as the sources of an
+# information standard. With this system chosen for a project, they are
+# also where the information rule looks for the classification code, so
+# the code that counts as there is the one that is checked. A project can
+# change them under "Where to look".
+#
+# BIM7AATypeCode is the name the edition before this one (BIM7AA
+# Typekodning 3.2) used for the property.
+[[code]]
+property = "^BIM(7AA)?TypeCode$"
+
+# A classification reference of the system. Revit writes its Assembly Code,
+# where the code is usually kept, as a reference to "Uniformat".
+[[code]]
+classification = true
+scheme = "^(BIM ?TypeCode|BIM7AA|Uniformat)"
+
+# The type id is the code followed by a running number, e.g. 224019.
+[[identifier]]
+property = "^BIM(7AA)?TypeID$"

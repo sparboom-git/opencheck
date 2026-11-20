@@ -654,6 +654,7 @@ fn engine_reports_findings_and_fill_rate() {
             Arc::new(Ids::from_xml(&text).unwrap()),
         )],
         standards: Vec::new(),
+        classification: None,
     };
     let report = run_check(&models, std::slice::from_ref(&job), &|_| {});
     let rule = &report.rulesets[0].rules[0];
@@ -890,6 +891,7 @@ fn information_rules_report_and_follow_overrides() {
             levels: vec![(ModelId(1), "300".to_owned())],
             ids: Vec::new(),
             standards,
+            classification: None,
         };
         let report = run_check(&models, &[job], &|_| {});
         let summary = report.rulesets[0].rules[0].information.clone().unwrap();
@@ -972,6 +974,7 @@ fn accepted_items_raise_no_finding_and_count_as_filled() {
             levels: vec![(ModelId(1), "300".to_owned())],
             ids: Vec::new(),
             standards,
+            classification: None,
         };
         let report = run_check(&models, &[job], &|_| {});
         let rule = &report.rulesets[0].rules[0];
@@ -1065,6 +1068,7 @@ fn information_coverage_is_kept_per_model() {
         ],
         ids: Vec::new(),
         standards: Vec::new(),
+        classification: None,
     };
     let report = run_check(&models, &[job], &|_| {});
     let summary = report.rulesets[0].rules[0].information.clone().unwrap();

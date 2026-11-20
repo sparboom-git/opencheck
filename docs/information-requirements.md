@@ -31,6 +31,7 @@ has a value. Empty texts do not count as values.
 | `attribute = "<pattern>"` | a direct IFC attribute (`Name`, `ObjectType`, `LongName`, `OverallWidth`, ...) has a value |
 | `type_name = true` | the element has a type with a name |
 | `classification = true` | the element or its type has a classification reference |
+| `scheme = "<pattern>"` | (with `classification`) only references of a classification system whose name matches |
 | `material = true` | the element or its type has a material |
 | `system = true` | the element is assigned to a system |
 | `storey = true` | the element is contained in a building storey |
@@ -76,8 +77,9 @@ look…* opens an editor:
   cable carriers keep in another property than doors. A part without its
   own sources uses the item's; *All building parts* edits the item's.
 - **Sources** are the places the item is read from: property (with an
-  optional property set), IFC attribute, type name, classification,
-  material, system, storey or geometry. Names are matched exactly (case,
+  optional property set), IFC attribute, type name, classification (of any
+  classification system, or of one you name), material, system, storey or
+  geometry. Names are matched exactly (case,
   spaces and underscores do not matter); tick *Pattern* to write a regular
   expression instead.
 - **Accept that the models lack the item** is a tick above *Last check*,
@@ -196,6 +198,88 @@ building part with every item listed, in the PDF, in Word and in the
 preview. Items read from the geometry rather than from a property (levels
 and positions) are marked with a small triangle, and a line under the
 description says so. Each check can be left out by hand.
+
+## Classification codes
+
+The information rule checks that a classification code is *there*. Whether
+the code itself is right is a check of its own, switched on with the tick
+**Classification** on the card of the "Information: LOD DK" ruleset. It is a
+feature under development: the tick is offered with *WIP* on in *File →
+Settings*, and stays on a project that uses it.
+
+Next to the tick you choose the **classification system and its edition**
+as one choice, so it is never in doubt which list the codes were checked
+against. OpenCheck ships one:
+
+| System | Edition | Publisher | Licence |
+|---|---|---|---|
+| BIMTypeCode 2022 DK | 2. udgave, 2023-06-30 | BIM7AA | CC BY-ND 4.0 |
+
+The list is the publisher's own, unchanged; see
+[crates/opencheck-core/classifications](../crates/opencheck-core/classifications/README.md).
+
+**The choice also decides where the code is looked for.** Models often
+carry codes of several systems side by side: a wall with a `CCSClassCode`,
+a `CCIClassCode` and a `BIMTypeCode`. Without a system chosen, the item
+*Klassifikationskode* is there when any of them is. With a system chosen,
+the items *Klassifikationskode* and *Type (-kode/-ID)* are read only where
+that system keeps them, so a wall with a CCS code alone lacks its
+classification code when the project uses BIMTypeCode. The code that
+counts as there is then the same code that is checked against the list.
+*Where to look…* shows these sources as the standard's and can change them,
+e.g. when a project keeps the type code in a property of its own; the code
+check reads the code from the same place.
+
+**What is checked.** Every element the information rule checks, except
+spaces and openings, which carry no type code:
+
+- The code is one of the list's codes at the level elements carry. For
+  BIMTypeCode that is the third level: `571` is a code, `57` is a group and
+  `570` is neither. Codes the list marks *FRI* are reserved for later
+  editions and count as not in use. Texts such as `N/A` are not codes.
+- The type id, when the element has one, begins with the code
+  (`BIMTypeID` 224019 for the code 224).
+- The code fits the element's IFC class, e.g. no pipe code on a wall and no
+  wall code on a duct.
+
+BIMTypeCode keeps the code in the property `BIMTypeCode` (or
+`BIM7AATypeCode`, as the edition before it called it) and otherwise in a
+classification reference of the system. Revit writes its *Assembly Code*,
+where the code is usually kept, as a reference to "Uniformat", so that is
+read too. The type id is the property `BIMTypeID` (or `BIM7AATypeID`). An
+element with a code of another system only (CCS, CCI) has no code of this
+one.
+
+**Which elements a code fits** is OpenCheck's own judgement: the list says
+what a code means, not which IFC classes it belongs on. The expectations
+are kept wide, so only a clear mismatch is reported; they are in
+`bimtypecode-2022-dk.expect.toml`, per main group, group or single code.
+An `IfcBuildingElementProxy` is never judged on this, and a generic IFC2x3
+element (`IfcFlowSegment`) passes where one of its subtypes is expected.
+
+**Results.** The fill rates and the missing information read as before.
+Between them the results show a section *Classification: BIMTypeCode 2022
+DK*: per IFC file how many elements have a code, the share of the codes
+that are in order, and under it what is wrong, e.g. *570 · not in the
+list*, with the number of elements. A click on a line shows the elements in
+3D. Under it, *Wrong classification per discipline* lists the elements;
+they are findings like any other, of the kind *Classification*, and can be
+accepted, rejected and turned into issues. An unknown code names the group
+it seems to belong to and that group's codes. Elements without a code of
+the system are counted, not reported: that a code is missing is already in
+the fill rates.
+
+In a report the check is a card of its own after the fill rates, in the
+block *Afsnit: Informationsniveau*: the system, edition and licence, how the
+check was done, and per model the share of codes in order and the most
+frequent problems.
+
+On the command line:
+
+```text
+opencheck classifications
+opencheck check ARK.ifc VVS.ifc -r information-lod-dk.toml --classification bimtypecode-2022-dk
+```
 
 ## IDS files
 

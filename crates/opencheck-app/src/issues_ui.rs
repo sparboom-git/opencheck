@@ -780,6 +780,8 @@ fn issue_detail(app: &mut OpenCheckApp, ui: &mut egui::Ui, guid: &str) {
                             "{} · {:.0} mm · {}",
                             source.kind, source.magnitude_mm, source.rule
                         )
+                    } else if source.kind == "Classification" {
+                        source.details.join(" ")
                     } else {
                         format!("Missing: {}", source.details.join(", "))
                     };

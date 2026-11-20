@@ -1,5 +1,6 @@
 //! Model checking: rulesets and the engine that runs them.
 
+mod classification;
 mod engine;
 pub mod freezone;
 mod geom;
@@ -10,6 +11,11 @@ mod information;
 mod ruleset;
 mod script;
 
+pub use classification::{
+    BUILTIN_CLASSIFICATIONS, BuiltinClassification, ClassificationInfo, ClassificationModel,
+    ClassificationSummary, ClassificationSystem, CodeEntry, CodeFinding, CodeProblem,
+    CodeProblemCount, Judgement, builtin_classification, builtin_classifications,
+};
 pub use engine::{
     CheckJob, CheckModel, CheckReport, Finding, FindingElement, FindingKind, RuleResult,
     RulesetResult, finding_id, run_check,
@@ -21,7 +27,7 @@ pub use ids::{
 pub use ids_export::{IdsExport, standard_to_ids};
 pub use information::{
     BUILTIN_STANDARDS, BuildingPart, BuiltinStandard, InformationItem, InformationStandard,
-    InformationSummary, ItemCoverage, ModelCoverage, ModelFacts, PartCoverage, Source,
+    InformationSummary, ItemCoverage, ItemRole, ModelCoverage, ModelFacts, PartCoverage, Source,
     StandardInfo, StandardOverrides, builtin_standard, display_pattern, exact_name, exact_pattern,
     is_checked, validate_sources,
 };

@@ -590,6 +590,7 @@ mod exclusions_on_models {
                     levels: Vec::new(),
                     ids: Vec::new(),
                     standards: Vec::new(),
+                    classification: None,
                 }],
                 &|_| {},
             );

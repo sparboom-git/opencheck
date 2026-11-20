@@ -124,14 +124,19 @@ decisions on findings.
     { "finding": "3f2a9c1e-7b4d-5e8f-9a01-23456789abcd", "decision": "accepted" }
   ],
   "level": "300",
-  "model_levels": [{ "model": 1, "level": "325" }]
+  "model_levels": [{ "model": 1, "level": "325" }],
+  "classification": "bimtypecode-2022-dk"
 }
 ```
 
 `models` lists positions in `manifest.json`; `null` means all models.
 `level` is the information level (LOD) the project is checked at; omitted
 means the standard's default. `model_levels` lists models, by position, that
-use another level than the project. `area` (optional) is the working area:
+use another level than the project. `classification` (optional) is the id of
+the classification system, in one edition, that the classification codes
+are checked against (see
+[information-requirements.md](information-requirements.md#classification-codes));
+omitted means the codes themselves are not checked. `area` (optional) is the working area:
 a rectangle in plan, `{ "center": [x, y], "half": [hx, hy], "angle": radians }`
 in world coordinates (metres); only elements whose extent touches it are
 shown and checked.
@@ -316,7 +321,13 @@ The reports made on the Report tab:
                 "models": [ { "name": "K09", "elements": 243, "values": 1215, "filled": 972,
                               "parts": [ { "name": "Fundament", "elements": 243, "complete": 0,
                                            "values": 1215, "filled": 972,
-                                           "items": [ { "name": "Længde", "present": 243, "required": 243, "accepted": false, "geometry": 0 } ] } ] } ] }
+                                           "items": [ { "name": "Længde", "present": 243, "required": 243, "accepted": false, "geometry": 0 } ] } ] } ],
+                "classification": { "system": "BIMTypeCode 2022 DK",
+                                    "provenance": "2. udgave, 2023-06-30 · BIM7AA · CC BY-ND 4.0",
+                                    "source": "https://github.com/bimtypecode/bimtypecode",
+                                    "about": "How the codes were checked, in Danish",
+                                    "models": [ { "name": "K08", "elements": 2405, "coded": 2365, "valid": 1126,
+                                                  "problems": [ { "label": "560: findes ikke i listen", "count": 914 } ] } ] } }
             ]
           }
         }

@@ -170,6 +170,8 @@ pub fn topic_description(issue: &Issue) -> String {
         .map(|f| {
             if f.details.is_empty() {
                 format!("- {} {:.0} mm: {}", f.kind, f.magnitude_mm, f.rule)
+            } else if f.kind == "Classification" {
+                format!("- {}", f.details.join(" "))
             } else {
                 format!("- Missing: {}", f.details.join(", "))
             }

@@ -58,7 +58,8 @@ slower, and the page waits while a model loads or a check runs.
   each model is guessed from its file name and can be changed.
 - **WIP, features under development**: switched on in *File → Settings*, and
   off until you do. With it off OpenCheck offers only what is stable. In WIP
-  now: the clearance rulesets (MEP near structure, cable trays, ventilation),
+  now: the clearance rulesets (MEP near structure, cable trays, ventilation), the
+  check of classification codes against BIMTypeCode 2022 DK,
   the visual checks of dimensions in pipe and duct systems and of the fall of
   drain pipes, and adding Revit files (`.rvt`), converted to IFC by
   [rvt-rs](https://github.com/DrunkOnJava/rvt-rs); see
@@ -132,6 +133,10 @@ checkers.
     be adapted per project in *Where to look*, a window that can be made small
     or folded down to a button in the status bar while you look at the model.
     See [docs/information-requirements.md](docs/information-requirements.md).
+    With *WIP* on, a tick on its card also checks the classification codes
+    themselves against **BIMTypeCode 2022 DK**: that a code is in the list
+    and fits the element, e.g. no pipe code on a wall. The results get a
+    section of their own.
   - *Clearance: MEP near structure*, *Electrical: cable tray clearances* and
     *Ventilation: clearances*. These three are **work in progress**: they are
     offered only with WIP switched on in *File → Settings*, apart, under
@@ -383,6 +388,7 @@ opencheck props ARK.ifc 1AQAupaRP1txwK1AGiN61V
 opencheck rulesets
 opencheck check ARK.ifc KON.ifc VEN.ifc --all
 opencheck check ARK.ifc KON.ifc --ruleset information-lod-dk.toml --level 325
+opencheck check ARK.ifc VVS.ifc --ruleset information-lod-dk.toml --classification bimtypecode-2022-dk
 opencheck check ARK.ifc KON.ifc --ids delivery.ids
 opencheck export-ids lod-300.ids --level 300
 opencheck mcp
@@ -459,6 +465,10 @@ OpenCheck are not affiliated with Autodesk; "Autodesk" and "Revit" are
 trademarks of Autodesk, Inc.
 The IBM Plex fonts are under the SIL Open Font License
 ([OFL.txt](crates/opencheck-app/assets/fonts/OFL.txt)).
+The list of codes of BIMTypeCode 2022 DK, by [BIM7AA](http://BIM7AA.dk), is
+included unchanged under
+[CC BY-ND 4.0](https://creativecommons.org/licenses/by-nd/4.0/); see
+[BIMTypeCode-NOTICE.txt](crates/opencheck-core/classifications/BIMTypeCode-NOTICE.txt).
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
