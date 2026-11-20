@@ -31,7 +31,8 @@ protected your PC" the first time. Click **More info** and then **Run anyway**.
 
 A Microsoft Store version is being prepared; see
 [docs/microsoft-store.md](docs/microsoft-store.md) for how it is packaged and
-how its version numbers work.
+how its version numbers work. The `.msix` file of a release is the package
+for the Store: it is not signed, so download the ZIP to run OpenCheck.
 
 ### In the browser
 
@@ -133,10 +134,15 @@ checkers.
     be adapted per project in *Where to look*, a window that can be made small
     or folded down to a button in the status bar while you look at the model.
     See [docs/information-requirements.md](docs/information-requirements.md).
-    With *WIP* on, a tick on its card also checks the classification codes
-    themselves against **BIMTypeCode 2022 DK**: that a code is in the list
-    and fits the element, e.g. no pipe code on a wall. The results get a
-    section of their own.
+    With *WIP* on, the tick *Classification* on its card also checks the
+    classification codes themselves against a classification system in a
+    named edition, for now **BIMTypeCode 2022 DK**: the code is one of the
+    list's codes (not a group, not a code marked *FRI*), the type id begins
+    with it, and it fits the element, e.g. no pipe code on a wall. The
+    classification code and the type id are then read only where that system
+    keeps them, so a CCS or CCI code alone no longer counts. The results get
+    a section of their own, between the fill rates and the missing
+    information.
   - *Clearance: MEP near structure*, *Electrical: cable tray clearances* and
     *Ventilation: clearances*. These three are **work in progress**: they are
     offered only with WIP switched on in *File → Settings*, apart, under
@@ -169,7 +175,9 @@ checkers.
 - **Results** have a tab per ruleset and a section for each under *All*: an
   overview of discipline against discipline, then findings per pair, grouped
   by the kind of component. Information rules show the fill rate per IFC file
-  and building part, and every element with what it is missing. Selecting a finding shows
+  and building part, and every element with what it is missing; with the
+  classification check on also the share of codes in order per IFC file and
+  the elements with a wrong code. Selecting a finding shows
   its two elements in their models' colours with the rest ghosted. Accept real
   problems and reject the rest; decisions are kept between runs.
 
@@ -254,7 +262,10 @@ discipline, ruleset), issues left out by hand and a comment per issue.
 - **Information level**: the section *Informationsniveau* shows each
   information check (LOD) of the last run: how it was done, written by
   OpenCheck in Danish, and the fill rate per IFC file and building part with
-  the items under each. Accepted items are marked as OK in blue.
+  the items under each. Accepted items are marked as OK in blue. With the
+  classification check on, a card after the fill rates names the system,
+  its edition and licence, and shows per model the share of codes in order
+  and the most frequent problems.
 - **Template**: reports are made from a Word template. *File → Settings*
   saves the standard one to change in Word (logo, header and footer, page
   margins, fonts, colours, the Heading 1 and Heading 2 styles, the text on
@@ -371,8 +382,8 @@ written; the log still shows that the session did not close.
 ## Projects
 
 A project is saved as one `.opencheck` file: a ZIP archive holding the IFC
-files unchanged, the rulesets, IDS files, information requirements, checking
-decisions, suggested categories and the triage file, the working area, the
+files unchanged, the rulesets, IDS files, information requirements, the
+classification system chosen, checking decisions, suggested categories and the triage file, the working area, the
 visual checks, the autorun configuration, issues and the view state. See
 [docs/file-format.md](docs/file-format.md). Sign-ins to BCF servers are kept
 per user, never in the project file.
@@ -386,6 +397,7 @@ opencheck info ARK.ifc KON.ifc VEN.ifc
 opencheck tree ARK.ifc --elements
 opencheck props ARK.ifc 1AQAupaRP1txwK1AGiN61V
 opencheck rulesets
+opencheck classifications
 opencheck check ARK.ifc KON.ifc VEN.ifc --all
 opencheck check ARK.ifc KON.ifc --ruleset information-lod-dk.toml --level 325
 opencheck check ARK.ifc VVS.ifc --ruleset information-lod-dk.toml --classification bimtypecode-2022-dk
@@ -399,7 +411,7 @@ opencheck autorun \\server\share\project\OpenCheck\autorun.json
 
 | Crate | Purpose |
 |---|---|
-| `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine (clashes, clearances, duplicates, free zones, Rhai script rules), visual checks (alignment, pipe and duct systems with their port network, drain fall, storeys, rooms, levels), triage of findings (C402 categories, groups, pre-sorting), information requirements and IDS, BCF data and files, project files, autorun runs and the dashboard |
+| `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine (clashes, clearances, duplicates, free zones, Rhai script rules), visual checks (alignment, pipe and duct systems with their port network, drain fall, storeys, rooms, levels), triage of findings (C402 categories, groups, pre-sorting), information requirements, classification systems and IDS, BCF data and files, project files, autorun runs and the dashboard |
 | `opencheck-rvt` | Revit files (WIP): converts `.rvt` to IFC4 with rvt-rs; the only code that knows rvt-rs |
 | `opencheck-cli` | The `opencheck` command line tool, including `autorun` and the `mcp` server for Claude Desktop |
 | `opencheck-app` | The application, for the desktop and the browser: federated 3D viewer (egui + wgpu), checking, visual checks, issues, reports, BCF Live, the autorun setup and the Claude connection |
