@@ -149,3 +149,14 @@ built.
   sign-in that returns to the page and servers that allow it); WebGL2 for
   browsers without WebGPU. Known limits: about 4 GB memory per tab, slower
   geometry processing.
+- **IFCX (IFC 5) for the federated model**: waiting for the format. IFCX is
+  built of layers that compose into one model, which is what a federation
+  is, but in November 2026 it is still an alpha (`ifcx_alpha`) with no
+  release date: the file format is about to be restructured, geometry is
+  triangle meshes only, and the authoring tools do not write it. As soon as
+  buildingSMART has released a stable format it goes in, in this order:
+  export of the federated model as IFCX next to the `.opencheck` file (one
+  layer per model and an index layer, written by OpenCheck itself); adding
+  `.ifcx` files as models; and, when models are delivered as IFCX, IFCX as
+  the model format of the project file. Until then the project file keeps
+  the IFC files as delivered.
