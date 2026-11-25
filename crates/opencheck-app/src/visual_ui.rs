@@ -24,10 +24,13 @@ use crate::scene::{ElementRef, PaintRest};
 use crate::theme;
 
 /// State of the tab; the rules themselves are kept with the project.
-#[derive(Default)]
 pub struct VisualUi {
     /// Index into `checking.visual`.
     pub selected: Option<usize>,
+    /// The marks of the check shown, its arrows and rings, are drawn: the
+    /// crosshair button of the 3D view, as the clash markers on the Check
+    /// tab.
+    pub marks: bool,
     /// What each rule found, by index into `checking.visual`.
     pub results: FxHashMap<usize, VisualResult>,
     /// Keep the colours on the other tabs.
@@ -39,6 +42,20 @@ pub struct VisualUi {
     pub only_selection: bool,
     /// The plan shown from a result's plan buttons.
     pub plan: Option<Plan>,
+}
+
+impl Default for VisualUi {
+    fn default() -> Self {
+        Self {
+            selected: None,
+            marks: true,
+            results: FxHashMap::default(),
+            keep: false,
+            rest: FxHashMap::default(),
+            only_selection: false,
+            plan: None,
+        }
+    }
 }
 
 /// What an analysis found.
@@ -63,16 +80,21 @@ fn element_ref(key: &ElementKey) -> ElementRef {
     }
 }
 
-/// How the selected rule draws the elements it does not colour. An alignment
-/// check leaves them out until something else is chosen, as only the walls
-/// and columns matter there; the other checks ghost them.
+/// How the selected rule draws the elements it does not colour, until
+/// something else is chosen. The alignment, dimension, fall and storey
+/// checks leave them out: only the elements they colour and mark matter
+/// there, and everything else is in the way of the marks. The room and level
+/// checks ghost them, so the building is still seen around what they show.
 pub fn rest(app: &OpenCheckApp) -> PaintRest {
     let Some(rule) = app.visual.selected.and_then(|i| app.checking.visual.get(i)) else {
         return PaintRest::default();
     };
     let chosen = app.visual.rest.get(&std::mem::discriminant(&rule.kind));
     chosen.copied().unwrap_or(match rule.kind {
-        VisualKind::Alignment(_) => PaintRest::Hidden,
+        VisualKind::Alignment(_)
+        | VisualKind::Dimensions(_)
+        | VisualKind::DrainSlope(_)
+        | VisualKind::Storeys(_) => PaintRest::Hidden,
         _ => PaintRest::Ghosted,
     })
 }
@@ -913,7 +935,7 @@ pub fn draw_marks(app: &OpenCheckApp, ui: &egui::Ui, rect: egui::Rect, aspect: f
     let Some(result) = state.shown() else {
         return;
     };
-    if result.outcome.marks.is_empty() || !(app.tab == Tab::Visual || state.keep) {
+    if !state.marks || result.outcome.marks.is_empty() || !(app.tab == Tab::Visual || state.keep) {
         return;
     }
     let painter = ui.painter_at(rect);

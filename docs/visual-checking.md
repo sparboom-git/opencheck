@@ -16,12 +16,19 @@ a break in it, shows at a glance. There are six, each added on its own with
 The checks are kept with the project; *Analyse* works the colours out. The
 right panel lists the problems first (what is wrong, with the element under
 it) and then the colours. A click selects the element or the group and zooms
-to it. Everything the check does not colour is ghosted, so the colours stand
-out; under *The other elements* (or the X-ray button in the 3D view) they can
-be shown normally or hidden instead. The alignment check hides them from the
-start, so only the walls and columns are seen. The colours stay on
+to it. Everything the check does not colour is hidden or ghosted, so the
+colours stand out; under *The other elements* (or the X-ray button in the 3D
+view) they can be shown normally, ghosted or hidden instead. The alignment,
+dimension, fall and storey checks hide them from the start, so only the
+elements they colour and mark are seen; the room and level checks ghost
+them, so the building is still there around what they show. The colours stay on
 the Visual Check tab, or on all tabs with *Keep the colours on the other
 tabs*. *Clear colours* removes them.
+
+Some checks also draw **marks** on the elements they point out, over the 3D
+view: the fall check its arrows, the dimension and storey checks a white
+ring on each problem. The crosshair button in the 3D view (or `K`) switches
+the marks off and on, as it does the clash markers on the Check tab.
 
 **Selection**: a check looks at all elements of its models, or only the
 selected ones. Hidden elements and elements outside the working area are
@@ -203,7 +210,8 @@ such as a wall or a pipe on the 4th floor contained in the ground floor.
 Colours: a muted colour per storey (by name across the models), **red** for
 elements standing on another storey (the text says which, and the value is
 the offset from the storey's floor), **purple** for elements that belong to
-no storey.
+no storey. Both carry a white ring in the 3D view, in the element's middle,
+so they are found at a glance.
 
 ## Rooms
 

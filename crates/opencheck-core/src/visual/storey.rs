@@ -8,9 +8,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{Category, ERROR, MISSING, Problem, VisualModel, VisualOutcome, muted};
+use glam::DMat4;
+
+use super::{Category, ERROR, MISSING, Mark, MarkKind, Problem, VisualModel, VisualOutcome, muted};
 use crate::check::Severity;
-use crate::{Discipline, IfcModel, SpatialNode};
+use crate::{Discipline, Element, IfcModel, SpatialNode};
 
 /// Settings of the storey check.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -146,6 +148,7 @@ pub(super) fn run(rule: &StoreyRule, models: &[VisualModel]) -> VisualOutcome {
                     value: None,
                     color: MISSING,
                 });
+                outcome.marks.push(ring(e, &model.local_to_world, key));
                 continue;
             };
             let bottom = e.bounds.transformed(&model.local_to_world).min.z as f64;
@@ -174,6 +177,7 @@ pub(super) fn run(rule: &StoreyRule, models: &[VisualModel]) -> VisualOutcome {
                 value: Some(((bottom - storey.z) * 1000.0).round()),
                 color: ERROR,
             });
+            outcome.marks.push(ring(e, &model.local_to_world, key));
         }
     }
 
@@ -195,4 +199,18 @@ pub(super) fn run(rule: &StoreyRule, models: &[VisualModel]) -> VisualOutcome {
         "Red: stands on another storey ({wrong}). Purple: belongs to no storey ({missing})."
     );
     outcome
+}
+
+/// A ring on an element the check points out, in its middle, so it is found
+/// in the view.
+fn ring(e: &Element, to_world: &DMat4, key: super::ElementKey) -> Mark {
+    let bounds = e.bounds.transformed(to_world);
+    Mark {
+        element: key,
+        kind: MarkKind::Ring {
+            at: bounds.center().as_dvec3().to_array(),
+        },
+        size: f64::from(bounds.size().min_element()),
+        marked: true,
+    }
 }

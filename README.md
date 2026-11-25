@@ -323,7 +323,9 @@ of clashes you marked as noise from one of them) before anyone looks. Claude onl
 
 The *Visual Check* tab colours the model, so a pattern or a break in it
 shows at a glance, and lists the problems; a click zooms to the element.
-Each check is added on its own:
+Some checks also draw marks on the elements they point out, arrows and white
+rings, which the crosshair button in the 3D view (or `K`) switches off and
+on. Each check is added on its own:
 
 - **Alignment of walls and columns**: structural walls and columns standing
   in line from storey to storey share a colour; those out of line with the
@@ -343,7 +345,8 @@ Each check is added on its own:
   sized with the model so they show when zoomed in; in 3D, in plan and in
   the pictures of a documented check.
 - **Storeys**: each storey in its own colour; elements standing on another
-  storey than they belong to are red, elements without a storey purple.
+  storey than they belong to are red, elements without a storey purple,
+  both with a white ring on them.
 - **Rooms**: rooms (`IfcSpace`) green. Per storey the walls, doors, windows
   and columns of the chosen models (usually architect and structure) are cut
   above the floor; a place they enclose without a room is an area without a

@@ -834,8 +834,12 @@ fn handle_keyboard(app: &mut OpenCheckApp, ui: &egui::Ui, response: &egui::Respo
             app.select(None, false);
         }
     }
-    if pressed(egui::Key::K) && app.checking.report.is_some() {
-        app.markers.toggle();
+    if pressed(egui::Key::K) {
+        if app.tab == crate::app::Tab::Visual {
+            app.visual.marks = !app.visual.marks;
+        } else if app.checking.report.is_some() {
+            app.markers.toggle();
+        }
     }
     if pressed(egui::Key::Delete) && app.measure.active {
         app.measure.clear();
@@ -1542,7 +1546,21 @@ fn tool_bar(app: &mut OpenCheckApp, ui: &mut egui::Ui, view: Rect) {
                     Walk::Off
                 };
             }
-            if app.checking.report.is_some() {
+            if app.tab == crate::app::Tab::Visual {
+                // The same button as the clash markers, for the marks of the
+                // visual check: the arrows and rings on the elements it points out.
+                if icon_button(
+                    ui,
+                    icon::CROSSHAIR,
+                    app.visual.marks,
+                    "Marks of the visual check (K): the arrows and rings on the elements \
+                     it points out",
+                )
+                .clicked()
+                {
+                    app.visual.marks = !app.visual.marks;
+                }
+            } else if app.checking.report.is_some() {
                 let button = icon_button(
                     ui,
                     icon::CROSSHAIR,
