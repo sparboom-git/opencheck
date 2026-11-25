@@ -27,7 +27,7 @@ pub const CONVERTER_AUTHOR: &str = "Griffin Long";
 pub const CONVERTER_URL: &str = "https://github.com/DrunkOnJava/rvt-rs";
 pub const CONVERTER_LICENSE: &str = "Apache-2.0";
 /// The rvt-rs release built in; a test holds it to `Cargo.lock`.
-pub const CONVERTER_VERSION: &str = "0.20.0";
+pub const CONVERTER_VERSION: &str = "0.25.0";
 
 /// The licence and notices of rvt-rs, to show and to ship with OpenCheck.
 pub const CONVERTER_LICENSE_TEXT: &str = include_str!("../licenses/rvt-rs-LICENSE");

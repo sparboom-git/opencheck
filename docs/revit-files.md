@@ -67,7 +67,7 @@ files.
 
 rvt-rs releases often, so its version is pinned. To move to a newer one:
 
-1. In the workspace `Cargo.toml`, change `rvt = "=0.20.0"` to the new version.
+1. In the workspace `Cargo.toml`, change `rvt = "=0.25.0"` to the new version.
 2. In `crates/opencheck-rvt/src/lib.rs`, change `CONVERTER_VERSION` to match.
 3. Run `cargo update -p rvt`.
 4. Copy `LICENSE` and `NOTICE` from the new release over

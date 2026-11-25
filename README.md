@@ -68,7 +68,7 @@ slower, and the page waits while a model loads or a check runs.
   check of classification codes against BIMTypeCode 2022 DK,
   the visual checks of dimensions in pipe and duct systems and of the fall of
   drain pipes, adding Revit files (`.rvt`), converted to IFC by
-  [rvt-rs](https://github.com/DrunkOnJava/rvt-rs) (see
+  [rvt-rs](https://github.com/DrunkOnJava/rvt-rs) 0.25.0 (see
   [docs/revit-files.md](docs/revit-files.md)), and adding **coordination
   files** (`.smc`), the file a model checker (Solibri) saves with the IFC
   models of a project put together: each model in it becomes a model here,
@@ -440,8 +440,9 @@ page describes how the crates work together, what is stored where, and what
 leaves your computer (nothing, unless you switch a connection on).
 
 Revit files are read by [rvt-rs](https://github.com/DrunkOnJava/rvt-rs) by
-Griffin Long (Apache-2.0), which converts them to IFC4 without Revit. This is
-a feature under development, switched on with *File → Settings → WIP*;
+Griffin Long (Apache-2.0), pinned at 0.25.0, which converts them to IFC4
+without Revit. This is a feature under development, switched on with *File →
+Settings → WIP*;
 [docs/revit-files.md](docs/revit-files.md) says what it does, what to be
 careful about and how a new rvt-rs release is taken in.
 
