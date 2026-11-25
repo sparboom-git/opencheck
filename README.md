@@ -227,7 +227,9 @@ result as a traffic light: **Approved** (green), **Approved with remarks**
 elements had each, the models and their versions, and pictures of the view;
 turn the view and add more pictures for large models. In reports the
 colours are one short line, at most 16 of them, or left out when the
-pictures say enough. No elements are kept.
+pictures say enough. No elements are kept. The record is kept as you
+write: there is nothing to save in the dialog, and closing it loses nothing;
+*Delete…* takes it away again.
 Problems found are made issues as usual. The documented checks are listed on
 the Visual Check tab and saved with the project.
 

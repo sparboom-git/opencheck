@@ -111,11 +111,12 @@ struct Saved {
     checks: Vec<CheckDoc>,
 }
 
-/// A documented check being written or changed.
+/// A documented check open in the dialog. It is in the list from the
+/// moment the dialog opens, and every change lands there as it is made:
+/// nothing waits for a Save, and closing the dialog loses nothing.
 pub struct Editing {
-    pub doc: CheckDoc,
-    /// Its place in the list; `None` for a new one.
-    pub index: Option<usize>,
+    /// Its place in the list.
+    pub index: usize,
     pub confirm_delete: bool,
 }
 
@@ -285,18 +286,19 @@ impl OpenCheckApp {
             models,
             pictures: Vec::new(),
         };
+        // In the list at once, so it is kept however the dialog is left.
+        self.check_docs.list.push(doc);
         self.check_docs.editing = Some(Editing {
-            doc,
-            index: None,
+            index: self.check_docs.list.len() - 1,
             confirm_delete: false,
         });
+        self.session.dirty = true;
         self.take_view_picture(ctx);
     }
 
     /// Opens a documented check to change it.
     pub fn edit_check_doc(&mut self, index: usize) {
-        if let Some(doc) = self.check_docs.list.get(index) {
-            let mut doc = doc.clone();
+        if let Some(doc) = self.check_docs.list.get_mut(index) {
             // Documented before OpenCheck described its checks.
             if doc.about.is_empty()
                 && let Some(rule) = self.checking.visual.iter().find(|r| r.name == doc.check)
@@ -304,8 +306,7 @@ impl OpenCheckApp {
                 doc.about = about_da(rule);
             }
             self.check_docs.editing = Some(Editing {
-                doc,
-                index: Some(index),
+                index,
                 confirm_delete: false,
             });
         }
@@ -351,8 +352,12 @@ impl OpenCheckApp {
             ) {
                 let hash = project::sha256_hex(&png);
                 self.check_docs.pictures.insert(hash.clone(), png);
-                if let Some(editing) = &mut self.check_docs.editing {
-                    editing.doc.pictures.push(hash);
+                if let Some(editing) = &self.check_docs.editing
+                    && let Some(doc) = self.check_docs.list.get_mut(editing.index)
+                {
+                    doc.pictures.push(hash);
+                    doc.modified = project::now_rfc3339();
+                    self.session.dirty = true;
                 }
             }
         } else if waited >= TIMEOUT {
@@ -571,25 +576,18 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
         min: egui::vec2(380.0, 320.0),
         scroll: crate::dialog::Scroll::Both,
     };
-    let mut action = None;
-    crate::dialog::show(ctx, &dialog, &mut open, |ui| action = contents(app, ui));
-    match action {
-        Some(Action::Save) => {
-            if let Some(editing) = app.check_docs.editing.take() {
-                let mut doc = editing.doc;
-                doc.modified = project::now_rfc3339();
-                match editing.index {
-                    Some(i) if i < app.check_docs.list.len() => app.check_docs.list[i] = doc,
-                    _ => app.check_docs.list.push(doc),
-                }
-                app.session.dirty = true;
-            }
-        }
+    let mut outcome = Outcome::default();
+    crate::dialog::show(ctx, &dialog, &mut open, |ui| outcome = contents(app, ui));
+    if outcome.changed {
+        app.session.dirty = true;
+    }
+    match outcome.action {
+        Some(Action::Done) => app.check_docs.editing = None,
         Some(Action::Delete) => {
-            if let Some(i) = app.check_docs.editing.take().and_then(|e| e.index)
-                && i < app.check_docs.list.len()
+            if let Some(editing) = app.check_docs.editing.take()
+                && editing.index < app.check_docs.list.len()
             {
-                app.check_docs.list.remove(i);
+                app.check_docs.list.remove(editing.index);
                 app.session.dirty = true;
             }
         }
@@ -600,17 +598,42 @@ pub fn window(app: &mut OpenCheckApp, ctx: &egui::Context) {
 }
 
 enum Action {
-    Save,
+    /// Closes the dialog; the check is kept already.
+    Done,
     Delete,
     Picture,
 }
 
-fn contents(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Option<Action> {
+/// What a frame of the dialog did: an action, and whether the check changed.
+#[derive(Default)]
+struct Outcome {
+    action: Option<Action>,
+    changed: bool,
+}
+
+/// Notes a change the dialog made: the time of the change, and that there
+/// was one.
+fn note_change(doc: &mut CheckDoc, before: &CheckDoc) -> bool {
+    if *doc == *before {
+        return false;
+    }
+    doc.modified = project::now_rfc3339();
+    true
+}
+
+fn contents(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Outcome {
     let mut action = None;
     let ctx = ui.ctx().clone();
     let docs = &mut app.check_docs;
-    let editing = docs.editing.as_mut()?;
-    let doc = &mut editing.doc;
+    let Some(editing) = docs.editing.as_ref() else {
+        return Outcome::default();
+    };
+    let (index, mut confirm_delete) = (editing.index, editing.confirm_delete);
+    let Some(doc) = docs.list.get_mut(index) else {
+        docs.editing = None;
+        return Outcome::default();
+    };
+    let before = doc.clone();
     egui::Grid::new("check_doc_fields")
         .num_columns(2)
         .spacing([10.0, 8.0])
@@ -741,43 +764,53 @@ fn contents(app: &mut OpenCheckApp, ui: &mut egui::Ui) -> Option<Action> {
             });
         }
     });
-    let Some(editing) = docs.editing.as_mut() else {
-        return action;
+    let Some(doc) = docs.list.get_mut(index) else {
+        return Outcome::default();
     };
-    if let Some(i) = remove {
-        editing.doc.pictures.remove(i);
+    if let Some(i) = remove
+        && i < doc.pictures.len()
+    {
+        doc.pictures.remove(i);
     }
+    let changed = note_change(doc, &before);
     ui.add_space(10.0);
     ui.separator();
     ui.horizontal(|ui| {
         if ui
-            .button(RichText::new(format!("{}  Save", icon::CHECK)).strong())
+            .button(RichText::new(format!("{}  Done", icon::CHECK)).strong())
+            .on_hover_text("The check is kept as you write; this only closes the dialog")
             .clicked()
         {
-            action = Some(Action::Save);
+            action = Some(Action::Done);
         }
-        if editing.index.is_some() {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if editing.confirm_delete {
-                    if ui
-                        .button(
-                            RichText::new(format!("{}  Delete for good", icon::TRASH))
-                                .color(theme::danger()),
-                        )
-                        .clicked()
-                    {
-                        action = Some(Action::Delete);
-                    }
-                    if ui.button("Keep it").clicked() {
-                        editing.confirm_delete = false;
-                    }
-                } else if ui.button(format!("{}  Delete…", icon::TRASH)).clicked() {
-                    editing.confirm_delete = true;
+        ui.label(
+            RichText::new("Kept as you write. Save the project to keep it on disk.")
+                .small()
+                .color(theme::text_muted()),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if confirm_delete {
+                if ui
+                    .button(
+                        RichText::new(format!("{}  Delete for good", icon::TRASH))
+                            .color(theme::danger()),
+                    )
+                    .clicked()
+                {
+                    action = Some(Action::Delete);
                 }
-            });
-        }
+                if ui.button("Keep it").clicked() {
+                    confirm_delete = false;
+                }
+            } else if ui.button(format!("{}  Delete…", icon::TRASH)).clicked() {
+                confirm_delete = true;
+            }
+        });
     });
-    action
+    if let Some(editing) = docs.editing.as_mut() {
+        editing.confirm_delete = confirm_delete;
+    }
+    Outcome { action, changed }
 }
 
 #[cfg(test)]
@@ -811,6 +844,21 @@ mod tests {
         assert_eq!(swatch_text(shown[0]), "G0");
         doc.hide_colours = true;
         assert!(legend_shown(&doc).0.is_empty());
+    }
+
+    #[test]
+    fn a_change_in_the_dialog_is_noted_with_its_time() {
+        let before = CheckDoc {
+            modified: "2026-01-01T00:00:00Z".into(),
+            ..CheckDoc::default()
+        };
+        let mut same = before.clone();
+        assert!(!note_change(&mut same, &before));
+        assert_eq!(same.modified, before.modified);
+        let mut changed = before.clone();
+        changed.method = "Seen from all four sides".into();
+        assert!(note_change(&mut changed, &before));
+        assert_ne!(changed.modified, before.modified);
     }
 
     #[test]
