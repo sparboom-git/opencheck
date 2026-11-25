@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 opencheck-core.workspace = true
+opencheck-smc.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 chrono.workspace = true

@@ -46,6 +46,8 @@ mod scene;
 mod session;
 mod settings;
 mod side_panel;
+#[cfg(not(target_arch = "wasm32"))]
+mod smc;
 mod snap;
 mod standard_editor;
 mod theme;

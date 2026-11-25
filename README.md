@@ -67,10 +67,17 @@ slower, and the page waits while a model loads or a check runs.
   now: the clearance rulesets (MEP near structure, cable trays, ventilation), the
   check of classification codes against BIMTypeCode 2022 DK,
   the visual checks of dimensions in pipe and duct systems and of the fall of
-  drain pipes, and adding Revit files (`.rvt`), converted to IFC by
-  [rvt-rs](https://github.com/DrunkOnJava/rvt-rs); see
-  [docs/revit-files.md](docs/revit-files.md). A ruleset or check already in a
-  project stays when WIP is switched off.
+  drain pipes, adding Revit files (`.rvt`), converted to IFC by
+  [rvt-rs](https://github.com/DrunkOnJava/rvt-rs) (see
+  [docs/revit-files.md](docs/revit-files.md)), and adding **coordination
+  files** (`.smc`), the file a model checker (Solibri) saves with the IFC
+  models of a project put together: each model in it becomes a model here,
+  with its elements, properties, storeys, colours and shapes, stored in the
+  project as IFC, read by the reader of
+  [Open BIM Suite](https://github.com/OpenAEC-Foundation/open-bim-suite)
+  (LGPL-3.0-or-later; see [docs/smc-files.md](docs/smc-files.md)). Both
+  desktop only. A ruleset or check already in a project stays when WIP is
+  switched off.
 - Switch models on and off, browse the spatial structure and read the
   properties, classifications, materials and systems of any element.
 - **Update a model** to a newer version of its IFC file with the ↻ button on
@@ -387,7 +394,8 @@ written; the log still shows that the session did not close.
 ## Projects
 
 A project is saved as one `.opencheck` file: a ZIP archive holding the IFC
-files unchanged, the rulesets, IDS files, information requirements, the
+files unchanged (for a Revit or coordination file, the IFC it was converted
+to), the rulesets, IDS files, information requirements, the
 classification system chosen, checking decisions, suggested categories and the triage file, the working area, the
 visual checks, the autorun configuration, issues and the view state. See
 [docs/file-format.md](docs/file-format.md). Sign-ins to BCF servers are kept
@@ -408,6 +416,7 @@ opencheck check ARK.ifc KON.ifc --ruleset information-lod-dk.toml --level 325
 opencheck check ARK.ifc VVS.ifc --ruleset information-lod-dk.toml --classification bimtypecode-2022-dk
 opencheck check ARK.ifc KON.ifc --ids delivery.ids
 opencheck export-ids lod-300.ids --level 300
+opencheck convert project.smc project.opencheck
 opencheck mcp
 opencheck autorun \\server\share\project\OpenCheck\autorun.json
 ```
@@ -418,6 +427,7 @@ opencheck autorun \\server\share\project\OpenCheck\autorun.json
 |---|---|
 | `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine (clashes, clearances, duplicates, free zones, Rhai script rules), visual checks (alignment, pipe and duct systems with their port network, drain fall, storeys, rooms, levels), triage of findings (C402 categories, groups, pre-sorting), information requirements, classification systems and IDS, BCF data and files, project files, autorun runs and the dashboard |
 | `opencheck-rvt` | Revit files (WIP): converts `.rvt` to IFC4 with rvt-rs; the only code that knows rvt-rs |
+| `opencheck-smc` | Coordination files (`.smc`, WIP): the reader of Open BIM Suite and the writing of each model as IFC4; the only code that knows the format. LGPL-3.0-or-later, unlike the rest |
 | `opencheck-cli` | The `opencheck` command line tool, including `autorun` and the `mcp` server for Claude Desktop |
 | `opencheck-app` | The application, for the desktop and the browser: federated 3D viewer (egui + wgpu), checking, visual checks, issues, reports, BCF Live, the autorun setup and the Claude connection |
 
@@ -434,6 +444,14 @@ Griffin Long (Apache-2.0), which converts them to IFC4 without Revit. This is
 a feature under development, switched on with *File → Settings → WIP*;
 [docs/revit-files.md](docs/revit-files.md) says what it does, what to be
 careful about and how a new rvt-rs release is taken in.
+
+Coordination files (`.smc`) are read by the reader of
+[Open BIM Suite](https://github.com/OpenAEC-Foundation/open-bim-suite) by the
+OpenAEC Foundation (LGPL-3.0-or-later), copied into `opencheck-smc`, which
+writes each model as IFC4. This too is a feature under development, behind
+the same WIP switch. [docs/smc-files.md](docs/smc-files.md) says what
+is converted, what is not, what the licence means and how a new revision of
+the reader is taken in.
 
 ## Building
 
@@ -497,12 +515,18 @@ Licensed under either of
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
-at your option. Dependencies carry their own licenses; ifc-lite is MPL-2.0.
+at your option, except the crate `opencheck-smc`, which is under the GNU
+Lesser General Public License, version 3 or later: it is built on the reader
+of coordination files of Open BIM Suite by the OpenAEC Foundation, and its
+licence and notice are in
+[crates/opencheck-smc/licenses](crates/opencheck-smc/licenses). Dependencies
+carry their own licenses; ifc-lite is MPL-2.0.
 rvt-rs, copyright 2026 Griffin Long, is under the Apache License 2.0; its
 licence and notices are in
 [crates/opencheck-rvt/licenses](crates/opencheck-rvt/licenses). rvt-rs and
 OpenCheck are not affiliated with Autodesk; "Autodesk" and "Revit" are
-trademarks of Autodesk, Inc.
+trademarks of Autodesk, Inc. Open BIM Suite and OpenCheck are not affiliated
+with Solibri; "Solibri" is a trademark of Solibri Oy.
 The IBM Plex fonts are under the SIL Open Font License
 ([OFL.txt](crates/opencheck-app/assets/fonts/OFL.txt)).
 The list of codes of BIMTypeCode 2022 DK, by [BIM7AA](http://BIM7AA.dk), is

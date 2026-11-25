@@ -1,0 +1,51 @@
+Notice: the reader of coordination files (.smc) in OpenCheck
+==============================================================================
+
+The reader of coordination files in this crate, opencheck-smc, is from
+Open BIM Suite by the OpenAEC Foundation:
+
+    https://github.com/OpenAEC-Foundation/open-bim-suite
+    Licence: GNU Lesser General Public License, version 3 or later
+             (LGPL-3.0-or-later), see open-bim-suite-LICENSE
+    Revision: eb4142ee12ea28f796c07f475a24a1d0c66aa8f0 (2026-11-25)
+    Files:    src/loaders/smc/stream.rs  ->  crates/opencheck-smc/src/stream.rs
+              src/loaders/smc/mesh.rs    ->  crates/opencheck-smc/src/mesh.rs
+
+Open BIM Suite worked out how such a file is built (a zip around one Java
+object stream of the model checker's own classes) and wrote the reader of
+that stream and the tessellation of its shapes. OpenCheck would not read these
+files without that work.
+
+What OpenCheck changed in the copied files (each change is marked
+"OpenCheck:" in the source; the files are otherwise as upstream, run through
+rustfmt with OpenCheck's settings):
+
+- mesh.rs: the positions of a mesh are kept as f64 instead of f32, so the
+  coordinates of a georeferenced model (hundreds of kilometres from the
+  origin) keep their precision.
+- stream.rs: a model record also keeps the file it came from (`file`), so
+  the models get the names of their IFC files.
+
+What OpenCheck added (src/lib.rs, src/ifc.rs, under the same licence as this
+crate): the writing of each model as an IFC4 file, which the rest of OpenCheck
+reads as it reads any IFC. The reading of the file's issues (presentations)
+that Open BIM Suite also does is not taken over.
+
+Licence of this crate
+------------------------------------------------------------------------------
+
+opencheck-smc as a whole is under the LGPL-3.0-or-later, see
+open-bim-suite-LICENSE. The rest of OpenCheck is under the MIT licence or the
+Apache License 2.0, at your option, and links this crate statically. The LGPL
+allows that on the condition that you can modify this library and relink the
+application with your modified version: OpenCheck's complete source code is
+public under those permissive licences, so you can rebuild it with a changed
+opencheck-smc at any time (LGPL-3.0, section 4(d)(0)).
+
+Trademarks
+------------------------------------------------------------------------------
+
+Solibri is a trademark of Solibri Oy (a Nemetschek company). Neither
+Open BIM Suite nor OpenCheck is affiliated with, endorsed by or sponsored by
+Solibri or Nemetschek. The name is used only to say which program writes the
+files this reader reads.

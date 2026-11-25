@@ -3,7 +3,7 @@
 //! Useful for inspecting what OpenCheck reads from a file without starting the
 //! viewer, and for scripting checks later on.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -16,7 +16,7 @@ use opencheck_core::check::{
     RuleKind, Ruleset, RulesetInfo, Selector, Severity, builtin_classification,
     builtin_classifications, builtin_standard, run_check, standard_to_ids,
 };
-use opencheck_core::{Federation, IfcModel, SpatialNode, load_ifc_file};
+use opencheck_core::{Discipline, Federation, IfcModel, SpatialNode, load_ifc_file};
 
 #[derive(Parser)]
 #[command(name = "opencheck", version, about = "Open source IFC model checker")]
@@ -89,6 +89,13 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Convert a coordination file (.smc) into an OpenCheck project: one
+    /// IFC4 file per model it holds, as the model checker kept them.
+    Convert {
+        file: PathBuf,
+        /// The project to write (.opencheck). Default: next to the file.
+        output: Option<PathBuf>,
+    },
     /// Write a built-in information standard as an IDS 1.0 file.
     ExportIds {
         /// Output file, e.g. lod-300.ids.
@@ -105,6 +112,7 @@ enum Command {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Info { files, classes } => info(&files, classes),
+        Command::Convert { file, output } => convert(&file, output),
         Command::Tree { file, elements } => tree(&file, elements),
         Command::Props { file, element } => props(&file, &element),
         Command::Check {
@@ -460,6 +468,72 @@ fn check(
         report.finding_count(),
         report.duration.as_secs_f64() * 1000.0
     );
+    Ok(())
+}
+
+/// Converts a coordination file and writes its models as a project, each
+/// read back once so the project records its discipline and hash.
+fn convert(file: &Path, output: Option<PathBuf>) -> Result<()> {
+    use opencheck_core::project::{
+        self, ModelEntry, ModelSource, PROJECT_EXTENSION, ProjectDocuments, ProjectModel,
+    };
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let converted = opencheck_smc::convert_file(file)
+        .with_context(|| format!("converting {}", file.display()))?;
+    println!("{}", converted.message(&name));
+    for note in converted.notes() {
+        println!("  {note}");
+    }
+    let now = project::now_rfc3339();
+    let mut models = Vec::new();
+    for m in &converted.models {
+        let ifc_name = format!("{}.ifc", m.name);
+        let mut model = opencheck_core::load_ifc_bytes(&ifc_name, &m.ifc)
+            .with_context(|| format!("reading the IFC converted for {}", m.name))?;
+        // the checker's short name, set by the coordinator, decides where it says one
+        if let Some(d) = Discipline::from_model_code(&m.short_name) {
+            model.discipline = d;
+        }
+        println!(
+            "  {:<28} {:<14} {:>6} elements, {:>9} triangles",
+            m.name,
+            model.discipline.label(),
+            model.elements.len(),
+            m.summary.triangles
+        );
+        models.push(ProjectModel {
+            entry: ModelEntry {
+                file: String::new(),
+                name: m.name.clone(),
+                discipline: model.discipline,
+                visible: true,
+                source_path: Some(file.display().to_string()),
+                sha256: model.content_hash.clone(),
+                revision: 1,
+                added: now.clone(),
+                updated: now.clone(),
+                color: None,
+            },
+            source: ModelSource::Memory {
+                name: ifc_name,
+                bytes: std::sync::Arc::from(m.ifc.clone()),
+            },
+        });
+    }
+    let output = output.unwrap_or_else(|| file.with_extension(PROJECT_EXTENSION));
+    project::save_project(
+        &output,
+        &models,
+        &[],
+        &[],
+        &ProjectDocuments::default(),
+        None,
+    )
+    .with_context(|| format!("writing {}", output.display()))?;
+    println!("Wrote {} with {} models", output.display(), models.len());
     Ok(())
 }
 

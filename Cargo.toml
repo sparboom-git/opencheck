@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.4.3"
+version = "0.4.4"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sparboom-git/opencheck"
@@ -22,6 +22,10 @@ ifc-lite-clash = "=20.4.0"
 # in a new release see docs/revit-files.md.
 rvt = "=0.20.0"
 opencheck-rvt = { path = "crates/opencheck-rvt" }
+# Coordination files (.smc): the reader of Open BIM Suite (LGPL-3.0-or-later),
+# as its own crate so that licence stays with it. Only opencheck-smc holds that
+# code; see crates/opencheck-smc/licenses and docs/smc-files.md.
+opencheck-smc = { path = "crates/opencheck-smc" }
 
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

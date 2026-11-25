@@ -29,13 +29,15 @@ pub enum JobResult {
         replaces: Option<ModelId>,
         result: Result<Box<IfcModel>, String>,
     },
-    /// A Revit file was converted to IFC; its model follows. `message` says
-    /// what the converter read and what it left out.
+    /// A Revit or coordination file was converted to IFC; its models follow.
+    /// `message` says what the converter read and what it left out.
     #[cfg(not(target_arch = "wasm32"))]
     Converted {
         message: String,
         /// The converter's own warnings, as it words them.
         warnings: Vec<String>,
+        /// A Revit file; else a coordination file.
+        revit: bool,
     },
     ProjectOpened {
         path: PathBuf,
@@ -218,6 +220,7 @@ impl Jobs {
                     JobResult::Converted {
                         message: converted.summary.message(&file),
                         warnings: converted.summary.warnings.clone(),
+                        revit: true,
                     },
                     false,
                 );
@@ -234,6 +237,75 @@ impl Jobs {
                 },
                 true,
             );
+        });
+    }
+
+    /// Converts a coordination file (.smc) to one IFC per model it holds
+    /// and loads them (WIP), in the file's order, so the first model gives
+    /// the federation its origin. The IFCs are kept in memory and written
+    /// into the project when it is saved.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn load_smc_file(&mut self, path: PathBuf, ctx: &egui::Context) {
+        let file = file_name(&path);
+        let reporter = self.start(format!("Converting {file}"), ctx);
+        crate::platform::spawn(move || {
+            let converted = match opencheck_smc::convert_file(&path) {
+                Ok(converted) => converted,
+                Err(e) => {
+                    reporter.send(
+                        JobResult::ModelLoaded {
+                            source: ModelSource::File(path),
+                            entry: None,
+                            replaces: None,
+                            result: Err(e.to_string()),
+                        },
+                        true,
+                    );
+                    return;
+                }
+            };
+            reporter.send(
+                JobResult::Converted {
+                    message: converted.message(&file),
+                    warnings: converted.notes(),
+                    revit: false,
+                },
+                false,
+            );
+            let last = converted.models.len().saturating_sub(1);
+            for (i, model) in converted.models.into_iter().enumerate() {
+                // Named as the IFC it now is, so the discipline is guessed from
+                // the name; the checker's short name, set by the coordinator,
+                // decides where it says one.
+                let name = format!("{}.ifc", model.name);
+                let result = opencheck_core::load_ifc_bytes(&name, &model.ifc)
+                    .map(|mut read| {
+                        if let Some(d) =
+                            opencheck_core::Discipline::from_model_code(&model.short_name)
+                        {
+                            read.discipline = d;
+                        }
+                        Box::new(read)
+                    })
+                    .map_err(|e| {
+                        format!(
+                            "the IFC converted from {file} for {} could not be read: {e}",
+                            model.name
+                        )
+                    });
+                reporter.send(
+                    JobResult::ModelLoaded {
+                        source: ModelSource::Memory {
+                            name,
+                            bytes: Arc::from(model.ifc),
+                        },
+                        entry: None,
+                        replaces: None,
+                        result,
+                    },
+                    i == last,
+                );
+            }
         });
     }
 

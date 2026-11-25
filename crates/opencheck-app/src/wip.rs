@@ -12,7 +12,9 @@
 //! - the visual checks whose kind is `work_in_progress` (`visual_ui`);
 //! - the check of classification codes against a classification system, on
 //!   the card of an information ruleset (`checking_ui`);
-//! - Revit files, converted to IFC with rvt-rs (`opencheck-rvt`).
+//! - Revit files, converted to IFC with rvt-rs (`opencheck-rvt`);
+//! - coordination files (`.smc`), converted to IFC with the reader of Open
+//!   BIM Suite (`opencheck-smc`).
 //!
 //! The switch decides what is offered, never what a project holds: a ruleset
 //! or check added while WIP was on stays and runs with it off.
@@ -32,18 +34,21 @@ const SETTING: &str = "wip";
 pub struct Wip {
     /// Features under development are offered.
     pub on: bool,
-    /// What the conversions of Revit files said, newest last.
+    /// What the conversions of Revit and coordination files said, newest
+    /// last.
     pub conversions: Vec<Conversion>,
     /// The window with `conversions` is open.
     pub conversions_open: bool,
 }
 
-/// What one conversion of a Revit file said.
+/// What one conversion of a Revit or coordination file said.
 pub struct Conversion {
     /// The summary: what was converted and what to be careful about.
     pub message: String,
     /// The converter's own warnings, as it words them.
     pub warnings: Vec<String>,
+    /// A Revit file; else a coordination file.
+    pub revit: bool,
 }
 
 impl Wip {
@@ -62,20 +67,28 @@ impl Wip {
         crate::settings::set(SETTING, Value::Bool(on));
     }
 
-    /// A Revit file was converted: keeps what the converter said and shows it.
+    /// A file was converted: keeps what the converter said and shows it.
     #[cfg_attr(
         target_arch = "wasm32",
-        expect(dead_code, reason = "Revit files are not converted in the browser")
+        expect(dead_code, reason = "nothing is converted in the browser")
     )]
-    pub fn converted(&mut self, message: String, warnings: Vec<String>) {
-        self.conversions.push(Conversion { message, warnings });
+    pub fn converted(&mut self, message: String, warnings: Vec<String>, revit: bool) {
+        self.conversions.push(Conversion {
+            message,
+            warnings,
+            revit,
+        });
         self.conversions_open = true;
     }
 
-    /// The model files that can be added: IFC, and Revit while WIP is on.
+    /// The model files that can be added: IFC, and coordination files
+    /// (.smc) and Revit while WIP is on.
     pub fn model_filter(&self) -> Filter<'static> {
         if self.revit() {
-            ("IFC or Revit model", &["ifc", "IFC", "rvt", "RVT"])
+            (
+                "IFC, SMC or Revit model",
+                &["ifc", "IFC", "smc", "SMC", "rvt", "RVT"],
+            )
         } else {
             ("IFC model", &["ifc", "IFC"])
         }
@@ -83,12 +96,17 @@ impl Wip {
 
     /// Revit files can be opened: WIP is on, in the desktop app.
     pub fn revit(&self) -> bool {
-        self.on && REVIT_BUILT_IN
+        self.on && CONVERTERS_BUILT_IN
+    }
+
+    /// Coordination files can be opened: WIP is on, in the desktop app.
+    pub fn smc(&self) -> bool {
+        self.on && CONVERTERS_BUILT_IN
     }
 }
 
-/// The converter is only built into the desktop app.
-const REVIT_BUILT_IN: bool = !crate::platform::IS_WEB;
+/// The converters are only built into the desktop app.
+const CONVERTERS_BUILT_IN: bool = !crate::platform::IS_WEB;
 
 /// A feature under development, as the Settings dialog lists it.
 struct Feature {
@@ -118,6 +136,7 @@ const FEATURES: &[Feature] = &[
                judgement and still being tuned.",
     },
     REVIT,
+    SMC,
 ];
 
 const REVIT: Feature = Feature {
@@ -127,6 +146,17 @@ const REVIT: Feature = Feature {
            everything: many elements come as a box of the right size and place rather than \
            their real shape, and some parameters are missing, so clashes and information \
            checks on such a model can be wrong. A window says what was converted.",
+};
+
+const SMC: Feature = Feature {
+    name: "Coordination files (.smc)",
+    what: "Add a coordination file, the file a model checker (Solibri) saves with the IFC \
+           models of a project put together: each model in it becomes a model here, with its \
+           elements, properties, storeys, colours and shapes as the checker kept them, and \
+           is stored in the project as IFC. Desktop app only. Tried on few files so far: \
+           other files may hold objects the reader does not know. The original IFC files \
+           are the models to rely on: update a model from its IFC file with the ↻ button \
+           when you have it. A window says what was converted.",
 };
 
 /// The WIP part of File → Settings.
@@ -170,7 +200,11 @@ pub fn section(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
     );
     ui.add_space(4.0);
     #[cfg(not(target_arch = "wasm32"))]
-    converter_credit(ui);
+    {
+        converter_credit(ui);
+        ui.add_space(4.0);
+        crate::smc::credit(ui);
+    }
 }
 
 /// Who the Revit conversion is by: shown wherever it is offered.
@@ -214,17 +248,19 @@ fn converter_credit(ui: &mut egui::Ui) {
         });
 }
 
-/// What the conversions of Revit files said; opens after each conversion.
+/// What the conversions of Revit and coordination files said; opens after
+/// each conversion.
 pub fn conversions_window(app: &mut OpenCheckApp, ctx: &egui::Context) {
     if !app.wip.conversions_open {
         return;
     }
+    let any_revit = app.wip.conversions.iter().any(|c| c.revit);
     let mut open = true;
     let mut close = false;
     let dialog = crate::dialog::Dialog {
         id: "revit_conversions",
         icon: icon::FLASK,
-        title: "Revit model converted (WIP)",
+        title: "Models converted (WIP)",
         size: egui::vec2(480.0, 300.0),
         min: egui::vec2(320.0, 180.0),
         scroll: crate::dialog::Scroll::Both,
@@ -251,10 +287,15 @@ pub fn conversions_window(app: &mut OpenCheckApp, ctx: &egui::Context) {
             ui.add_space(8.0);
         }
         ui.label(
-            RichText::new(
+            RichText::new(if any_revit {
                 "Reading Revit files is under development. The model in OpenCheck is the \
-                 converted IFC, not the Revit model itself.",
-            )
+                 converted IFC, not the Revit model itself."
+            } else {
+                "Reading coordination files is under development. The models in OpenCheck \
+                 are the converted IFC files, as the model checker kept them, not the \
+                 original IFC files. Update a model from its own IFC file with the ↻ button \
+                 when you have it."
+            })
             .small()
             .color(theme::text_muted()),
         );
@@ -271,21 +312,23 @@ mod tests {
     #[test]
     fn revit_files_are_only_offered_with_wip_on() {
         let off = Wip::default();
-        assert!(!off.revit());
+        assert!(!off.revit() && !off.smc());
         assert_eq!(off.model_filter().1, ["ifc", "IFC"]);
         let on = Wip {
             on: true,
             ..Wip::default()
         };
-        assert!(on.revit());
+        assert!(on.revit() && on.smc());
         assert!(on.model_filter().1.contains(&"rvt"));
+        assert!(on.model_filter().1.contains(&"smc"));
     }
 
     #[test]
     fn a_conversion_opens_its_window() {
         let mut wip = Wip::default();
-        wip.converted("K09.rvt was converted".to_owned(), Vec::new());
+        wip.converted("K09.rvt was converted".to_owned(), Vec::new(), true);
         assert!(wip.conversions_open);
         assert_eq!(wip.conversions.len(), 1);
+        assert!(wip.conversions[0].revit);
     }
 }

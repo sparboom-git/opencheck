@@ -40,6 +40,8 @@ typst-render = "=0.15.1"
 ureq = { version = "3", features = ["json"] }
 # Revit files (WIP): the conversion takes long, so not in the browser.
 opencheck-rvt.workspace = true
+# Coordination files (.smc), converted to IFC: large files, so not in the browser.
+opencheck-smc.workspace = true
 getrandom = "0.3"
 # Pictures pasted into report blocks.
 arboard = { version = "3", default-features = false, features = ["image-data"] }

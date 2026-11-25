@@ -293,9 +293,10 @@ impl OpenCheckApp {
         match extension.as_str() {
             "ifc" => self.jobs.load_file(path, None, ctx),
             "rvt" => self.load_revit(path, None, ctx),
+            "smc" => self.load_smc(path, ctx),
             PROJECT_EXTENSION => self.request(PendingAction::OpenProject(Some(path)), ctx),
             _ => self.errors.push(format!(
-                "{} is not an IFC file or OpenCheck project",
+                "{} is not an IFC file, a coordination file (.smc) or an OpenCheck project",
                 path.file_name().unwrap_or_default().to_string_lossy()
             )),
         }
@@ -319,25 +320,56 @@ impl OpenCheckApp {
         }
     }
 
-    /// "Add IFC models", also naming Revit while that is offered (WIP).
+    /// "Add IFC models", also naming coordination files and Revit while
+    /// those are offered (WIP).
     pub fn add_models_label(&self) -> &'static str {
         if self.wip.revit() {
-            "Add IFC or Revit models"
+            "Add IFC, SMC or Revit models"
         } else {
             "Add IFC models"
         }
     }
 
-    /// Loads a model file picked in a dialog: IFC, or Revit by its extension.
+    /// Loads a model file picked in a dialog: IFC, a coordination file or
+    /// Revit by its extension.
     fn load_model_file(&mut self, path: PathBuf, replaces: Option<ModelId>, ctx: &egui::Context) {
-        let revit = path
+        let extension = path
             .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("rvt"));
-        if revit {
-            self.load_revit(path, replaces, ctx);
-        } else {
-            self.jobs.load_file(path, replaces, ctx);
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        match extension.as_str() {
+            "rvt" => self.load_revit(path, replaces, ctx),
+            "smc" if replaces.is_some() => self.errors.push(format!(
+                "{} is a coordination file with the models of a whole project; add it with \
+                 Add models, and update a model from its own IFC file",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            )),
+            "smc" => self.load_smc(path, ctx),
+            _ => self.jobs.load_file(path, replaces, ctx),
         }
+    }
+
+    /// Converts a coordination file (.smc) to IFC, one model per model in it,
+    /// and loads them (WIP, desktop only).
+    fn load_smc(&mut self, path: PathBuf, ctx: &egui::Context) {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        if platform::IS_WEB {
+            self.errors.push(format!(
+                "{name} is a coordination file; those can only be opened in the desktop app"
+            ));
+            return;
+        }
+        if !self.wip.smc() {
+            self.errors.push(format!(
+                "{name} is a coordination file. Opening coordination files is under \
+                 development: switch on WIP in File → Settings to try it."
+            ));
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.jobs.load_smc_file(path, ctx);
+        #[cfg(target_arch = "wasm32")]
+        let _ = ctx;
     }
 
     /// Converts a Revit file to IFC and loads that (WIP, desktop only).
@@ -523,8 +555,12 @@ impl OpenCheckApp {
                     )),
                 },
                 #[cfg(not(target_arch = "wasm32"))]
-                JobResult::Converted { message, warnings } => {
-                    self.wip.converted(message, warnings);
+                JobResult::Converted {
+                    message,
+                    warnings,
+                    revit,
+                } => {
+                    self.wip.converted(message, warnings, revit);
                 }
                 JobResult::ProjectOpened { path, result } => match result {
                     Ok(contents) => {

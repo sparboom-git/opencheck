@@ -1,0 +1,25 @@
+[package]
+name = "opencheck-smc"
+description = "Coordination files (.smc) for OpenCheck: reads them with the reader of Open BIM Suite and writes one IFC4 file per model."
+version.workspace = true
+edition.workspace = true
+# Not the workspace licence: the reader (src/stream.rs, src/mesh.rs) is from
+# Open BIM Suite by the OpenAEC Foundation, under the LGPL-3.0-or-later, and
+# so is this crate as a whole. See licenses/open-bim-suite-NOTICE.
+license = "LGPL-3.0-or-later"
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+glam.workspace = true
+# The attribute lists of IFC4, so every element is written with the right
+# number of attributes for its class.
+ifc-lite-core.workspace = true
+thiserror.workspace = true
+zip.workspace = true
+# Triangulates the faces of the reader's shapes (ISC licence).
+earcutr = "0.5"
+
+[dev-dependencies]
+# The example reads the converted IFC back as OpenCheck does.
+opencheck-core.workspace = true

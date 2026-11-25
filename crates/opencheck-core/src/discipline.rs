@@ -104,6 +104,25 @@ impl Discipline {
         })
     }
 
+    /// The discipline of the short name a model has in a coordination file
+    /// (a model checker's project): the letters Danish projects use, `A` for
+    /// the architect, `K` for structures, `L` for landscape, `E` for
+    /// electrical, `R` for pipes, `V` or `VENT` for ventilation, `B` for
+    /// fire. None for anything else, such as a supplier's `G`.
+    pub fn from_model_code(code: &str) -> Option<Self> {
+        Some(match code.trim().to_ascii_uppercase().as_str() {
+            "A" | "ARK" | "ARC" => Discipline::Architectural,
+            "K" | "KON" | "STR" => Discipline::Structural,
+            "L" | "LAND" | "LAN" => Discipline::Landscape,
+            "E" | "EL" | "ELE" => Discipline::Electrical,
+            "R" | "VVS" | "PLU" => Discipline::Plumbing,
+            "V" | "VENT" | "VEN" => Discipline::Mechanical,
+            "B" | "BRAND" | "SPR" => Discipline::FireProtection,
+            "I" | "INF" | "ANL" => Discipline::Infrastructure,
+            _ => return None,
+        })
+    }
+
     fn guess_from_file_name(file_name: &str) -> Option<Self> {
         let stem = file_name
             .rsplit(['/', '\\'])
@@ -268,6 +287,25 @@ mod tests {
             Discipline::guess("Projekt_EL.ifc", []),
             Discipline::Electrical
         );
+    }
+
+    #[test]
+    fn model_codes_of_coordination_files() {
+        assert_eq!(
+            Discipline::from_model_code("A"),
+            Some(Discipline::Architectural)
+        );
+        assert_eq!(
+            Discipline::from_model_code("k"),
+            Some(Discipline::Structural)
+        );
+        assert_eq!(
+            Discipline::from_model_code("VENT "),
+            Some(Discipline::Mechanical)
+        );
+        assert_eq!(Discipline::from_model_code("R"), Some(Discipline::Plumbing));
+        assert_eq!(Discipline::from_model_code("G"), None);
+        assert_eq!(Discipline::from_model_code(""), None);
     }
 
     #[test]
