@@ -102,7 +102,7 @@ pub fn show(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         // documented check also shows its levels.
         if app.check_docs.shot.is_some() {
             crate::visual_ui::draw_levels(app, ui, rect, aspect);
-            crate::visual_ui::draw_fall_arrows(app, ui, rect, aspect);
+            crate::visual_ui::draw_marks(app, ui, rect, aspect);
             crate::visual_ui::draw_plan(app, ui, rect, aspect);
         }
         draw_focus_marker(app, ui, rect, aspect);
@@ -110,7 +110,7 @@ pub fn show(app: &mut OpenCheckApp, ui: &mut egui::Ui) {
         return;
     }
     crate::visual_ui::draw_levels(app, ui, rect, aspect);
-    crate::visual_ui::draw_fall_arrows(app, ui, rect, aspect);
+    crate::visual_ui::draw_marks(app, ui, rect, aspect);
     crate::visual_ui::draw_plan(app, ui, rect, aspect);
     draw_measurements(app, ui, rect, aspect);
     draw_focus_zones(app, ui, rect, aspect);

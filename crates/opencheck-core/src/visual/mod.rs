@@ -299,27 +299,31 @@ pub struct VisualOutcome {
     pub table: Vec<Vec<String>>,
     /// Names written on places in plan, e.g. the rooms.
     pub labels: Vec<PlaceLabel>,
-    /// Arrows drawn along elements in the 3D view: the way each drain pipe
-    /// falls.
-    pub arrows: Vec<FlowArrow>,
+    /// Marks drawn over the 3D view on elements: the way each drain pipe
+    /// falls, a ring on each dimension jump.
+    pub marks: Vec<Mark>,
 }
 
-/// An arrow along an element, drawn over the 3D view: the way a drain pipe
-/// falls, from its higher end to its lower.
+/// A mark drawn over the 3D view on an element: an arrow along it (the way a
+/// drain pipe falls) or a ring on it (a dimension jump, a flat pipe). A mark
+/// that explains a problem stands out, white with a dark edge and never
+/// tiny; the rest are faint. A mark is a thing of the model, sized with it.
 #[derive(Debug, Clone, PartialEq)]
-pub struct FlowArrow {
+pub struct Mark {
     pub element: ElementKey,
-    /// Both ends in the shared frame, metres.
-    pub from: [f64; 3],
-    pub to: [f64; 3],
-    /// The element's size across, metres: the arrow is drawn to it.
+    pub kind: MarkKind,
+    /// The element's size across, metres: the mark is drawn to it.
     pub size: f64,
-    /// The arrow explains a problem (a pipe falling the wrong way, or lying
-    /// flat) and is drawn to stand out; the rest are drawn faintly.
+    /// The mark explains a problem.
     pub marked: bool,
-    /// The pipe lies flat: there is no way to show, so a ring marks it in
-    /// place of an arrow.
-    pub flat: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MarkKind {
+    /// From one end of the element to the other, in the shared frame, metres.
+    Arrow { from: [f64; 3], to: [f64; 3] },
+    /// At a point of the element, in the shared frame, metres.
+    Ring { at: [f64; 3] },
 }
 
 /// A plan view of a storey: cut above its floor, seen from above.

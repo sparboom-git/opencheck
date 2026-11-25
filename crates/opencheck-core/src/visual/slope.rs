@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 
 use super::network::{self, Medium, Role};
 use super::{
-    Category, ERROR, ElementKey, FlowArrow, GOOD, NEUTRAL, Problem, VisualModel, VisualOutcome,
-    WARNING,
+    Category, ERROR, ElementKey, GOOD, Mark, MarkKind, NEUTRAL, Problem, VisualModel,
+    VisualOutcome, WARNING,
 };
 use crate::Discipline;
 use crate::check::Severity;
@@ -281,7 +281,7 @@ pub(super) fn run(rule: &SlopeRule, models: &[VisualModel]) -> VisualOutcome {
         } else {
             good.push(node.key);
         }
-        outcome.arrows.push(fall_arrow(
+        outcome.marks.push(fall_mark(
             node.key,
             run.ends,
             run.size_mm() / 1000.0,
@@ -331,26 +331,28 @@ pub(super) fn run(rule: &SlopeRule, models: &[VisualModel]) -> VisualOutcome {
 }
 
 /// The way a pipe falls: an arrow from its higher end to its lower, whatever
-/// way the water should go; a ring when it lies flat.
-fn fall_arrow(
-    element: ElementKey,
-    ends: [DVec3; 2],
-    size: f64,
-    marked: bool,
-    flat: bool,
-) -> FlowArrow {
+/// way the water should go; a ring in its middle when it lies flat.
+fn fall_mark(element: ElementKey, ends: [DVec3; 2], size: f64, marked: bool, flat: bool) -> Mark {
     let (top, bottom) = if ends[0].z >= ends[1].z {
         (ends[0], ends[1])
     } else {
         (ends[1], ends[0])
     };
-    FlowArrow {
+    let kind = if flat {
+        MarkKind::Ring {
+            at: ((ends[0] + ends[1]) / 2.0).to_array(),
+        }
+    } else {
+        MarkKind::Arrow {
+            from: top.to_array(),
+            to: bottom.to_array(),
+        }
+    };
+    Mark {
         element,
-        from: top.to_array(),
-        to: bottom.to_array(),
+        kind,
         size,
         marked,
-        flat,
     }
 }
 
@@ -359,22 +361,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_fall_arrow_points_downhill() {
+    fn a_fall_mark_points_downhill_or_rings_a_flat_pipe() {
         let key = ElementKey {
             model: crate::ModelId(0),
             express_id: 7,
         };
         let high = DVec3::new(0.0, 0.0, 10.5);
         let low = DVec3::new(4.0, 0.0, 10.4);
-        let arrow = fall_arrow(key, [low, high], 0.11, true, false);
-        assert_eq!(arrow.from, high.to_array());
-        assert_eq!(arrow.to, low.to_array());
-        assert!(arrow.marked && !arrow.flat);
+        let mark = fall_mark(key, [low, high], 0.11, true, false);
         assert_eq!(
-            fall_arrow(key, [high, low], 0.11, false, false).to,
-            low.to_array()
+            mark.kind,
+            MarkKind::Arrow {
+                from: high.to_array(),
+                to: low.to_array()
+            }
         );
-        assert!(fall_arrow(key, [high, low], 0.11, true, true).flat);
+        assert!(mark.marked);
+        assert_eq!(
+            fall_mark(key, [high, low], 0.11, false, false).kind,
+            MarkKind::Arrow {
+                from: high.to_array(),
+                to: low.to_array()
+            }
+        );
+        assert_eq!(
+            fall_mark(key, [high, low], 0.11, true, true).kind,
+            MarkKind::Ring {
+                at: [2.0, 0.0, 10.45]
+            }
+        );
     }
 
     #[test]

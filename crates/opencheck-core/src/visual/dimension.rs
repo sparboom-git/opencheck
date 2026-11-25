@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::network::{self, Medium, Net, Role, system_color};
-use super::{Category, ERROR, Problem, VisualModel, VisualOutcome};
+use super::{Category, ERROR, Mark, MarkKind, Problem, VisualModel, VisualOutcome};
 use crate::Discipline;
 use crate::check::Severity;
 
@@ -115,6 +115,7 @@ pub(super) fn run(rule: &DimensionRule, models: &[VisualModel]) -> VisualOutcome
                         value: net.nodes[s].run.map(|r| r.size_mm()),
                         color: ERROR,
                     });
+                    outcome.marks.push(ring(&net, s));
                 }
                 continue;
             }
@@ -154,6 +155,7 @@ pub(super) fn run(rule: &DimensionRule, models: &[VisualModel]) -> VisualOutcome
                         value: net.nodes[m].run.map(|r| r.size_mm()),
                         color: ERROR,
                     });
+                    outcome.marks.push(ring(&net, m));
                 }
                 queue.push_back(m);
             }
@@ -217,6 +219,20 @@ pub(super) fn run(rule: &DimensionRule, models: &[VisualModel]) -> VisualOutcome
             .push("No pipes or ducts in the models of these disciplines.".to_owned());
     }
     outcome
+}
+
+/// A ring on a piece that is a jump, in its middle, so it is found in the
+/// view.
+fn ring(net: &Net, n: usize) -> Mark {
+    let node = &net.nodes[n];
+    Mark {
+        element: node.key,
+        kind: MarkKind::Ring {
+            at: node.bounds.center().as_dvec3().to_array(),
+        },
+        size: node.run.map_or(0.1, |r| r.size_mm() / 1000.0),
+        marked: true,
+    }
 }
 
 /// How many separate places the nodes `of` lie in, connected through each

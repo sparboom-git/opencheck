@@ -333,7 +333,8 @@ Each check is added on its own:
 - **Dimensions in pipe and duct systems** (WIP, offered with WIP switched on
   in *File → Settings*): each kind of system in its own
   muted colour; a pipe or duct larger than the piece before it, seen from
-  the start of its system, is red.
+  the start of its system, is red, with a white ring on it so it is found
+  in the view.
 - **Fall of drain pipes** (WIP, as above): drain pipes green with enough
   fall, yellow with
   too little, red when flat or falling the wrong way; least fall overall

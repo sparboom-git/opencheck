@@ -12,7 +12,7 @@ use eframe::egui::{self, Color32, RichText};
 use egui_phosphor::regular as icon;
 use opencheck_core::Discipline;
 use opencheck_core::visual::{
-    self, AlignMode, AlignmentRule, DimensionRule, ElementKey, LevelRule, Plan, RoomRule,
+    self, AlignMode, AlignmentRule, DimensionRule, ElementKey, LevelRule, MarkKind, Plan, RoomRule,
     SlopeLimit, SlopeRule, StoreyRule, VisualKind, VisualModel, VisualOutcome, VisualRule,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -891,10 +891,10 @@ pub fn draw_levels(app: &OpenCheckApp, ui: &egui::Ui, rect: egui::Rect, aspect: 
     }
 }
 
-/// A fall arrow is a thing of the model, not of the screen: so long in
-/// metres (less on a short pipe), and as wide as the pipe. Zoomed out it
-/// shrinks with the pipes until it is too small to draw; zoomed in it is
-/// there to read.
+/// A mark is a thing of the model, not of the screen: an arrow so long in
+/// metres (less on a short element) and as wide as the element, a ring as
+/// wide as it. Zoomed out it shrinks with the model until it is too small
+/// to draw; zoomed in it is there to read.
 const ARROW_METRES: f32 = 0.6;
 /// Shorter than this on screen, an arrow is left out.
 const ARROW_MIN_PX: f32 = 9.0;
@@ -902,87 +902,110 @@ const ARROW_MIN_PX: f32 = 9.0;
 /// a thin pipe far off still shows what is wrong with it.
 const MARKED_MIN_PX: f32 = 20.0;
 
-/// The way the drain pipes fall, as arrows over the 3D view: along each pipe
-/// from its higher end to its lower, and a ring on a pipe that lies flat.
-/// On a red pipe (the wrong way, or flat) the mark is what explains the
-/// problem, so it is white with a dark edge and never tiny; on the other
-/// pipes it is a faint shadow on the pipe, there when looked for. Drawn
-/// while the fall check's result is shown, in plan too, for every pipe
-/// that is drawn.
-pub fn draw_fall_arrows(app: &OpenCheckApp, ui: &egui::Ui, rect: egui::Rect, aspect: f32) {
+/// The marks of the visual check shown, over the 3D view: the way each
+/// drain pipe falls as an arrow, a ring on a flat pipe or a dimension jump.
+/// A mark that explains a problem is white with a dark edge and never tiny;
+/// the rest are a faint shadow on the element, there when looked for. Drawn
+/// while the check's result is shown, in plan too, for every element that
+/// is drawn.
+pub fn draw_marks(app: &OpenCheckApp, ui: &egui::Ui, rect: egui::Rect, aspect: f32) {
     let state = &app.visual;
     let Some(result) = state.shown() else {
         return;
     };
-    if result.outcome.arrows.is_empty() || !(app.tab == Tab::Visual || state.keep) {
+    if result.outcome.marks.is_empty() || !(app.tab == Tab::Visual || state.keep) {
         return;
     }
     let painter = ui.painter_at(rect);
-    for arrow in &result.outcome.arrows {
-        if app.view.display_mode(element_ref(&arrow.element)) == DisplayMode::Hidden {
+    let project = |p: glam::Vec3| crate::viewport::project(app, rect, aspect, p);
+    let shade = Color32::from_black_alpha(170);
+    for mark in &result.outcome.marks {
+        if app.view.display_mode(element_ref(&mark.element)) == DisplayMode::Hidden {
             continue;
         }
-        let from = glam::Vec3::from(arrow.from.map(|v| v as f32));
-        let to = glam::Vec3::from(arrow.to.map(|v| v as f32));
-        let mid = (from + to) / 2.0;
-        if !app.view.is_visible_point(mid) {
-            continue;
-        }
-        // The arrow in the model: centred on the pipe, along it.
-        let along = to - from;
-        let length = along.length();
-        if length < 1e-3 {
-            continue;
-        }
-        let dir = along / length;
-        let shaft = ARROW_METRES.min(length * 0.4);
-        let project = |p: glam::Vec3| crate::viewport::project(app, rect, aspect, p);
-        let (Some(a), Some(b), Some(m), Some(across)) = (
-            project(mid - dir * (shaft / 2.0)),
-            project(mid + dir * (shaft / 2.0)),
-            project(mid),
-            project(mid + glam::Vec3::Z * arrow.size as f32),
-        ) else {
-            continue;
-        };
-        if !rect.contains(a) && !rect.contains(b) {
-            continue;
-        }
-        // As wide as the pipe looks, within reason.
-        let mut width = ((m - across).length() * 0.45).clamp(1.2, 4.0);
-        if arrow.marked {
-            width = width.max(2.0);
-        }
-        if arrow.flat {
-            // A ring: no way to show.
-            let radius = ((m - across).length() * 0.9).clamp(5.0, 10.0);
-            painter.circle_stroke(
-                m,
-                radius,
-                egui::Stroke::new(width + 2.5, Color32::from_black_alpha(170)),
-            );
-            painter.circle_stroke(m, radius, egui::Stroke::new(width, Color32::WHITE));
-            continue;
-        }
-        let (a, b) = if arrow.marked {
-            at_least(a, b, MARKED_MIN_PX)
-        } else {
-            (a, b)
-        };
-        let Some(shape) = arrow_shape(a, b) else {
-            continue;
-        };
-        let strokes: &[(f32, Color32)] = if arrow.marked {
-            &[
-                (width + 2.5, Color32::from_black_alpha(170)),
-                (width, Color32::WHITE),
-            ]
-        } else {
-            &[(width * 0.8, Color32::from_black_alpha(80))]
-        };
-        for (w, color) in strokes {
-            for (p, q) in shape {
-                painter.line_segment([p, q], egui::Stroke::new(*w, *color));
+        let size = mark.size as f32;
+        match &mark.kind {
+            MarkKind::Ring { at } => {
+                let at = glam::Vec3::from(at.map(|v| v as f32));
+                if !app.view.is_visible_point(at) {
+                    continue;
+                }
+                let (Some(m), Some(across)) = (project(at), project(at + glam::Vec3::Z * size))
+                else {
+                    continue;
+                };
+                if !rect.contains(m) {
+                    continue;
+                }
+                let looks = (m - across).length();
+                let (radius, width) = if mark.marked {
+                    (
+                        (looks * 0.9).clamp(5.0, 10.0),
+                        (looks * 0.45).clamp(2.0, 4.0),
+                    )
+                } else {
+                    (
+                        (looks * 0.9).clamp(3.0, 10.0),
+                        (looks * 0.35).clamp(1.2, 3.0),
+                    )
+                };
+                if mark.marked {
+                    painter.circle_stroke(m, radius, egui::Stroke::new(width + 2.5, shade));
+                    painter.circle_stroke(m, radius, egui::Stroke::new(width, Color32::WHITE));
+                } else {
+                    painter.circle_stroke(
+                        m,
+                        radius,
+                        egui::Stroke::new(width, Color32::from_black_alpha(80)),
+                    );
+                }
+            }
+            MarkKind::Arrow { from, to } => {
+                let from = glam::Vec3::from(from.map(|v| v as f32));
+                let to = glam::Vec3::from(to.map(|v| v as f32));
+                let mid = (from + to) / 2.0;
+                if !app.view.is_visible_point(mid) {
+                    continue;
+                }
+                let along = to - from;
+                let length = along.length();
+                if length < 1e-3 {
+                    continue;
+                }
+                let dir = along / length;
+                let shaft = ARROW_METRES.min(length * 0.4);
+                let (Some(a), Some(b), Some(m), Some(across)) = (
+                    project(mid - dir * (shaft / 2.0)),
+                    project(mid + dir * (shaft / 2.0)),
+                    project(mid),
+                    project(mid + glam::Vec3::Z * size),
+                ) else {
+                    continue;
+                };
+                if !rect.contains(a) && !rect.contains(b) {
+                    continue;
+                }
+                // As wide as the pipe looks, within reason.
+                let mut width = ((m - across).length() * 0.45).clamp(1.2, 4.0);
+                let (a, b) = if mark.marked {
+                    width = width.max(2.0);
+                    at_least(a, b, MARKED_MIN_PX)
+                } else {
+                    (a, b)
+                };
+                let Some(shape) = arrow_shape(a, b) else {
+                    continue;
+                };
+                let strokes: &[(f32, Color32)] = if mark.marked {
+                    &[(width + 2.5, shade), (width, Color32::WHITE)]
+                } else {
+                    &[(width * 0.8, Color32::from_black_alpha(80))]
+                };
+                for (w, color) in strokes {
+                    for (p, q) in shape {
+                        painter.line_segment([p, q], egui::Stroke::new(*w, *color));
+                    }
+                }
             }
         }
     }

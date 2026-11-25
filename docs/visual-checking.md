@@ -135,7 +135,10 @@ increase such as Ø160, Ø125, Ø160 is most likely a modelling error.
   counts as a jump, so rounding gives no false problems.
 
 The problem names both sizes (`Ø160 after Ø125 in VI 3`) and selects the
-larger piece.
+larger piece. Every jump carries a white ring with a dark edge in the 3D
+view, in its middle, as wide as the pipe but never tiny, so the places are
+found at a glance; the rings are drawn in plan and in the pictures of a
+documented check too.
 
 ## Fall of drain pipes
 
