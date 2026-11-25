@@ -1,6 +1,6 @@
 //! Coordination files (`.smc`) for OpenCheck.
 //!
-//! A coordination file is what a model checker (Solibri) saves: the IFC
+//! A coordination file is what a model checker saves: the IFC
 //! models of a project put together, with their elements, properties and
 //! shapes, in the checker's own format, a zip around one stream of
 //! serialized Java objects. There is no IFC inside. The reader of that stream
@@ -14,8 +14,12 @@
 //! and geometry as triangles, and OpenCheck then reads those files as it
 //! reads any IFC. Nothing else in OpenCheck knows the format.
 //!
-//! Solibri is a trademark of Solibri Oy; neither Open BIM Suite nor OpenCheck
-//! is affiliated with it.
+//! The other way, [`write`] makes a coordination file of models: the objects
+//! of the checker written by this crate itself, which Open BIM Suite has no
+//! part in.
+//!
+//! Neither Open BIM Suite nor OpenCheck is affiliated with the maker of any
+//! model checker.
 
 use std::io::{Read, Seek};
 use std::path::Path;
@@ -23,6 +27,12 @@ use std::path::Path;
 mod ifc;
 pub mod mesh;
 pub mod stream;
+pub mod write;
+
+pub use write::{
+    WriteDiscipline, WriteElement, WriteError, WriteModel, WriteProperty, WritePropertySet,
+    WriteShape, WriteStorey, WriteSummary, WriteValue, write_smc,
+};
 
 /// Where the reader comes from.
 pub const READER_NAME: &str = "Open BIM Suite";

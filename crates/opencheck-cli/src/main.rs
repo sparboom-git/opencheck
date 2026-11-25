@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 mod autorun;
+mod export_smc;
 mod mcp;
 
 use clap::{Parser, Subcommand};
@@ -96,6 +97,16 @@ enum Command {
         /// The project to write (.opencheck). Default: next to the file.
         output: Option<PathBuf>,
     },
+    /// Write IFC models as one coordination file (.smc), the file a model
+    /// checker opens: each IFC file becomes a model in it, with its
+    /// elements, properties, storeys and shapes as triangles.
+    ExportSmc {
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// The coordination file to write, e.g. project.smc.
+        #[arg(short, long)]
+        output: PathBuf,
+    },
     /// Write a built-in information standard as an IDS 1.0 file.
     ExportIds {
         /// Output file, e.g. lod-300.ids.
@@ -153,6 +164,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::ExportSmc { files, output } => export_smc::export_smc(&files, &output),
         Command::ExportIds {
             output,
             standard,

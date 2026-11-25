@@ -70,12 +70,15 @@ slower, and the page waits while a model loads or a check runs.
   drain pipes, adding Revit files (`.rvt`), converted to IFC by
   [rvt-rs](https://github.com/DrunkOnJava/rvt-rs) 0.25.0 (see
   [docs/revit-files.md](docs/revit-files.md)), and adding **coordination
-  files** (`.smc`), the file a model checker (Solibri) saves with the IFC
+  files** (`.smc`), the file a model checker saves with the IFC
   models of a project put together: each model in it becomes a model here,
   with its elements, properties, storeys, colours and shapes, stored in the
   project as IFC, read by the reader of
   [Open BIM Suite](https://github.com/OpenAEC-Foundation/open-bim-suite)
-  (LGPL-3.0-or-later; see [docs/smc-files.md](docs/smc-files.md)). Both
+  (LGPL-3.0-or-later; see [docs/smc-files.md](docs/smc-files.md)). The
+  other way, *File → Export → Coordination file (.smc)…* writes the models
+  of a project as one coordination file, with their elements, properties,
+  storeys and shapes as triangles. All
   desktop only. A ruleset or check already in a project stays when WIP is
   switched off.
 - Switch models on and off, browse the spatial structure and read the
@@ -426,6 +429,7 @@ opencheck check ARK.ifc VVS.ifc --ruleset information-lod-dk.toml --classificati
 opencheck check ARK.ifc KON.ifc --ids delivery.ids
 opencheck export-ids lod-300.ids --level 300
 opencheck convert project.smc project.opencheck
+opencheck export-smc A.ifc K.ifc --output project.smc   # IFC models as one coordination file (WIP)
 opencheck mcp
 opencheck autorun \\server\share\project\OpenCheck\autorun.json
 ```
@@ -436,7 +440,7 @@ opencheck autorun \\server\share\project\OpenCheck\autorun.json
 |---|---|
 | `opencheck-core` | IFC loading, element and property model, federation, rulesets and the check engine (clashes, clearances, duplicates, free zones, Rhai script rules), visual checks (alignment, pipe and duct systems with their port network, drain fall, storeys, rooms, levels), triage of findings (C402 categories, groups, pre-sorting), information requirements, classification systems and IDS, BCF data and files, project files, autorun runs and the dashboard |
 | `opencheck-rvt` | Revit files (WIP): converts `.rvt` to IFC4 with rvt-rs; the only code that knows rvt-rs |
-| `opencheck-smc` | Coordination files (`.smc`, WIP): the reader of Open BIM Suite and the writing of each model as IFC4; the only code that knows the format. LGPL-3.0-or-later, unlike the rest |
+| `opencheck-smc` | Coordination files (`.smc`, WIP): the reader of Open BIM Suite and the writing of each model as IFC4, and a writer of coordination files from models; the only code that knows the format. LGPL-3.0-or-later, unlike the rest |
 | `opencheck-cli` | The `opencheck` command line tool, including `autorun` and the `mcp` server for Claude Desktop |
 | `opencheck-app` | The application, for the desktop and the browser: federated 3D viewer (egui + wgpu), checking, visual checks, issues, reports, BCF Live, the autorun setup and the Claude connection |
 
@@ -536,7 +540,7 @@ licence and notices are in
 [crates/opencheck-rvt/licenses](crates/opencheck-rvt/licenses). rvt-rs and
 OpenCheck are not affiliated with Autodesk; "Autodesk" and "Revit" are
 trademarks of Autodesk, Inc. Open BIM Suite and OpenCheck are not affiliated
-with Solibri; "Solibri" is a trademark of Solibri Oy.
+with the maker of any model checker.
 The IBM Plex fonts are under the SIL Open Font License
 ([OFL.txt](crates/opencheck-app/assets/fonts/OFL.txt)).
 The list of codes of BIMTypeCode 2022 DK, by [BIM7AA](http://BIM7AA.dk), is

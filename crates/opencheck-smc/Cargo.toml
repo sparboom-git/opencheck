@@ -1,6 +1,6 @@
 [package]
 name = "opencheck-smc"
-description = "Coordination files (.smc) for OpenCheck: reads them with the reader of Open BIM Suite and writes one IFC4 file per model."
+description = "Coordination files (.smc) for OpenCheck: reads them with the reader of Open BIM Suite into one IFC4 file per model, and writes them from models."
 version.workspace = true
 edition.workspace = true
 # Not the workspace licence: the reader (src/stream.rs, src/mesh.rs) is from
@@ -19,7 +19,7 @@ thiserror.workspace = true
 zip.workspace = true
 # Triangulates the faces of the reader's shapes (ISC licence).
 earcutr = "0.5"
-
-[dev-dependencies]
-# The example reads the converted IFC back as OpenCheck does.
+# OpenCheck's models, to write them as a coordination file; the example
+# reads the converted IFC back with it.
 opencheck-core.workspace = true
+

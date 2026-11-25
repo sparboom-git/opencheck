@@ -39,6 +39,12 @@ pub enum JobResult {
         /// A Revit file; else a coordination file.
         revit: bool,
     },
+    /// The models were written as a coordination file.
+    #[cfg(not(target_arch = "wasm32"))]
+    SmcExported {
+        path: PathBuf,
+        result: Result<opencheck_smc::WriteSummary, String>,
+    },
     ProjectOpened {
         path: PathBuf,
         result: Result<Box<ProjectContents>, String>,
@@ -306,6 +312,29 @@ impl Jobs {
                     i == last,
                 );
             }
+        });
+    }
+
+    /// Writes models as one coordination file (WIP). The models are made
+    /// ready on the UI thread, where they live; putting the file together
+    /// and packing it happens here.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn export_smc(
+        &mut self,
+        models: Vec<opencheck_smc::WriteModel>,
+        path: PathBuf,
+        ctx: &egui::Context,
+    ) {
+        let file = file_name(&path);
+        let reporter = self.start(format!("Writing {file}"), ctx);
+        crate::platform::spawn(move || {
+            let result = opencheck_smc::write_smc(&models, &file)
+                .map_err(|e| e.to_string())
+                .and_then(|(bytes, summary)| {
+                    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+                    Ok(summary)
+                });
+            reporter.send(JobResult::SmcExported { path, result }, true);
         });
     }
 

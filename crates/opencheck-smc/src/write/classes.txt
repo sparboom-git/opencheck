@@ -1,0 +1,492 @@
+# The classes of a coordination file (.smc), as files saved by a model checker (version 25.12) have them.
+# ~ stands for the name of the checker's maker, which the class names have.
+# Made by testdata/smc-test/make_class_table.py; do not edit by hand.
+# C  class, serialVersionUID, flags, the class it extends, its fields (type, name, type string)
+# M  IFC class, the class it is written as
+# D  class, field, what the field holds when nothing is known
+C	com.~.sae.~.construction.SModel	-44880968867462232	3	com.~.sae.redox.Model	I updateStrategyOrdinal	I useIfcColors	L applicationName Ljava/lang/String;	L coordinateSystem Lcom/~/sae/geometry/CoordinateSystem;	L customHierarchies Ljava/util/List;	L domain Lcom/~/saf/plugins/modelhandling/BuildingIndustryDomains;	L globalCoordinateSettingSerialized Ljava/lang/String;	L industry Ljava/lang/String;	L infoFavorites Ljava/util/List;	L materialSchema Lcom/~/saf/plugins/modelhandling/material/MaterialSchema;	L scoreId Ljava/util/UUID;	L selectionSets Ljava/util/Collection;	L volume Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.redox.Model	-6098047273744196882	3	com.~.sae.redox.Entity	I lastId	Z savable	I versionOnStream	L classes Ljava/util/Vector;	L externalFiles Ljava/util/Map;	L file Ljava/io/File;	L modelUuid Ljava/util/UUID;	L serializedResource Ljava/lang/String;	L shortName Ljava/lang/String;	L version Lcom/~/sae/util/Version;
+C	com.~.sae.redox.Entity	-6298967354018926767	3	com.~.sae.redox.Item	I id	L children Ljava/util/Vector;	L extensionPropertySupport Lcom/~/sae/redox/PropertySet;	L index Lcom/~/sae/redox/IntegerProperty;	L uuid Ljava/util/UUID;
+C	com.~.sae.redox.Item	6485213638644178662	3	-	L parent Lcom/~/sae/redox/Item;
+C	com.~.sae.redox.PropertySet	5533359766805406131	2	com.~.sae.redox.Property	L propertyList Ljava/util/ArrayList;	L source Ljava/lang/String;
+C	com.~.sae.redox.Property	-460626762998179201	3	com.~.sae.redox.Item	I status	L importedValueType Ljava/lang/String;	L name Ljava/lang/String;	L value Ljava/lang/Object;
+C	java.util.ArrayList	8683452581122892189	3	-	I size
+C	java.util.Vector	-2767605614048989439	3	-	I capacityIncrement	I elementCount	[ elementData [Ljava/lang/Object;
+C	[Ljava.lang.Object;	-8012369246846506644	2	-
+C	com.~.sae.redox.Model$ClassNode	-3266563801620717183	3	-	L clazz Ljava/lang/Class;	L entities Lcom/~/sae/redox/ObjectProperty;
+C	com.~.sae.redox.ObjectProperty	-5831468300275045501	2	com.~.sae.redox.Property
+C	com.~.sae.geometry.CoordinateSystem	-1020113915299487732	2	com.~.sae.redox.Entity	[ matrix [D	L origin Lcom/~/sae/redox/ObjectProperty;
+C	java.util.UUID	-4856846361193249489	2	-	J leastSigBits	J mostSigBits
+C	com.~.sae.redox.StringProperty	2013785285511720728	2	com.~.sae.redox.Property
+C	com.~.sae.~.SOwnerHistory	-1366291419366301622	2	com.~.sae.redox.Entity	L applicationId Ljava/lang/String;
+C	com.~.sae.~.SOrganization	-3571795468634419724	2	com.~.sae.redox.Entity	L description Lcom/~/sae/redox/StringProperty;	L id Lcom/~/sae/redox/StringProperty;	L name Lcom/~/sae/redox/StringProperty;
+C	com.~.sae.redox.DateProperty	-6063377163348822486	2	com.~.sae.redox.Property
+C	java.util.Date	7523967970034938905	3	-
+C	com.~.sae.~.SPerson	-7879805514847093480	2	com.~.sae.redox.Entity	L familyName Lcom/~/sae/redox/StringProperty;	L givenName Lcom/~/sae/redox/StringProperty;	L id Lcom/~/sae/redox/StringProperty;	L postalAddress Lcom/~/sae/~/SAddress;
+C	[Ljava.lang.String;	-5921575005990323385	2	-
+C	com.~.sae.~.construction.SSystemFurnitureElement	-1984122454680378530	2	com.~.sae.~.construction.SElement
+C	com.~.sae.~.construction.SElement	-7748096875550016858	3	com.~.sae.~.construction.SProduct	L manufactureInformation Lcom/~/sae/redox/ObjectProperty;	L material Lcom/~/sae/redox/ObjectProperty;	L volume Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.SProduct	3569205047338433085	3	com.~.sae.~.SEntity	Z federatedFloorPopulated	Z nearestSpacesPopulated	L bimToolId Ljava/lang/String;	L bottomElevation Lcom/~/sae/redox/DoubleProperty;	L topElevation Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.SEntity	9051303109947978016	3	com.~.sae.redox.Entity	J modificationTimeLong	L coordinateSystem Lcom/~/sae/geometry/CoordinateSystem;	L description Lcom/~/sae/redox/StringProperty;	L ifcType Ljava/lang/String;	L label Lcom/~/sae/redox/StringProperty;	L objectType Lcom/~/sae/redox/StringProperty;	L predefinedType Lcom/~/sae/redox/StringProperty;	L type Lcom/~/sae/redox/ObjectProperty;	L uniqueId Ljava/lang/Object;
+C	com.~.sae.geometry.MappedGeometry	4965482702536042252	2	com.~.sae.geometry.GEntity
+C	com.~.sae.geometry.GEntity	2402418937002874351	3	com.~.sae.geometry.CoordinateSystem	J hashValue	I presentationType	I versionOnStream	L importedMaterialInfo Lcom/~/sae/geometry/MaterialInfo;	L material Lcom/~/sae/redox/ObjectProperty;
+C	[D	4514449696888150558	2	-
+C	com.~.sae.geometry.MaterialInfo	4050481231285991478	2	-	F blue	F emission	F green	F red	F transparency
+C	com.~.sae.redox.DoubleProperty	-3549706623080027764	2	com.~.sae.redox.Property	I quantityType
+C	java.lang.Double	-9172774392245257468	2	java.lang.Number	D value
+C	java.lang.Number	-8742448824652078965	2	-
+C	com.~.sae.~.construction.SProject	8624596461074598280	2	com.~.sae.~.construction.SProduct	L longName Lcom/~/sae/redox/StringProperty;	L phase Lcom/~/sae/redox/StringProperty;
+C	com.~.sae.~.construction.structure.SPlate	2237964820161304657	2	com.~.sae.~.construction.SElement	L area Lcom/~/sae/redox/DoubleProperty;	L thickness Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.geometry.BoundaryRepresentation	7120257597710215422	2	com.~.sae.geometry.GEntity	I versionOnStream	[ colors [F	[ contours [I	[ strips [I	[ vertices [F
+C	[F	836686056779680834	2	-
+C	[I	5600894804908749477	2	-
+C	com.~.sae.~.construction.buildingservices.SCoil	3257291339824640309	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice	3618696409432600627	2	com.~.sae.~.construction.buildingservices.SDistributionFlowElement
+C	com.~.sae.~.construction.buildingservices.SDistributionFlowElement	3256722875133014064	2	com.~.sae.~.construction.buildingservices.SDistributionElement
+C	com.~.sae.~.construction.buildingservices.SDistributionElement	3258408435015169585	2	com.~.sae.~.construction.SElement
+C	com.~.sae.~.construction.STransportElement	1276052013108838557	2	com.~.sae.~.construction.SElement	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L height Lcom/~/sae/redox/DoubleProperty;	L operationType Lcom/~/sae/redox/ObjectProperty;
+C	com.~.sae.~.construction.buildingservices.SFlowController	3258135760392959026	2	com.~.sae.~.construction.buildingservices.SDistributionFlowElement
+C	com.~.sae.~.construction.buildingservices.SSpaceHeater	3256728381197661235	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.buildingservices.SDuct	3258129167584080184	2	com.~.sae.~.construction.buildingservices.SFlowSegment
+C	com.~.sae.~.construction.buildingservices.SFlowSegment	3546074778780577845	2	com.~.sae.~.construction.buildingservices.SDistributionFlowElement
+C	com.~.sae.~.construction.buildingservices.SAirToAirHeatRecovery	3546359517949736249	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.buildingservices.SFlowTreatmentDevice	3258415019182862387	2	com.~.sae.~.construction.buildingservices.SDistributionFlowElement
+C	com.~.sae.~.construction.buildingservices.SWasteTerminal	7714828083831057766	2	com.~.sae.~.construction.buildingservices.SFlowTerminal
+C	com.~.sae.~.construction.buildingservices.SFlowTerminal	3257281444237029425	2	com.~.sae.~.construction.buildingservices.SDistributionFlowElement
+C	com.~.sae.~.construction.SSite	2379300591719687967	2	com.~.sae.~.construction.SProduct	L address Lcom/~/sae/redox/ObjectProperty;	L area Lcom/~/sae/redox/DoubleProperty;	L compositionType Lcom/~/sae/redox/StringProperty;	L elevation Lcom/~/sae/redox/DoubleProperty;	L latitude Lcom/~/sae/redox/ObjectProperty;	L longName Lcom/~/sae/redox/StringProperty;	L longitude Lcom/~/sae/redox/ObjectProperty;	L number Lcom/~/sae/redox/StringProperty;	L perimeter Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.buildingservices.SInterceptor	3657845506762262201	2	com.~.sae.~.construction.buildingservices.SFlowTreatmentDevice
+C	com.~.sae.~.construction.buildingservices.SEvaporativeCooler	3258133565614339632	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.SCivilElement	7819070538547177245	2	com.~.sae.~.construction.SElement
+C	com.~.sae.~.construction.SObject	3356692547934401533	2	com.~.sae.~.construction.SElement	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L compositionType Lcom/~/sae/redox/StringProperty;	L depth Lcom/~/sae/redox/DoubleProperty;	L height Lcom/~/sae/redox/DoubleProperty;	L width Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.SDoor	364923510249616361	2	com.~.sae.~.construction.SElement	L area Lcom/~/sae/redox/DoubleProperty;	L frameLength Lcom/~/sae/redox/DoubleProperty;	L hardwareGroup Lcom/~/sae/redox/ObjectProperty;	L height Lcom/~/sae/redox/DoubleProperty;	L operation Lcom/~/sae/redox/ObjectProperty;	L width Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.DoorOperationType	669411466224798685	2	-	I ordinal
+C	com.~.sae.~.construction.buildingservices.SElectricDistributionBoard	1157226664970368188	2	com.~.sae.~.construction.buildingservices.SFlowController
+C	com.~.sae.~.construction.buildingservices.SCompressor	3257289140767699254	2	com.~.sae.~.construction.buildingservices.SFlowMovingDevice
+C	com.~.sae.~.construction.buildingservices.SFlowMovingDevice	3258133565731518516	2	com.~.sae.~.construction.buildingservices.SDistributionFlowElement
+C	com.~.sae.~.construction.SRoof	-7375873081634042200	2	com.~.sae.~.construction.SElement	L angle Lcom/~/sae/redox/DoubleProperty;	L area Lcom/~/sae/redox/DoubleProperty;	L grossArea Lcom/~/sae/redox/DoubleProperty;	L perimeter Lcom/~/sae/redox/DoubleProperty;	L thickness Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.SBuildingStorey	7363153580192644658	2	com.~.sae.~.construction.SProduct	L area Lcom/~/sae/redox/DoubleProperty;	L compositionType Lcom/~/sae/redox/StringProperty;	L height Lcom/~/sae/redox/DoubleProperty;	L longName Lcom/~/sae/redox/StringProperty;	L name Lcom/~/sae/redox/StringProperty;	L number Lcom/~/sae/redox/IntegerProperty;	L volume Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.redox.IntegerProperty	8446630109842466046	2	com.~.sae.redox.Property
+C	java.lang.Integer	1360826667806852920	2	java.lang.Number	I value
+C	com.~.sae.~.construction.buildingservices.SProtectiveDeviceTrippingUnit	6234650731926800695	2	com.~.sae.~.construction.buildingservices.SDistributionControlElement
+C	com.~.sae.~.construction.buildingservices.SDistributionControlElement	5830001745309109829	2	com.~.sae.~.construction.buildingservices.SDistributionElement
+C	com.~.sae.~.construction.buildingservices.SFilter	3257288024042518323	2	com.~.sae.~.construction.buildingservices.SFlowTreatmentDevice
+C	com.~.sae.~.construction.SOpening	-6448466016104923566	2	com.~.sae.~.construction.SElement	L area Lcom/~/sae/redox/DoubleProperty;	L height Lcom/~/sae/redox/DoubleProperty;	L width Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.buildingservices.SCableFitting	4668725942675818419	2	com.~.sae.~.construction.buildingservices.SFlowFitting
+C	com.~.sae.~.construction.buildingservices.SFlowFitting	3257002163938144825	2	com.~.sae.~.construction.buildingservices.SDistributionFlowElement
+C	com.~.sae.~.construction.SSlab	8826294469481353031	2	com.~.sae.~.construction.SElement	L area Lcom/~/sae/redox/DoubleProperty;	L areaOfOpenings Lcom/~/sae/redox/DoubleProperty;	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L grossArea Lcom/~/sae/redox/DoubleProperty;	L perimeter Lcom/~/sae/redox/DoubleProperty;	L perimeterOfOpenings Lcom/~/sae/redox/DoubleProperty;	L perimeterTotal Lcom/~/sae/redox/DoubleProperty;	L thickness Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.buildingservices.SCable	3978707276989544241	2	com.~.sae.~.construction.buildingservices.SFlowSegment
+C	com.~.sae.~.construction.buildingservices.SJunctionBox	3257288011158205494	2	com.~.sae.~.construction.buildingservices.SFlowFitting
+C	com.~.sae.~.construction.buildingservices.SCondenser	3618135662780758070	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.SWall	3704234900238282295	2	com.~.sae.~.construction.SElement	L area Lcom/~/sae/redox/DoubleProperty;	L areaOfDoors Lcom/~/sae/redox/DoubleProperty;	L areaOfOpenings Lcom/~/sae/redox/DoubleProperty;	L areaOfWindows Lcom/~/sae/redox/DoubleProperty;	L baseline Lcom/~/sae/redox/PointListProperty;	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L grossArea Lcom/~/sae/redox/DoubleProperty;	L height Lcom/~/sae/redox/DoubleProperty;	L isExternal Lcom/~/sae/redox/BooleanProperty;	L length Lcom/~/sae/redox/DoubleProperty;	L minArea Lcom/~/sae/redox/DoubleProperty;	L minGrossArea Lcom/~/sae/redox/DoubleProperty;	L minHeight Lcom/~/sae/redox/DoubleProperty;	L minLength Lcom/~/sae/redox/DoubleProperty;	L minThickness Lcom/~/sae/redox/DoubleProperty;	L thickness Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.redox.PointListProperty	2500010844412784223	2	com.~.sae.redox.Property
+C	com.~.sae.redox.BooleanProperty	6576388188074235411	2	com.~.sae.redox.Property
+C	com.~.sae.geometry.Extrusion	6716545339283150236	2	com.~.sae.geometry.GEntity	I versionOnStream	L profile Lcom/~/sae/redox/ProfileProperty;	L route Lcom/~/sae/redox/PointListProperty;
+C	com.~.sae.redox.ProfileProperty	928970410403379160	2	com.~.sae.redox.Property
+C	com.~.sae.geometry.profile.ParametricProfile	128859632629867876	2	com.~.sae.geometry.profile.Profile	[ parameters [Ljava/lang/Number;	L type Lcom/~/sae/geometry/profile/ParametricProfileTypes;
+C	com.~.sae.geometry.profile.Profile	87324294841816760	2	-	L name Ljava/lang/String;	L transform Lcom/~/sae/geometry/TransformationMatrix;
+C	com.~.sae.geometry.TransformationMatrix	5335587040697505862	3	-	S versionOnStream
+C	[Ljava.lang.Number;	-8266771853702261460	2	-
+C	com.~.sae.geometry.profile.ParametricProfileTypes	6162346400287975628	2	-	I ordinal
+C	java.util.Arrays$ArrayList	-2764017481108945198	2	-	[ a [Ljava/lang/Object;
+C	[Lcom.~.sae.geometry.Point;	5974098875757690759	2	-
+C	com.~.sae.geometry.Point	7054947901565227642	2	javax.vecmath.Point3d
+C	javax.vecmath.Point3d	5718062286069042927	2	javax.vecmath.Tuple3d
+C	javax.vecmath.Tuple3d	5542096614926168415	2	-	D x	D y	D z
+C	com.~.sae.~.construction.buildingservices.SUnitaryEquipment	3257567299996562744	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.SCovering	4778368935077854352	2	com.~.sae.~.construction.SElement	L area Lcom/~/sae/redox/DoubleProperty;	L thickness Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.buildingservices.SFlowInstrument	8455516169369144475	2	com.~.sae.~.construction.buildingservices.SDistributionControlElement
+C	com.~.sae.~.construction.buildingservices.SOutlet	3257564005806716208	2	com.~.sae.~.construction.buildingservices.SFlowTerminal
+C	com.~.sae.~.construction.structure.STendonAnchor	-5335532532951442687	2	com.~.sae.~.construction.structure.SReinforcingElement
+C	com.~.sae.~.construction.structure.SReinforcingElement	-7106849555949056504	2	com.~.sae.~.construction.SElement
+C	com.~.sae.~.construction.buildingservices.SMotorConnection	3256444711593063476	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.SCurtainWall	-2394169611128064177	2	com.~.sae.~.construction.SWall
+C	com.~.sae.~.construction.structure.SMechanicalFastener	8877885507976486711	2	com.~.sae.~.construction.structure.SFastener
+C	com.~.sae.~.construction.structure.SFastener	-7898653968239508847	2	com.~.sae.~.construction.SElement
+C	com.~.sae.~.construction.SRamp	-1695975119453412352	2	com.~.sae.~.construction.SElement	L angle Lcom/~/sae/redox/DoubleProperty;	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L height Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.buildingservices.SDuctSilencer	3617009750122771764	2	com.~.sae.~.construction.buildingservices.SFlowTreatmentDevice
+C	com.~.sae.~.construction.buildingservices.SCableCarrierFitting	3762538931560003640	2	com.~.sae.~.construction.buildingservices.SFlowFitting
+C	com.~.sae.~.construction.buildingservices.SElectricAppliance	3976733683614823988	2	com.~.sae.~.construction.buildingservices.SFlowTerminal
+C	com.~.sae.~.construction.buildingservices.STank	3257570598598096177	2	com.~.sae.~.construction.buildingservices.SFlowStorageDevice
+C	com.~.sae.~.construction.buildingservices.SFlowStorageDevice	3545233652435794225	2	com.~.sae.~.construction.buildingservices.SDistributionFlowElement
+C	com.~.sae.~.construction.buildingservices.STransformer	3544957666410379571	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.SShadingDevice	-6779699169123499423	2	com.~.sae.~.construction.SElement
+C	com.~.sae.~.construction.buildingservices.SElectricTimeControl	3832898870987272754	2	com.~.sae.~.construction.buildingservices.SFlowController
+C	com.~.sae.~.construction.buildingservices.SPipeFitting	3833182540742932280	2	com.~.sae.~.construction.buildingservices.SFlowFitting
+C	com.~.sae.~.construction.buildingservices.SBurner	1027370232358881792	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.SBeam	3928738678039434550	2	com.~.sae.~.construction.SElement	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L length Lcom/~/sae/redox/DoubleProperty;	L profHeight Lcom/~/sae/redox/DoubleProperty;	L profWidth Lcom/~/sae/redox/DoubleProperty;	L profileType Lcom/~/sae/redox/ObjectProperty;
+C	com.~.sae.~.construction.buildingservices.SFlowMeter	3834873593854112569	2	com.~.sae.~.construction.buildingservices.SFlowController
+C	com.~.sae.~.construction.buildingservices.SCoolingTower	3977578099921532469	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.buildingservices.SDuctFitting	3617857490616923441	2	com.~.sae.~.construction.buildingservices.SFlowFitting
+C	com.~.sae.~.construction.SSpace	3660240789114863591	2	com.~.sae.~.construction.SSpatialElement	Z nearComponentBackwardRelationPopulated	L doorArea Lcom/~/sae/redox/DoubleProperty;	L doorWidth Lcom/~/sae/redox/DoubleProperty;	L elevationWithFlooring Lcom/~/sae/redox/DoubleProperty;	L interiorSpace Lcom/~/sae/redox/BooleanProperty;	L name Lcom/~/sae/redox/StringProperty;	L openingArea Lcom/~/sae/redox/DoubleProperty;	L spaceGroupType Lcom/~/sae/redox/ObjectProperty;	L spaceNumber Lcom/~/sae/redox/StringProperty;	L windowArea Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.SSpatialElement	4062955312700429825	2	com.~.sae.~.construction.SProduct	L area Lcom/~/sae/redox/DoubleProperty;	L compositionType Lcom/~/sae/redox/StringProperty;	L height Lcom/~/sae/redox/DoubleProperty;	L longName Lcom/~/sae/redox/StringProperty;	L perimeter Lcom/~/sae/redox/DoubleProperty;	L volume Lcom/~/sae/redox/DoubleProperty;
+C	java.lang.Boolean	-3665804199014368530	2	-	Z value
+C	com.~.sae.~.construction.buildingservices.SProtectiveDevice	3978702913252176944	2	com.~.sae.~.construction.buildingservices.SFlowController
+C	com.~.sae.~.construction.SWindow	-6798779258816491075	2	com.~.sae.~.construction.SElement	L area Lcom/~/sae/redox/DoubleProperty;	L frameLength Lcom/~/sae/redox/DoubleProperty;	L hardwareGroup Lcom/~/sae/redox/ObjectProperty;	L height Lcom/~/sae/redox/DoubleProperty;	L partitioningType Lcom/~/sae/redox/StringProperty;	L userDefinedPartitionType Lcom/~/sae/redox/StringProperty;	L width Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.buildingservices.SActuator	1287093066599766908	2	com.~.sae.~.construction.buildingservices.SDistributionControlElement
+C	com.~.sae.~.construction.buildingservices.SHeatExchanger	3832622885045809464	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.buildingservices.SValve	4050759390615385396	2	com.~.sae.~.construction.buildingservices.SFlowController
+C	com.~.sae.~.construction.buildingservices.SAlarm	-4263579470284774449	2	com.~.sae.~.construction.buildingservices.SDistributionControlElement
+C	com.~.sae.~.construction.structure.SMember	-3120436335045585531	2	com.~.sae.~.construction.SElement	L length Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.buildingservices.SUnitaryControlElement	-5770773268140024452	2	com.~.sae.~.construction.buildingservices.SDistributionControlElement
+C	com.~.sae.~.construction.buildingservices.SPipe	3258126942891947831	2	com.~.sae.~.construction.buildingservices.SFlowSegment
+C	com.~.sae.~.construction.SFurniture	-4539774317062997018	2	com.~.sae.~.construction.SElement	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L depth Lcom/~/sae/redox/DoubleProperty;	L height Lcom/~/sae/redox/DoubleProperty;	L width Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.SGeographicElement	7517283592391906906	2	com.~.sae.~.construction.SElement
+C	com.~.sae.~.construction.buildingservices.SFan	3545231453446289720	2	com.~.sae.~.construction.buildingservices.SFlowMovingDevice
+C	com.~.sae.~.construction.buildingservices.SPump	3618417129301620277	2	com.~.sae.~.construction.buildingservices.SFlowMovingDevice
+C	com.~.sae.~.construction.structure.SFooting	-5111137841118560034	2	com.~.sae.~.construction.SElement	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L height Lcom/~/sae/redox/DoubleProperty;	L profHeight Lcom/~/sae/redox/DoubleProperty;	L profWidth Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.SStair	-2297515876719417123	2	com.~.sae.~.construction.SElement	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L depth Lcom/~/sae/redox/DoubleProperty;	L height Lcom/~/sae/redox/DoubleProperty;	L width Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.buildingservices.STubeBundle	3834869200152769328	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.buildingservices.SCableCarrier	3256999964814357815	2	com.~.sae.~.construction.buildingservices.SFlowSegment
+C	com.~.sae.~.construction.structure.SReinforcingMesh	-384255123500218904	2	com.~.sae.~.construction.structure.SReinforcingElement
+C	com.~.sae.~.construction.buildingservices.SFireSuppressionTerminal	1181233170789219084	2	com.~.sae.~.construction.buildingservices.SFlowTerminal
+C	com.~.sae.~.construction.buildingservices.SSolarDevice	3953440650148506513	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.SRailing	3763101847137039922	2	com.~.sae.~.construction.SElement	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L height Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.SColumn	1995320395920583577	2	com.~.sae.~.construction.SElement	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L diameter Lcom/~/sae/redox/DoubleProperty;	L isExternal Lcom/~/sae/redox/BooleanProperty;	L length Lcom/~/sae/redox/DoubleProperty;	L profHeight Lcom/~/sae/redox/DoubleProperty;	L profWidth Lcom/~/sae/redox/DoubleProperty;	L profileType Lcom/~/sae/redox/ObjectProperty;	L sheetThickness Lcom/~/sae/redox/DoubleProperty;	L skinArea Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.SVibrationIsolator	-659515635463213881	2	com.~.sae.~.construction.SElement
+C	com.~.sae.~.construction.buildingservices.SElectricGenerator	3258128072350969907	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.buildingservices.SAirTerminalBox	4049352015664526896	2	com.~.sae.~.construction.buildingservices.SFlowController
+C	com.~.sae.~.construction.buildingservices.SSwitchingDevice	3257846563098211376	2	com.~.sae.~.construction.buildingservices.SFlowController
+C	com.~.sae.~.construction.buildingservices.SHumidifier	3832622889307681332	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.structure.STendon	1720983330536516640	2	com.~.sae.~.construction.structure.SReinforcingElement
+C	com.~.sae.~.construction.buildingservices.SBoiler	4121130333833214259	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.buildingservices.SElectricFlowStorageDevice	4049356435320091953	2	com.~.sae.~.construction.buildingservices.SFlowStorageDevice
+C	com.~.sae.~.construction.buildingservices.SAudioVisualAppliance	-2560982048225137333	2	com.~.sae.~.construction.buildingservices.SFlowTerminal
+C	com.~.sae.~.construction.buildingservices.SSanitaryTerminal	-2301950616199359071	2	com.~.sae.~.construction.buildingservices.SFlowTerminal
+C	com.~.sae.~.construction.SChimney	-2651347632776502041	2	com.~.sae.~.construction.SElement
+C	com.~.sae.~.construction.buildingservices.SElectricMotor	3834030251390350896	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.buildingservices.SStackTerminal	1896963723041357943	2	com.~.sae.~.construction.buildingservices.SFlowTerminal
+C	com.~.sae.~.construction.buildingservices.SEvaporator	3905805270906188850	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.buildingservices.SAirTerminal	7752170400382235120	2	com.~.sae.~.construction.buildingservices.SFlowTerminal
+C	com.~.sae.~.construction.buildingservices.SCommunicationsAppliance	-8861844032995889846	2	com.~.sae.~.construction.buildingservices.SFlowTerminal
+C	com.~.sae.~.construction.structure.SReinforcingBar	-2452929868895138418	2	com.~.sae.~.construction.structure.SReinforcingElement
+C	com.~.sae.~.construction.SDiscreteAccessory	8140847077857231287	2	com.~.sae.~.construction.SElement
+C	com.~.sae.~.construction.SBuilding	-508877943081167827	2	com.~.sae.~.construction.SProduct	L compositionType Lcom/~/sae/redox/StringProperty;	L elevation Lcom/~/sae/redox/DoubleProperty;	L elevationOfTerrain Lcom/~/sae/redox/DoubleProperty;	L fireRating Lcom/~/sae/redox/StringProperty;	L grossArea Lcom/~/sae/redox/DoubleProperty;	L longName Lcom/~/sae/redox/StringProperty;	L volume Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.buildingservices.SEngine	9039103537464735873	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.buildingservices.SSensor	729199011767207840	2	com.~.sae.~.construction.buildingservices.SDistributionControlElement
+C	com.~.sae.~.construction.buildingservices.SChiller	3834309553079792177	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.structure.SPile	-896033572271867632	2	com.~.sae.~.construction.SElement	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L length Lcom/~/sae/redox/DoubleProperty;	L profHeight Lcom/~/sae/redox/DoubleProperty;	L profWidth Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.SBuildingElementPart	55011727878837476	2	com.~.sae.~.construction.SElement
+C	com.~.sae.~.construction.buildingservices.SCooledBeam	3257284725507830838	2	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+C	com.~.sae.~.construction.buildingservices.SLamp	3258126964249670707	2	com.~.sae.~.construction.buildingservices.SFlowTerminal
+C	com.~.sae.~.construction.buildingservices.SMedicalDevice	-5812298766721587072	2	com.~.sae.~.construction.buildingservices.SFlowTerminal
+C	com.~.sae.~.construction.structure.SAssembly	-8005839894691519372	2	com.~.sae.~.construction.SElement
+C	com.~.sae.~.construction.buildingservices.SDamper	3257572788897593655	2	com.~.sae.~.construction.buildingservices.SFlowController
+C	com.~.sae.~.construction.buildingservices.SLightFixture	4050199730590134578	2	com.~.sae.~.construction.buildingservices.SFlowTerminal
+C	com.~.sae.~.construction.buildingservices.SController	6490383254479919145	2	com.~.sae.~.construction.buildingservices.SDistributionControlElement
+C	com.~.sae.~.construction.buildingservices.SDistributionChamberElement	3905805262215656502	2	com.~.sae.~.construction.buildingservices.SDistributionFlowElement
+C	java.util.HashMap	362498820763181265	3	-	F loadFactor	I threshold
+C	com.~.sae.redox.ExternalFile	-6442043711843043015	3	-	J timeStamp	L file Ljava/io/File;	L relativePath Ljava/lang/String;	L role Ljava/lang/String;	L serializedResource Ljava/lang/String;	L uri Ljava/net/URI;	L url Ljava/net/URL;	L version Ljava/lang/String;
+C	java.io.File	301077366599181567	3	-	L path Ljava/lang/String;
+C	com.~.sae.util.Version	3414887466057017761	2	-	I versionNumber	L date Ljava/util/Date;
+C	com.~.saf.plugins.modelhandling.BuildingIndustryDomains	-8818570785351692108	2	-	I index
+C	java.util.CollSer	6309168927139932177	3	-	I tag
+C	com.~.saf.plugins.modelhandling.material.MaterialSchema	4049076046886089270	2	-	L data Ljava/util/Vector;	L file Ljava/io/File;	L name Ljava/lang/String;	L resourceString Ljava/lang/String;
+C	com.~.saf.plugins.modelhandling.material.MaterialSchema$MaterialEntry	3256722875133145653	2	-	L clazz Ljava/lang/Class;	L material Lcom/~/sae/geometry/MaterialInfo;	L type Ljava/lang/String;
+C	com.~.sae.~.construction.SLightFixture	2745141852651444451	2	com.~.sae.~.construction.SElement	L bottomArea Lcom/~/sae/redox/DoubleProperty;	L depth Lcom/~/sae/redox/DoubleProperty;	L height Lcom/~/sae/redox/DoubleProperty;	L width Lcom/~/sae/redox/DoubleProperty;
+C	com.~.saf.plugins.presentationplugin.PresentationsModel	-5442215135963046308	2	com.~.sae.redox.Model	L presentations Ljava/util/List;
+C	com.~.sae.~.SHasGeometry	7696636913918422420	2	com.~.sae.redox.DirectedRelation
+C	com.~.sae.redox.DirectedRelation	9146012886979896680	2	com.~.sae.redox.Relation
+C	com.~.sae.redox.Relation	4984081931510314877	2	com.~.sae.redox.Property
+C	[Lcom.~.sae.redox.Item;	-8497334716703921840	2	-
+C	com.~.sae.~.SContains	-3731813713764913734	2	com.~.sae.~.SDirectedRelation
+C	com.~.sae.~.SDirectedRelation	5798672114988563059	2	com.~.sae.redox.DirectedRelation
+C	com.~.sae.~.SFills	8736240163767528973	2	com.~.sae.~.SDirectedRelation
+C	com.~.sae.~.SVoids	4094768345608135909	2	com.~.sae.~.SDirectedRelation
+C	com.~.sae.redox.Groups	-3506097958942451060	2	com.~.sae.redox.DirectedRelation
+C	com.~.sae.geometry.IsMappedBy	3641143186950668852	2	com.~.sae.redox.DirectedRelation
+C	com.~.sae.~.construction.SWallType	-8894316923926106407	2	com.~.sae.~.SType	L fireRating Lcom/~/sae/redox/StringProperty;	L isExternal Lcom/~/sae/redox/BooleanProperty;
+C	com.~.sae.~.SType	-2696913144749718174	2	com.~.sae.redox.Entity	L code Lcom/~/sae/redox/StringProperty;	L description Lcom/~/sae/redox/StringProperty;	L elementType Lcom/~/sae/redox/StringProperty;	L ifcType Ljava/lang/String;	L material Lcom/~/sae/redox/ObjectProperty;	L predefinedType Lcom/~/sae/redox/StringProperty;	L uniqueId Ljava/lang/Object;
+C	com.~.sae.~.construction.SMaterial	3867156140575661948	2	com.~.sae.redox.Entity	Z isThicknessNull	L category Ljava/lang/String;	L constituentName Ljava/lang/String;	L description Ljava/lang/String;	L fraction Ljava/lang/Double;	L ifcType Ljava/lang/String;	L isVentilated Ljava/lang/Boolean;	L layerSetName Ljava/lang/String;	L name Lcom/~/sae/redox/StringProperty;	L priority Ljava/lang/Integer;	L thickness Lcom/~/sae/redox/DoubleProperty;
+C	com.~.sae.~.construction.buildingservices.SDistributionSystem	5124931799577126292	2	com.~.sae.~.construction.buildingservices.SSystem
+C	com.~.sae.~.construction.buildingservices.SSystem	3257288041289954610	2	com.~.sae.~.construction.SGroup
+C	com.~.sae.~.construction.SGroup	-200083147369666204	2	com.~.sae.~.SEntity
+C	com.~.saf.plugins.classificationplugin.Classification	8557647686687364782	3	com.~.sae.redox.Entity	I classificationMethodOrdinal	I classifiedSortOrder	Z datesAsClassificationNames	Z imported	Z isColorClassification	Z isMultiName	Z locked	Z savable	Z showUnclassified	Z useFirstMatchMethod	Z verified	Z visualizeSpacesFlat	[ classes [Ljava/lang/Class;	L classificationColumns Ljava/util/ArrayList;	L data Ljava/util/Vector;	L defaultData Ljava/util/Vector;	L delimiter Ljava/lang/String;	L description Ljava/lang/String;	[ disciplines [Lcom/~/saf/plugins/modelhandling/BuildingIndustryDomains;	L edition Ljava/lang/String;	L filters Ljava/util/Vector;	L name Ljava/lang/String;	L properties Ljava/util/HashMap;	L references Ljava/util/HashMap;	L source Ljava/lang/String;
+C	[Ljava.lang.Class;	-6118465897992725863	2	-
+C	com.~.saf.plugins.classificationplugin.ComponentClassificationColumn	3892240577562361674	2	com.~.saf.plugins.classificationplugin.ClassificationColumn
+C	com.~.saf.plugins.classificationplugin.ClassificationColumn	1295527075095679284	2	-	L name Ljava/lang/String;
+C	com.~.saf.plugins.classificationplugin.PropertyClassificationColumn	6725545613218420057	2	com.~.saf.plugins.classificationplugin.ClassificationColumn	L propertyRef Lcom/~/saf/plugins/filteringplugin/PropertyReference;
+C	com.~.saf.plugins.filteringplugin.properties.IdentificationPropertyReference	3257009864814637362	2	com.~.saf.plugins.filteringplugin.properties.DiscretePropertyReference	L type Lcom/~/saf/plugins/componentviewerplugin/ui/IdentificationType;
+C	com.~.saf.plugins.filteringplugin.properties.DiscretePropertyReference	-8341594006601532140	2	com.~.saf.plugins.filteringplugin.properties.AbstractPropertyReference
+C	com.~.saf.plugins.filteringplugin.properties.AbstractPropertyReference	7390803986618148091	2	-
+C	com.~.saf.plugins.componentviewerplugin.ui.IdentificationType	3257565105335382072	2	-	I ordinal
+C	[Lcom.~.saf.plugins.modelhandling.BuildingIndustryDomains;	-3544101495883373091	2	-
+C	com.~.saf.plugins.filteringplugin.ClassAndPropertyFilter	-6029753371350969395	3	-	I serializedVersion	L clazz Ljava/lang/Class;	L filterState Lcom/~/saf/plugins/filteringplugin/ClassAndPropertyFilter$FilterState;	L operator Lcom/~/saf/plugins/filteringplugin/OperatorInterface;	L propertyReference Lcom/~/saf/plugins/filteringplugin/PropertyReference;
+C	com.~.saf.plugins.filteringplugin.ClassAndPropertyFilter$FilterState	0	18	java.lang.Enum
+C	java.lang.Enum	0	18	-
+C	com.~.saf.plugins.classificationplugin.ClassificationReference	-627044312340136812	2	com.~.sae.redox.Entity	L classification Lcom/~/saf/plugins/classificationplugin/Classification;	L description Ljava/lang/String;	L material Lcom/~/sae/geometry/MaterialInfo;	L name Ljava/lang/String;	L source Lcom/~/saf/plugins/classificationplugin/ClassificationReference$Source;
+C	com.~.saf.plugins.classificationplugin.ClassificationReference$Source	0	18	java.lang.Enum
+C	com.~.sae.~.SDefinesByType	-7789954660010788058	2	com.~.sae.~.SDirectedRelation
+C	com.~.saf.plugins.classificationplugin.Classifies	2565552732300242028	2	com.~.sae.redox.DirectedRelation
+M	IfcActuator	com.~.sae.~.construction.buildingservices.SActuator
+M	IfcAirTerminal	com.~.sae.~.construction.buildingservices.SAirTerminal
+M	IfcAirTerminalBox	com.~.sae.~.construction.buildingservices.SAirTerminalBox
+M	IfcAirToAirHeatRecovery	com.~.sae.~.construction.buildingservices.SAirToAirHeatRecovery
+M	IfcAlarm	com.~.sae.~.construction.buildingservices.SAlarm
+M	IfcAudioVisualAppliance	com.~.sae.~.construction.buildingservices.SAudioVisualAppliance
+M	IfcBeam	com.~.sae.~.construction.SBeam
+M	IfcBeamStandardCase	com.~.sae.~.construction.SBeam
+M	IfcBoiler	com.~.sae.~.construction.buildingservices.SBoiler
+M	IfcBuilding	com.~.sae.~.construction.SBuilding
+M	IfcBuildingElementPart	com.~.sae.~.construction.SBuildingElementPart
+M	IfcBuildingElementProxy	com.~.sae.~.construction.SObject
+M	IfcBuildingStorey	com.~.sae.~.construction.SBuildingStorey
+M	IfcBurner	com.~.sae.~.construction.buildingservices.SBurner
+M	IfcCableCarrierFitting	com.~.sae.~.construction.buildingservices.SCableCarrierFitting
+M	IfcCableCarrierSegment	com.~.sae.~.construction.buildingservices.SCableCarrier
+M	IfcCableFitting	com.~.sae.~.construction.buildingservices.SCableFitting
+M	IfcCableSegment	com.~.sae.~.construction.buildingservices.SCable
+M	IfcChiller	com.~.sae.~.construction.buildingservices.SChiller
+M	IfcChimney	com.~.sae.~.construction.SChimney
+M	IfcCivilElement	com.~.sae.~.construction.SCivilElement
+M	IfcCoil	com.~.sae.~.construction.buildingservices.SCoil
+M	IfcColumn	com.~.sae.~.construction.SColumn
+M	IfcColumnStandardCase	com.~.sae.~.construction.SColumn
+M	IfcCommunicationsAppliance	com.~.sae.~.construction.buildingservices.SCommunicationsAppliance
+M	IfcCompressor	com.~.sae.~.construction.buildingservices.SCompressor
+M	IfcCondenser	com.~.sae.~.construction.buildingservices.SCondenser
+M	IfcController	com.~.sae.~.construction.buildingservices.SController
+M	IfcCooledBeam	com.~.sae.~.construction.buildingservices.SCooledBeam
+M	IfcCoolingTower	com.~.sae.~.construction.buildingservices.SCoolingTower
+M	IfcCovering	com.~.sae.~.construction.SCovering
+M	IfcCurtainWall	com.~.sae.~.construction.SCurtainWall
+M	IfcDamper	com.~.sae.~.construction.buildingservices.SDamper
+M	IfcDiscreteAccessory	com.~.sae.~.construction.SDiscreteAccessory
+M	IfcDistributionChamberElement	com.~.sae.~.construction.buildingservices.SDistributionChamberElement
+M	IfcDistributionControlElement	com.~.sae.~.construction.buildingservices.SDistributionControlElement
+M	IfcDistributionElement	com.~.sae.~.construction.buildingservices.SDistributionElement
+M	IfcDistributionFlowElement	com.~.sae.~.construction.buildingservices.SDistributionFlowElement
+M	IfcDistributionSystem	com.~.sae.~.construction.buildingservices.SDistributionSystem
+M	IfcDoor	com.~.sae.~.construction.SDoor
+M	IfcDoorStandardCase	com.~.sae.~.construction.SDoor
+M	IfcDuctFitting	com.~.sae.~.construction.buildingservices.SDuctFitting
+M	IfcDuctSegment	com.~.sae.~.construction.buildingservices.SDuct
+M	IfcDuctSilencer	com.~.sae.~.construction.buildingservices.SDuctSilencer
+M	IfcElectricAppliance	com.~.sae.~.construction.buildingservices.SElectricAppliance
+M	IfcElectricDistributionBoard	com.~.sae.~.construction.buildingservices.SElectricDistributionBoard
+M	IfcElectricFlowStorageDevice	com.~.sae.~.construction.buildingservices.SElectricFlowStorageDevice
+M	IfcElectricGenerator	com.~.sae.~.construction.buildingservices.SElectricGenerator
+M	IfcElectricMotor	com.~.sae.~.construction.buildingservices.SElectricMotor
+M	IfcElectricTimeControl	com.~.sae.~.construction.buildingservices.SElectricTimeControl
+M	IfcElementAssembly	com.~.sae.~.construction.structure.SAssembly
+M	IfcEnergyConversionDevice	com.~.sae.~.construction.buildingservices.SEnergyConversionDevice
+M	IfcEngine	com.~.sae.~.construction.buildingservices.SEngine
+M	IfcEvaporativeCooler	com.~.sae.~.construction.buildingservices.SEvaporativeCooler
+M	IfcEvaporator	com.~.sae.~.construction.buildingservices.SEvaporator
+M	IfcFan	com.~.sae.~.construction.buildingservices.SFan
+M	IfcFastener	com.~.sae.~.construction.structure.SFastener
+M	IfcFilter	com.~.sae.~.construction.buildingservices.SFilter
+M	IfcFireSuppressionTerminal	com.~.sae.~.construction.buildingservices.SFireSuppressionTerminal
+M	IfcFlowController	com.~.sae.~.construction.buildingservices.SFlowController
+M	IfcFlowFitting	com.~.sae.~.construction.buildingservices.SFlowFitting
+M	IfcFlowInstrument	com.~.sae.~.construction.buildingservices.SFlowInstrument
+M	IfcFlowMeter	com.~.sae.~.construction.buildingservices.SFlowMeter
+M	IfcFlowMovingDevice	com.~.sae.~.construction.buildingservices.SFlowMovingDevice
+M	IfcFlowSegment	com.~.sae.~.construction.buildingservices.SFlowSegment
+M	IfcFlowStorageDevice	com.~.sae.~.construction.buildingservices.SFlowStorageDevice
+M	IfcFlowTerminal	com.~.sae.~.construction.buildingservices.SFlowTerminal
+M	IfcFlowTreatmentDevice	com.~.sae.~.construction.buildingservices.SFlowTreatmentDevice
+M	IfcFooting	com.~.sae.~.construction.structure.SFooting
+M	IfcFurnishingElement	com.~.sae.~.construction.SFurniture
+M	IfcFurniture	com.~.sae.~.construction.SFurniture
+M	IfcGeographicElement	com.~.sae.~.construction.SGeographicElement
+M	IfcHeatExchanger	com.~.sae.~.construction.buildingservices.SHeatExchanger
+M	IfcHumidifier	com.~.sae.~.construction.buildingservices.SHumidifier
+M	IfcInterceptor	com.~.sae.~.construction.buildingservices.SInterceptor
+M	IfcJunctionBox	com.~.sae.~.construction.buildingservices.SJunctionBox
+M	IfcLamp	com.~.sae.~.construction.buildingservices.SLamp
+M	IfcLightFixture	com.~.sae.~.construction.buildingservices.SLightFixture
+M	IfcMechanicalFastener	com.~.sae.~.construction.structure.SMechanicalFastener
+M	IfcMedicalDevice	com.~.sae.~.construction.buildingservices.SMedicalDevice
+M	IfcMember	com.~.sae.~.construction.structure.SMember
+M	IfcMemberStandardCase	com.~.sae.~.construction.structure.SMember
+M	IfcMotorConnection	com.~.sae.~.construction.buildingservices.SMotorConnection
+M	IfcOpeningElement	com.~.sae.~.construction.SOpening
+M	IfcOutlet	com.~.sae.~.construction.buildingservices.SOutlet
+M	IfcPile	com.~.sae.~.construction.structure.SPile
+M	IfcPipeFitting	com.~.sae.~.construction.buildingservices.SPipeFitting
+M	IfcPipeSegment	com.~.sae.~.construction.buildingservices.SPipe
+M	IfcPlate	com.~.sae.~.construction.structure.SPlate
+M	IfcPlateStandardCase	com.~.sae.~.construction.structure.SPlate
+M	IfcProject	com.~.sae.~.construction.SProject
+M	IfcProtectiveDevice	com.~.sae.~.construction.buildingservices.SProtectiveDevice
+M	IfcProtectiveDeviceTrippingUnit	com.~.sae.~.construction.buildingservices.SProtectiveDeviceTrippingUnit
+M	IfcPump	com.~.sae.~.construction.buildingservices.SPump
+M	IfcRailing	com.~.sae.~.construction.SRailing
+M	IfcRamp	com.~.sae.~.construction.SRamp
+M	IfcRampFlight	com.~.sae.~.construction.SRamp
+M	IfcReinforcingBar	com.~.sae.~.construction.structure.SReinforcingBar
+M	IfcReinforcingMesh	com.~.sae.~.construction.structure.SReinforcingMesh
+M	IfcRoof	com.~.sae.~.construction.SRoof
+M	IfcSanitaryTerminal	com.~.sae.~.construction.buildingservices.SSanitaryTerminal
+M	IfcSensor	com.~.sae.~.construction.buildingservices.SSensor
+M	IfcShadingDevice	com.~.sae.~.construction.SShadingDevice
+M	IfcSite	com.~.sae.~.construction.SSite
+M	IfcSlab	com.~.sae.~.construction.SSlab
+M	IfcSlabElementedCase	com.~.sae.~.construction.SSlab
+M	IfcSlabStandardCase	com.~.sae.~.construction.SSlab
+M	IfcSolarDevice	com.~.sae.~.construction.buildingservices.SSolarDevice
+M	IfcSpace	com.~.sae.~.construction.SSpace
+M	IfcSpaceHeater	com.~.sae.~.construction.buildingservices.SSpaceHeater
+M	IfcStackTerminal	com.~.sae.~.construction.buildingservices.SStackTerminal
+M	IfcStair	com.~.sae.~.construction.SStair
+M	IfcStairFlight	com.~.sae.~.construction.SStair
+M	IfcSwitchingDevice	com.~.sae.~.construction.buildingservices.SSwitchingDevice
+M	IfcSystemFurnitureElement	com.~.sae.~.construction.SSystemFurnitureElement
+M	IfcTank	com.~.sae.~.construction.buildingservices.STank
+M	IfcTendon	com.~.sae.~.construction.structure.STendon
+M	IfcTendonAnchor	com.~.sae.~.construction.structure.STendonAnchor
+M	IfcTransformer	com.~.sae.~.construction.buildingservices.STransformer
+M	IfcTransportElement	com.~.sae.~.construction.STransportElement
+M	IfcTubeBundle	com.~.sae.~.construction.buildingservices.STubeBundle
+M	IfcUnitaryControlElement	com.~.sae.~.construction.buildingservices.SUnitaryControlElement
+M	IfcUnitaryEquipment	com.~.sae.~.construction.buildingservices.SUnitaryEquipment
+M	IfcValve	com.~.sae.~.construction.buildingservices.SValve
+M	IfcVibrationIsolator	com.~.sae.~.construction.SVibrationIsolator
+M	IfcWall	com.~.sae.~.construction.SWall
+M	IfcWallElementedCase	com.~.sae.~.construction.SWall
+M	IfcWallStandardCase	com.~.sae.~.construction.SWall
+M	IfcWasteTerminal	com.~.sae.~.construction.buildingservices.SWasteTerminal
+M	IfcWindow	com.~.sae.~.construction.SWindow
+M	IfcWindowStandardCase	com.~.sae.~.construction.SWindow
+D	com.~.sae.~.construction.SProduct	federatedFloorPopulated	bool false
+D	com.~.sae.~.construction.SProduct	nearestSpacesPopulated	bool false
+D	com.~.sae.~.construction.SProduct	bimToolId	null
+D	com.~.sae.~.construction.SProduct	bottomElevation	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SProduct	topElevation	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SElement	manufactureInformation	null
+D	com.~.sae.~.construction.SElement	material	null
+D	com.~.sae.~.construction.SElement	volume	prop DoubleProperty 1 3 double 0.0
+D	com.~.sae.~.construction.structure.SPlate	area	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.structure.SPlate	thickness	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.STransportElement	bottomArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.STransportElement	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.STransportElement	operationType	prop ObjectProperty 0 null
+D	com.~.sae.~.construction.SSite	address	prop ObjectProperty 4 null
+D	com.~.sae.~.construction.SSite	area	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SSite	compositionType	prop StringProperty 1 text ELEMENT
+D	com.~.sae.~.construction.SSite	elevation	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SSite	latitude	prop ObjectProperty 0 null
+D	com.~.sae.~.construction.SSite	longName	prop StringProperty 4 null
+D	com.~.sae.~.construction.SSite	longitude	prop ObjectProperty 0 null
+D	com.~.sae.~.construction.SSite	number	prop StringProperty 4 null
+D	com.~.sae.~.construction.SSite	perimeter	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SObject	bottomArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SObject	compositionType	prop StringProperty 0 null
+D	com.~.sae.~.construction.SObject	depth	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SObject	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SObject	width	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SDoor	area	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SDoor	frameLength	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SDoor	hardwareGroup	prop ObjectProperty 0 null
+D	com.~.sae.~.construction.SDoor	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SDoor	operation	prop ObjectProperty 1 object com.~.sae.~.construction.DoorOperationType 17
+D	com.~.sae.~.construction.SDoor	width	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SRoof	angle	prop DoubleProperty 1 5 double 0.0
+D	com.~.sae.~.construction.SRoof	area	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SRoof	grossArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SRoof	perimeter	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SRoof	thickness	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SBuildingStorey	area	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SBuildingStorey	compositionType	prop StringProperty 1 text ELEMENT
+D	com.~.sae.~.construction.SBuildingStorey	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SBuildingStorey	longName	prop StringProperty 4 null
+D	com.~.sae.~.construction.SBuildingStorey	name	prop StringProperty 4 null
+D	com.~.sae.~.construction.SBuildingStorey	number	prop IntegerProperty 1 integer 0
+D	com.~.sae.~.construction.SBuildingStorey	volume	prop DoubleProperty 1 3 double 0.0
+D	com.~.sae.~.construction.SOpening	area	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SOpening	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SOpening	width	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SSlab	area	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SSlab	areaOfOpenings	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SSlab	bottomArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SSlab	grossArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SSlab	perimeter	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SSlab	perimeterOfOpenings	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SSlab	perimeterTotal	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SSlab	thickness	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SWall	area	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SWall	areaOfDoors	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SWall	areaOfOpenings	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SWall	areaOfWindows	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SWall	baseline	prop PointListProperty 0 null
+D	com.~.sae.~.construction.SWall	bottomArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SWall	grossArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SWall	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SWall	isExternal	prop BooleanProperty 1 null
+D	com.~.sae.~.construction.SWall	length	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SWall	minArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SWall	minGrossArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SWall	minHeight	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SWall	minLength	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SWall	minThickness	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SWall	thickness	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SCovering	area	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SCovering	thickness	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SRamp	angle	prop DoubleProperty 1 4 double 0.0
+D	com.~.sae.~.construction.SRamp	bottomArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SRamp	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SBeam	bottomArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SBeam	length	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SBeam	profHeight	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SBeam	profWidth	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SBeam	profileType	prop ObjectProperty 0 null
+D	com.~.sae.~.construction.SSpatialElement	area	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SSpatialElement	compositionType	prop StringProperty 1 text ELEMENT
+D	com.~.sae.~.construction.SSpatialElement	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SSpatialElement	longName	prop StringProperty 0 null
+D	com.~.sae.~.construction.SSpatialElement	perimeter	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SSpatialElement	volume	prop DoubleProperty 1 3 double 0.0
+D	com.~.sae.~.construction.SSpace	nearComponentBackwardRelationPopulated	bool false
+D	com.~.sae.~.construction.SSpace	doorArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SSpace	doorWidth	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SSpace	elevationWithFlooring	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SSpace	interiorSpace	prop BooleanProperty 4 boolean true
+D	com.~.sae.~.construction.SSpace	name	prop StringProperty 4 null
+D	com.~.sae.~.construction.SSpace	openingArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SSpace	spaceGroupType	prop ObjectProperty 1 null
+D	com.~.sae.~.construction.SSpace	spaceNumber	prop StringProperty 4 null
+D	com.~.sae.~.construction.SSpace	windowArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SWindow	area	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SWindow	frameLength	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SWindow	hardwareGroup	prop ObjectProperty 0 null
+D	com.~.sae.~.construction.SWindow	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SWindow	partitioningType	prop StringProperty 4 null
+D	com.~.sae.~.construction.SWindow	userDefinedPartitionType	prop StringProperty 4 null
+D	com.~.sae.~.construction.SWindow	width	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.structure.SMember	length	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SFurniture	bottomArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SFurniture	depth	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SFurniture	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SFurniture	width	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.structure.SFooting	bottomArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.structure.SFooting	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.structure.SFooting	profHeight	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.structure.SFooting	profWidth	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SStair	bottomArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SStair	depth	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SStair	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SStair	width	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SRailing	bottomArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SRailing	height	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SColumn	bottomArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SColumn	diameter	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SColumn	isExternal	prop BooleanProperty 1 null
+D	com.~.sae.~.construction.SColumn	length	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SColumn	profHeight	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SColumn	profWidth	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SColumn	profileType	prop ObjectProperty 0 null
+D	com.~.sae.~.construction.SColumn	sheetThickness	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SColumn	skinArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SBuilding	compositionType	prop StringProperty 1 text ELEMENT
+D	com.~.sae.~.construction.SBuilding	elevation	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SBuilding	elevationOfTerrain	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SBuilding	fireRating	prop StringProperty 0 null
+D	com.~.sae.~.construction.SBuilding	grossArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.SBuilding	longName	prop StringProperty 4 null
+D	com.~.sae.~.construction.SBuilding	volume	prop DoubleProperty 1 3 double 0.0
+D	com.~.sae.~.construction.structure.SPile	bottomArea	prop DoubleProperty 1 2 double 0.0
+D	com.~.sae.~.construction.structure.SPile	length	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.structure.SPile	profHeight	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.structure.SPile	profWidth	prop DoubleProperty 1 1 double 0.0
+D	com.~.sae.~.construction.SProject	longName	prop StringProperty 4 null
+D	com.~.sae.~.construction.SProject	phase	prop StringProperty 4 null

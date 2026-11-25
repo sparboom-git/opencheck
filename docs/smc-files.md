@@ -1,7 +1,7 @@
 # Coordination files (.smc, WIP)
 
 OpenCheck can add a coordination file (`.smc`), the file a model checker
-(Solibri) saves with the IFC models of a project put together. Each model in
+saves with the IFC models of a project put together. Each model in
 it becomes a model in OpenCheck, with the elements, properties, storeys,
 colours and shapes the checker kept. This is a feature under development: in
 the app it is offered only when **WIP** is switched on in *File → Settings*,
@@ -21,9 +21,8 @@ that reader (two files, `stream.rs` and `mesh.rs`, from revision
 `opencheck-smc` and adds the writing of each model as IFC. Without that work
 OpenCheck would not read these files.
 
-Open BIM Suite and OpenCheck are not affiliated with Solibri. Solibri is a
-trademark of Solibri Oy (a Nemetschek company); the name says which program
-writes the files.
+Open BIM Suite and OpenCheck are not affiliated with the maker of any model
+checker.
 
 The licence and notice of the reader are in
 [`crates/opencheck-smc/licenses`](../crates/opencheck-smc/licenses), are shown
@@ -109,6 +108,72 @@ a model from its own IFC file with the ↻ button on its card when you have it.
 Name, discipline, colour and the user's picks carry over, since the GlobalIds
 are the same.
 
+## Writing a coordination file (WIP)
+
+OpenCheck can also write a coordination file: the models of a project put
+together as one `.smc` that the checker opens, for projects where the
+federated model has to be delivered in that form. It is made without the
+checker. In the desktop app it is *File → Export → Coordination file
+(.smc)…*, offered while **WIP** is on; on the command line it is `opencheck
+export-smc`. It has been opened in one version of the checker (25.12).
+
+Each model of the project becomes a model in the file, under the name and
+discipline it has in OpenCheck, and with the short name of its discipline
+(`A`, `K`, `V`, a second of the same `V2`). Hidden models are written too.
+The file is put together in the background; a message says when it is
+written. Written per model:
+
+- the project, a site, a building and the storeys with their names and
+  elevations;
+- every element as the checker's class for its IFC class (`IfcWall` as a
+  wall, `IfcPump` as a pump), with GlobalId, name, object type, predefined
+  type, tag and description, on its storey;
+- its property sets, with texts, numbers, whole numbers and yes/no values;
+- its shape as faces of three points in millimetres, with its colour, or a
+  colour per triangle where it has several.
+
+What to be careful about:
+
+- **Shapes are triangles**, the ones OpenCheck works with. The checker's own
+  shapes (a profile pulled along a line, a shape cut from another) are not
+  written, so what the checker measures from them (a wall's thickness, a
+  beam's profile) it has to take from the triangles.
+- **Not written**: type objects, materials, systems, classifications,
+  openings and what fills them, the link to the IFC file a model came from,
+  rulesets, results, issues and presentations. A model cannot be updated in
+  the checker from a new IFC file.
+- **Numbers in property sets** are written as plain numbers, without a unit.
+- **Storeys get new GlobalIds**; the elements keep theirs.
+- **An IFC class the checker has no class of its own for** (in the table, see
+  below) is written as a plain object; the command says which.
+- **Disciplines**: a model is filed under the checker's discipline for
+  OpenCheck's (fire protection as sprinkler, infrastructure as road, since the
+  checker has roads, bridges, railways and ports and no one discipline for
+  them all). A model OpenCheck knows no discipline for is filed as
+  architectural.
+- **Size**: the model data of one file must stay under 4 GB.
+
+Deliver the IFC files with it. The coordination file is a view of them, not a
+replacement.
+
+### How the format was found
+
+A coordination file is the checker's own objects written out by Java's
+serialization, a public format. What the objects hold was read out of files
+the checker saved of OpenCheck's own small test models, and tried by opening
+changed copies in the checker: repacked, with a shape changed, a model taken
+out, an element added. The checker's program was not opened or decompiled,
+and must not be: only files it saved are looked at.
+
+The classes with their version numbers and fields, the class each IFC class
+is written as, and what the fields of a class hold by default are in
+`crates/opencheck-smc/src/write/classes.txt`. That table is drawn out of two
+files saved by the checker (one with an element of every IFC4 element class)
+by `testdata/smc-test/make_class_table.py`; the test files and the tools that
+read them are kept outside the repository. A checker of another version
+reads the file as long as its classes keep their version numbers, which they
+did between 25.9 and 25.12.
+
 ## Command line
 
 ```sh
@@ -119,6 +184,12 @@ opencheck convert project.smc C:\Checks\project.opencheck
 The project has one IFC per model, with its discipline and hash, and no
 rulesets yet; open it in the app or give its models to `opencheck check`.
 
+```sh
+opencheck export-smc A.ifc K.ifc V.ifc --output project.smc
+```
+
+Each IFC file becomes a model of `project.smc`, in the order given.
+
 ## Where the code is
 
 | Where | What |
@@ -126,11 +197,17 @@ rulesets yet; open it in the app or give its models to `opencheck check`.
 | `crates/opencheck-smc/src/stream.rs`, `mesh.rs` | The reader, from Open BIM Suite (each change marked `OpenCheck:`) |
 | `crates/opencheck-smc/src/ifc.rs` | The models as IFC4 files |
 | `crates/opencheck-smc/src/lib.rs` | `convert_file`, the summary, the credit constants |
+| `crates/opencheck-smc/src/write/java.rs` | Java objects written as a stream |
+| `crates/opencheck-smc/src/write/classes.rs`, `classes.txt` | The classes of the format |
+| `crates/opencheck-smc/src/write/build.rs` | The objects of a file, from the models |
+| `crates/opencheck-smc/src/write/mod.rs` | `write_smc` and what it takes |
+| `crates/opencheck-smc/src/write/models.rs` | OpenCheck's models as what `write_smc` takes |
 | `crates/opencheck-smc/licenses` | The licence and notice of the reader |
-| `crates/opencheck-app/src/smc.rs` | The credit in the WIP part of Settings |
+| `crates/opencheck-app/src/smc.rs` | The credit in the WIP part of Settings; *File → Export* as a coordination file |
 | `crates/opencheck-app/src/wip.rs` | The WIP switch, the feature's entry and the conversion window |
-| `crates/opencheck-app/src/jobs.rs` | `load_smc_file`: converts in the background and loads the models |
+| `crates/opencheck-app/src/jobs.rs` | `load_smc_file`: converts in the background and loads the models; `export_smc`: writes one |
 | `crates/opencheck-cli/src/main.rs` | `opencheck convert` |
+| `crates/opencheck-cli/src/export_smc.rs` | `opencheck export-smc` |
 
 To try a file without the app:
 

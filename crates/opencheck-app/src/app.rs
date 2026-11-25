@@ -562,6 +562,8 @@ impl OpenCheckApp {
                 } => {
                     self.wip.converted(message, warnings, revit);
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                JobResult::SmcExported { path, result } => self.smc_exported(&path, result),
                 JobResult::ProjectOpened { path, result } => match result {
                     Ok(contents) => {
                         self.session.path = Some(path);
@@ -1841,6 +1843,34 @@ impl OpenCheckApp {
             ) {
                 self.open_file_dialog(&ctx);
                 ui.close();
+            }
+            // The models put together in a file for another program: under
+            // development, and only where the writer is built in.
+            #[cfg(not(target_arch = "wasm32"))]
+            if self.wip.smc() {
+                ui.menu_button(format!("{}  Export", icon::EXPORT), |ui| {
+                    ui.set_min_width(240.0);
+                    let any = !self.federation.is_empty();
+                    if ui
+                        .add_enabled(
+                            any,
+                            egui::Button::new(format!(
+                                "{}  Coordination file (.smc)…",
+                                icon::FLASK
+                            )),
+                        )
+                        .on_hover_text(
+                            "The models of the project put together as one coordination \
+                             file, with their elements, properties, storeys and shapes as \
+                             triangles. Under development (WIP).",
+                        )
+                        .on_disabled_hover_text("Add a model first")
+                        .clicked()
+                    {
+                        ui.close();
+                        self.export_smc_dialog(&ctx);
+                    }
+                });
             }
             // The level (LOD) the property checks ask for, for the whole
             // project; a model can differ (its menu in the model list).

@@ -444,7 +444,7 @@ impl OpenCheckApp {
         }
     }
 
-    fn export_base_name(&self) -> String {
+    pub(crate) fn export_base_name(&self) -> String {
         let name = if self.issues.report.project.trim().is_empty() {
             self.session
                 .path

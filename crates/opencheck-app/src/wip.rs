@@ -14,7 +14,9 @@
 //!   the card of an information ruleset (`checking_ui`);
 //! - Revit files, converted to IFC with rvt-rs (`opencheck-rvt`);
 //! - coordination files (`.smc`), converted to IFC with the reader of Open
-//!   BIM Suite (`opencheck-smc`).
+//!   BIM Suite (`opencheck-smc`);
+//! - the models of a project written as one coordination file (*File →
+//!   Export*, `smc`).
 //!
 //! The switch decides what is offered, never what a project holds: a ruleset
 //! or check added while WIP was on stays and runs with it off.
@@ -137,6 +139,7 @@ const FEATURES: &[Feature] = &[
     },
     REVIT,
     SMC,
+    SMC_EXPORT,
 ];
 
 const REVIT: Feature = Feature {
@@ -150,13 +153,22 @@ const REVIT: Feature = Feature {
 
 const SMC: Feature = Feature {
     name: "Coordination files (.smc)",
-    what: "Add a coordination file, the file a model checker (Solibri) saves with the IFC \
+    what: "Add a coordination file, the file a model checker saves with the IFC \
            models of a project put together: each model in it becomes a model here, with its \
            elements, properties, storeys, colours and shapes as the checker kept them, and \
            is stored in the project as IFC. Desktop app only. Tried on few files so far: \
            other files may hold objects the reader does not know. The original IFC files \
            are the models to rely on: update a model from its IFC file with the ↻ button \
            when you have it. A window says what was converted.",
+};
+
+const SMC_EXPORT: Feature = Feature {
+    name: "Export as a coordination file (.smc)",
+    what: "File → Export → Coordination file (.smc): the models of the project put together \
+           as one coordination file, for where the federated model has to be delivered in \
+           that form. Each model becomes a model in it, with its elements, properties, \
+           storeys, colours and shapes as triangles. Types, materials, systems and \
+           classifications are not written. Desktop app only. Deliver the IFC files with it.",
 };
 
 /// The WIP part of File → Settings.

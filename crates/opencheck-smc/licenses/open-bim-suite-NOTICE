@@ -31,6 +31,12 @@ crate): the writing of each model as an IFC4 file, which the rest of OpenCheck
 reads as it reads any IFC. The reading of the file's issues (presentations)
 that Open BIM Suite also does is not taken over.
 
+OpenCheck also added the writing of coordination files (src/write, under the
+same licence as this crate). It is OpenCheck's own work and not from
+Open BIM Suite, which has no writer; what it knows of the format beyond what
+the reader shows was read out of files a model checker saved of OpenCheck's
+own test models.
+
 Licence of this crate
 ------------------------------------------------------------------------------
 
@@ -42,10 +48,8 @@ application with your modified version: OpenCheck's complete source code is
 public under those permissive licences, so you can rebuild it with a changed
 opencheck-smc at any time (LGPL-3.0, section 4(d)(0)).
 
-Trademarks
+Affiliation
 ------------------------------------------------------------------------------
 
-Solibri is a trademark of Solibri Oy (a Nemetschek company). Neither
-Open BIM Suite nor OpenCheck is affiliated with, endorsed by or sponsored by
-Solibri or Nemetschek. The name is used only to say which program writes the
-files this reader reads.
+Neither Open BIM Suite nor OpenCheck is affiliated with, endorsed by or
+sponsored by the maker of any model checker.
