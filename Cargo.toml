@@ -13,9 +13,9 @@ rust-version = "1.88"
 opencheck-core = { path = "crates/opencheck-core" }
 
 # IFC parsing and geometry (MPL-2.0). Pinned: the ifc-lite API moves quickly.
-ifc-lite-core = "=20.4.0"
-ifc-lite-processing = "=20.4.0"
-ifc-lite-clash = "=20.4.0"
+ifc-lite-core = "=30.0.0"
+ifc-lite-processing = "=30.0.0"
+ifc-lite-clash = "=30.0.0"
 
 # Revit files (work in progress): rvt-rs by Griffin Long (Apache-2.0) converts
 # .rvt to IFC4. Only opencheck-rvt uses it. Pinned: it releases often. To take

@@ -1229,6 +1229,20 @@ fn read_property(entity: &DecodedEntity) -> Option<Property> {
 
 /// Converts an attribute that may hold a typed value such as `IFCLABEL('x')`.
 fn typed_value(attr: &AttributeValue) -> (PropertyValue, Option<String>) {
+    // ifc-lite 30 parses `IFCLABEL('x')` as a typed value of its own; the
+    // list form below is how older versions gave it.
+    if let AttributeValue::Typed { name, value } = attr {
+        let converted = match (&**name, &**value) {
+            ("IFCBOOLEAN", AttributeValue::Enum(e)) => PropertyValue::Boolean(e == "T"),
+            ("IFCLOGICAL", AttributeValue::Enum(e)) => PropertyValue::Logical(match e.as_str() {
+                "T" => Some(true),
+                "F" => Some(false),
+                _ => None,
+            }),
+            (_, inner) => plain_value(inner),
+        };
+        return (converted, Some(measure_type_name(name)));
+    }
     if let AttributeValue::List(items) = attr
         && let [AttributeValue::String(type_name), inner] = items.as_slice()
         && type_name.starts_with("IFC")
@@ -1261,6 +1275,9 @@ fn plain_value(attr: &AttributeValue) -> PropertyValue {
             PropertyValue::List(items.iter().map(|i| typed_value(i).0).collect())
         }
         AttributeValue::EntityRef(id) => PropertyValue::Text(format!("#{id}")),
+        // a STEP binary literal, kept as its hex text
+        AttributeValue::Binary(hex) => PropertyValue::Text(hex.clone()),
+        AttributeValue::Typed { value, .. } => plain_value(value),
         AttributeValue::Null | AttributeValue::Derived => PropertyValue::Null,
     }
 }
