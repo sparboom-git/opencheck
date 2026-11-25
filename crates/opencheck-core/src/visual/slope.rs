@@ -16,7 +16,10 @@ use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
 use super::network::{self, Medium, Role};
-use super::{Category, ERROR, GOOD, NEUTRAL, Problem, VisualModel, VisualOutcome, WARNING};
+use super::{
+    Category, ERROR, ElementKey, FlowArrow, GOOD, NEUTRAL, Problem, VisualModel, VisualOutcome,
+    WARNING,
+};
 use crate::Discipline;
 use crate::check::Severity;
 
@@ -251,6 +254,9 @@ pub(super) fn run(rule: &SlopeRule, models: &[VisualModel]) -> VisualOutcome {
             value: Some((permille * 10.0).round() / 10.0),
             color,
         };
+        // A pipe that falls at all gets an arrow the way it falls; a flat
+        // one has no way to show.
+        let mut falls = true;
         if directed && permille < -tolerance {
             outcome.problems.push(problem(
                 Severity::Critical,
@@ -258,6 +264,7 @@ pub(super) fn run(rule: &SlopeRule, models: &[VisualModel]) -> VisualOutcome {
                 ERROR,
             ));
         } else if permille.abs() <= tolerance {
+            falls = false;
             outcome.problems.push(problem(
                 Severity::Critical,
                 format!("Flat: {:.1} ‰", permille.abs()),
@@ -271,6 +278,9 @@ pub(super) fn run(rule: &SlopeRule, models: &[VisualModel]) -> VisualOutcome {
             ));
         } else {
             good.push(node.key);
+        }
+        if falls {
+            outcome.arrows.push(fall_arrow(node.key, run.ends));
         }
     }
     outcome
@@ -314,9 +324,38 @@ pub(super) fn run(rule: &SlopeRule, models: &[VisualModel]) -> VisualOutcome {
     outcome
 }
 
+/// The way a pipe falls: an arrow from its higher end to its lower, whatever
+/// way the water should go.
+fn fall_arrow(element: ElementKey, ends: [DVec3; 2]) -> FlowArrow {
+    let (top, bottom) = if ends[0].z >= ends[1].z {
+        (ends[0], ends[1])
+    } else {
+        (ends[1], ends[0])
+    };
+    FlowArrow {
+        element,
+        from: top.to_array(),
+        to: bottom.to_array(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fall_arrow_points_downhill() {
+        let key = ElementKey {
+            model: crate::ModelId(0),
+            express_id: 7,
+        };
+        let high = DVec3::new(0.0, 0.0, 10.5);
+        let low = DVec3::new(4.0, 0.0, 10.4);
+        let arrow = fall_arrow(key, [low, high]);
+        assert_eq!(arrow.from, high.to_array());
+        assert_eq!(arrow.to, low.to_array());
+        assert_eq!(fall_arrow(key, [high, low]).to, low.to_array());
+    }
 
     #[test]
     fn drains_by_words_and_by_hand() {

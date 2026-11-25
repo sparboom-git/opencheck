@@ -166,6 +166,14 @@ Colours: **green** enough fall in the right direction, **yellow** the right
 direction but less than required, **red** flat or the wrong way, **grey**
 stacks and fittings.
 
+**Arrows.** Every pipe that falls at all carries an arrow in the 3D view,
+from its higher end to its lower: the way the water runs in it. On a green
+or yellow pipe the arrow points towards the stack; on a red pipe falling
+the wrong way it points away from it, which is what is wrong. A flat pipe
+has no arrow. The arrows are white with a dark edge, about the same size on
+screen whatever the zoom, left out on pipes too short on screen to carry
+one, and drawn in plan and in the pictures of a documented check too.
+
 ## Storeys
 
 Finds elements that stand on another storey than the one they belong to,

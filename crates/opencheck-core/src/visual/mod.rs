@@ -299,6 +299,19 @@ pub struct VisualOutcome {
     pub table: Vec<Vec<String>>,
     /// Names written on places in plan, e.g. the rooms.
     pub labels: Vec<PlaceLabel>,
+    /// Arrows drawn along elements in the 3D view: the way each drain pipe
+    /// falls.
+    pub arrows: Vec<FlowArrow>,
+}
+
+/// An arrow along an element, drawn over the 3D view: the way a drain pipe
+/// falls, from its higher end to its lower.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlowArrow {
+    pub element: ElementKey,
+    /// Both ends in the shared frame, metres.
+    pub from: [f64; 3],
+    pub to: [f64; 3],
 }
 
 /// A plan view of a storey: cut above its floor, seen from above.

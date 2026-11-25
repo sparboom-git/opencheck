@@ -19,6 +19,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::app::{OpenCheckApp, Tab};
 use crate::checking_ui::{panel_frame, section_title};
+use crate::render::DisplayMode;
 use crate::scene::{ElementRef, PaintRest};
 use crate::theme;
 
@@ -888,6 +889,74 @@ pub fn draw_levels(app: &OpenCheckApp, ui: &egui::Ui, rect: egui::Rect, aspect: 
             painter.galley(label.min + egui::vec2(5.0, 2.0), galley, Color32::WHITE);
         }
     }
+}
+
+/// Length of a fall arrow on screen, points; a pipe shorter than the
+/// minimum on screen gets none, so far-off pipes do not fill the view.
+const ARROW_LENGTH: f32 = 28.0;
+const ARROW_MIN: f32 = 16.0;
+const ARROW_HEAD: f32 = 9.0;
+
+/// The way the drain pipes fall, as arrows over the 3D view: along each pipe
+/// from its higher end to its lower, white with a dark edge so it shows on
+/// a red, yellow or green pipe alike. Drawn while the fall check's result
+/// is shown, in plan too, for every pipe that is drawn.
+pub fn draw_fall_arrows(app: &OpenCheckApp, ui: &egui::Ui, rect: egui::Rect, aspect: f32) {
+    let state = &app.visual;
+    let Some(result) = state.shown() else {
+        return;
+    };
+    if result.outcome.arrows.is_empty() || !(app.tab == Tab::Visual || state.keep) {
+        return;
+    }
+    let painter = ui.painter_at(rect);
+    for arrow in &result.outcome.arrows {
+        if app.view.display_mode(element_ref(&arrow.element)) == DisplayMode::Hidden {
+            continue;
+        }
+        let from = glam::Vec3::from(arrow.from.map(|v| v as f32));
+        let to = glam::Vec3::from(arrow.to.map(|v| v as f32));
+        if !app.view.is_visible_point((from + to) / 2.0) {
+            continue;
+        }
+        let (Some(a), Some(b)) = (
+            crate::viewport::project(app, rect, aspect, from),
+            crate::viewport::project(app, rect, aspect, to),
+        ) else {
+            continue;
+        };
+        let Some(shape) = arrow_shape(a, b) else {
+            continue;
+        };
+        if !rect.contains(shape[0].0) && !rect.contains(shape[0].1) {
+            continue;
+        }
+        for width_color in [(5.0, Color32::from_black_alpha(170)), (2.5, Color32::WHITE)] {
+            for (p, q) in shape {
+                painter.line_segment([p, q], egui::Stroke::new(width_color.0, width_color.1));
+            }
+        }
+    }
+}
+
+/// An arrow on screen along the line from `a` to `b`, centred on it: its
+/// shaft and the two strokes of its head, pointing at `b`. None when the
+/// line is too short to carry one.
+fn arrow_shape(a: egui::Pos2, b: egui::Pos2) -> Option<[(egui::Pos2, egui::Pos2); 3]> {
+    let v = b - a;
+    let len = v.length();
+    if len < ARROW_MIN {
+        return None;
+    }
+    let dir = v / len;
+    let shaft = (len * 0.6).min(ARROW_LENGTH);
+    let mid = a + v * 0.5;
+    let tail = mid - dir * (shaft / 2.0);
+    let head = mid + dir * (shaft / 2.0);
+    let side = egui::vec2(-dir.y, dir.x);
+    let left = head - dir * ARROW_HEAD + side * (ARROW_HEAD * 0.6);
+    let right = head - dir * ARROW_HEAD - side * (ARROW_HEAD * 0.6);
+    Some([(tail, head), (head, left), (head, right)])
 }
 
 /// The plan shown, while the view still is that plan: its section in place
