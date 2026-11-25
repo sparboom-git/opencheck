@@ -566,6 +566,23 @@ mod tests {
         assert_eq!(holds(&stream, "VE01"), 1);
     }
 
+    /// A shape stands once in the file: as its faces, and not once more as
+    /// triangles to draw from.
+    #[test]
+    fn the_points_of_a_shape_are_written_once() {
+        let mut models = two_models();
+        // a height no other number of the test has
+        let shape = box_shape([0.0, 0.0, 0.0], [1.0, 1.0, 4.321], [0.5, 0.5, 0.5, 1.0]);
+        models[1].elements[0].shape = Some(shape);
+        let (bytes, _) = write_smc(&models, "Testhus.smc").unwrap();
+        let stream = stream_of(bytes);
+        let needle = 4321.0f32.to_be_bytes();
+        let times = stream.windows(4).filter(|w| *w == needle).count();
+        // the four upper corners of the box: twice each in the top, and once
+        // or twice in each of the four sides, as corners of triangles
+        assert_eq!(times, 6 + 4 * 3);
+    }
+
     #[test]
     fn nothing_to_write_is_an_error() {
         assert!(matches!(write_smc(&[], "x.smc"), Err(WriteError::NoModels)));

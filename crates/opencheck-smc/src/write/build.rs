@@ -1064,8 +1064,12 @@ impl Builder {
     }
 
     /// The shape of an element as faces of three points, in millimetres from
-    /// the element's own frame, with the triangles and their normals the
-    /// checker draws from.
+    /// the element's own frame.
+    ///
+    /// The checker's own files hold every shape a second time, as the
+    /// triangles it draws with their normals and colours. That copy is left
+    /// empty here: the checker works it out from the faces when it opens the
+    /// file, and without it a file is less than half the size.
     fn faces(
         &mut self,
         nodes: &mut Nodes,
@@ -1075,7 +1079,6 @@ impl Builder {
         corner: [f64; 3],
     ) -> Id {
         let mut points = Vec::with_capacity(shape.triangles.len() * 9);
-        let mut normals = Vec::with_capacity(shape.triangles.len() * 9);
         let mut faces = 0;
         // a colour per corner, when the shape has more than one
         let several = shape.triangle_colors.len() == shape.triangles.len()
@@ -1097,19 +1100,8 @@ impl Builder {
             if !whole {
                 continue;
             }
-            let (u, v) = (sub(p[1], p[0]), sub(p[2], p[0]));
-            let mut n = [
-                u[1] * v[2] - u[2] * v[1],
-                u[2] * v[0] - u[0] * v[2],
-                u[0] * v[1] - u[1] * v[0],
-            ];
-            let length = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
-            if length > 0.0 {
-                n = [n[0] / length, n[1] / length, n[2] / length];
-            }
             for corner in p {
                 points.extend(corner.iter().map(|c| *c as f32));
-                normals.extend(n.iter().map(|c| *c as f32));
                 if several {
                     colours.extend(shape.triangle_colors[t].map(|c| c.clamp(0.0, 1.0)));
                 }
@@ -1149,18 +1141,15 @@ impl Builder {
 
         let floats = self.class_named("[F");
         let ints = self.class_named("[I");
-        let count = (points.len() as i32).to_be_bytes().to_vec();
-        self.g.extra(id, "GEntity", Val::Block(count));
-        let triangles = self.g.floats(floats, points.clone());
-        self.g.extra(id, "GEntity", triangles);
-        let normals = self.g.floats(floats, normals);
-        self.g.extra(id, "GEntity", normals);
-        // the colours of the triangles' corners, when there are several
-        let count = (colours.len() as i32).to_be_bytes().to_vec();
-        self.g.extra(id, "GEntity", Val::Block(count));
+        // the copy to draw from: no triangles, no normals, no colours
+        self.g.extra(id, "GEntity", Val::Block(vec![0, 0, 0, 0]));
+        let none = self.g.floats(floats, Vec::new());
+        self.g.extra(id, "GEntity", none);
+        let none = self.g.floats(floats, Vec::new());
+        self.g.extra(id, "GEntity", none);
+        self.g.extra(id, "GEntity", Val::Block(vec![0, 0, 0, 0]));
+        // a colour for each corner of each face, when there are several
         if several {
-            let array = self.g.floats(floats, colours.clone());
-            self.g.extra(id, "GEntity", array);
             let array = self.g.floats(floats, colours);
             self.g.set(id, "BoundaryRepresentation", "colors", array);
         }
@@ -1179,10 +1168,6 @@ impl Builder {
         nodes.add(class, id);
         id
     }
-}
-
-fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
 /// A matrix that moves and does not turn: row by row, the move in the fourth column.

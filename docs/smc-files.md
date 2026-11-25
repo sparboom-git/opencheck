@@ -144,6 +144,14 @@ What to be careful about:
   shapes (a profile pulled along a line, a shape cut from another) are not
   written, so what the checker measures from them (a wall's thickness, a
   beam's profile) it has to take from the triangles.
+- **The file is larger than one the checker saves of the same IFC files.**
+  The checker keeps a wall as a profile and a length and lets equal elements
+  share one shape; OpenCheck has only the triangles, and writes each element's
+  own. A shape is written once, as its faces: the copy of triangles and
+  normals the checker draws from is left empty, and the checker works it out
+  when it opens the file. That keeps a file at less than half of what it would
+  be, and for one project of four models at 110 MB against the checker's own
+  80 MB.
 - **Types, materials and systems are written by name**, which is what
   OpenCheck keeps of them: a type has no properties and no GlobalId of its
   own (it gets a new one), a material no layers, thicknesses or category,
