@@ -56,6 +56,8 @@ pub enum PropValue {
 pub struct Table {
     /// IFC class -> the class it is written as.
     pub written_as: HashMap<String, String>,
+    /// IFC type class -> the class its type is written as.
+    pub type_written_as: HashMap<String, String>,
     /// Class -> its fields with what they hold by default, in the table's order.
     pub defaults: HashMap<String, Vec<(String, Shape)>>,
 }
@@ -66,6 +68,7 @@ pub fn load(graph: &mut Graph) -> Table {
     let mut order = Vec::new();
     let mut table = Table {
         written_as: HashMap::new(),
+        type_written_as: HashMap::new(),
         defaults: HashMap::new(),
     };
     let text = full(TABLE);
@@ -79,6 +82,11 @@ pub fn load(graph: &mut Graph) -> Table {
             "M" => {
                 table
                     .written_as
+                    .insert(cols[1].to_string(), cols[2].to_string());
+            }
+            "T" => {
+                table
+                    .type_written_as
                     .insert(cols[1].to_string(), cols[2].to_string());
             }
             "D" => table

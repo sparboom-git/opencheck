@@ -43,7 +43,7 @@ pub fn export_smc(files: &[PathBuf], output: &Path) -> Result<()> {
         );
     }
     println!(
-        "  Shapes are triangles. Not written: types, materials, systems, classifications and the link to the IFC files."
+        "  Shapes are triangles. Types, materials, systems and classification codes are written by name. Not written: the link to the IFC files."
     );
     Ok(())
 }

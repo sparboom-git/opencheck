@@ -78,7 +78,8 @@ slower, and the page waits while a model loads or a check runs.
   (LGPL-3.0-or-later; see [docs/smc-files.md](docs/smc-files.md)). The
   other way, *File → Export → Coordination file (.smc)…* writes the models
   of a project as one coordination file, with their elements, properties,
-  storeys and shapes as triangles. All
+  storeys, types, materials, systems, classification codes and shapes as
+  triangles. All
   desktop only. A ruleset or check already in a project stays when WIP is
   switched off.
 - Switch models on and off, browse the spatial structure and read the

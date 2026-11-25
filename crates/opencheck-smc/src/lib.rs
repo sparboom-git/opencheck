@@ -30,8 +30,8 @@ pub mod stream;
 pub mod write;
 
 pub use write::{
-    WriteDiscipline, WriteElement, WriteError, WriteModel, WriteProperty, WritePropertySet,
-    WriteShape, WriteStorey, WriteSummary, WriteValue, write_smc,
+    WriteClassification, WriteDiscipline, WriteElement, WriteError, WriteModel, WriteProperty,
+    WritePropertySet, WriteShape, WriteStorey, WriteSummary, WriteValue, write_smc,
 };
 
 /// Where the reader comes from.

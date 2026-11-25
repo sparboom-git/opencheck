@@ -4,6 +4,7 @@
 # C  class, serialVersionUID, flags, the class it extends, its fields (type, name, type string)
 # M  IFC class, the class it is written as
 # D  class, field, what the field holds when nothing is known
+# T  IFC type class, the class its type is written as
 C	com.~.sae.~.construction.SModel	-44880968867462232	3	com.~.sae.redox.Model	I updateStrategyOrdinal	I useIfcColors	L applicationName Ljava/lang/String;	L coordinateSystem Lcom/~/sae/geometry/CoordinateSystem;	L customHierarchies Ljava/util/List;	L domain Lcom/~/saf/plugins/modelhandling/BuildingIndustryDomains;	L globalCoordinateSettingSerialized Ljava/lang/String;	L industry Ljava/lang/String;	L infoFavorites Ljava/util/List;	L materialSchema Lcom/~/saf/plugins/modelhandling/material/MaterialSchema;	L scoreId Ljava/util/UUID;	L selectionSets Ljava/util/Collection;	L volume Lcom/~/sae/redox/DoubleProperty;
 C	com.~.sae.redox.Model	-6098047273744196882	3	com.~.sae.redox.Entity	I lastId	Z savable	I versionOnStream	L classes Ljava/util/Vector;	L externalFiles Ljava/util/Map;	L file Ljava/io/File;	L modelUuid Ljava/util/UUID;	L serializedResource Ljava/lang/String;	L shortName Ljava/lang/String;	L version Lcom/~/sae/util/Version;
 C	com.~.sae.redox.Entity	-6298967354018926767	3	com.~.sae.redox.Item	I id	L children Ljava/util/Vector;	L extensionPropertySupport Lcom/~/sae/redox/PropertySet;	L index Lcom/~/sae/redox/IntegerProperty;	L uuid Ljava/util/UUID;
@@ -217,6 +218,19 @@ C	com.~.saf.plugins.classificationplugin.ClassificationReference	-62704431234013
 C	com.~.saf.plugins.classificationplugin.ClassificationReference$Source	0	18	java.lang.Enum
 C	com.~.sae.~.SDefinesByType	-7789954660010788058	2	com.~.sae.~.SDirectedRelation
 C	com.~.saf.plugins.classificationplugin.Classifies	2565552732300242028	2	com.~.sae.redox.DirectedRelation
+C	com.~.sae.~.construction.SObjectType	-8076221652637190607	2	com.~.sae.~.SType
+C	com.~.sae.~.construction.SZone	-2556338876811442502	2	com.~.sae.~.construction.SGroup	L longName Lcom/~/sae/redox/StringProperty;
+C	com.~.sae.~.construction.SStairType	4497742631782537108	2	com.~.sae.~.SType
+C	com.~.sae.~.construction.SSlabType	130249498823655382	2	com.~.sae.~.SType	L fireRating Lcom/~/sae/redox/StringProperty;
+C	com.~.sae.~.construction.SRoofType	6837206161101664075	2	com.~.sae.~.SType	L fireRating Lcom/~/sae/redox/StringProperty;
+C	com.~.sae.~.construction.SCoveringType	-9129317073454324654	2	com.~.sae.~.SType
+C	com.~.sae.~.construction.SDoorType	6506709243024989655	2	com.~.sae.~.SType	L fireRating Lcom/~/sae/redox/StringProperty;	L isExternal Lcom/~/sae/redox/BooleanProperty;
+C	com.~.sae.~.construction.SBeamType	-4155657377752588428	2	com.~.sae.~.SType
+C	com.~.sae.~.construction.SFurnitureType	7243539457762080794	2	com.~.sae.~.SType
+C	com.~.sae.~.construction.SColumnType	5616208888722442129	2	com.~.sae.~.SType
+C	com.~.sae.~.construction.SLightFixtureType	3415939196517148694	2	com.~.sae.~.SType
+C	com.~.sae.~.construction.SRailingType	-8637081711167641371	2	com.~.sae.~.SType
+C	com.~.sae.~.construction.SWindowType	3853238758835230939	2	com.~.sae.~.SType	L partitioningType Lcom/~/sae/redox/StringProperty;	L userDefinedPartitioningType Lcom/~/sae/redox/StringProperty;
 M	IfcActuator	com.~.sae.~.construction.buildingservices.SActuator
 M	IfcAirTerminal	com.~.sae.~.construction.buildingservices.SAirTerminal
 M	IfcAirTerminalBox	com.~.sae.~.construction.buildingservices.SAirTerminalBox
@@ -289,6 +303,7 @@ M	IfcFooting	com.~.sae.~.construction.structure.SFooting
 M	IfcFurnishingElement	com.~.sae.~.construction.SFurniture
 M	IfcFurniture	com.~.sae.~.construction.SFurniture
 M	IfcGeographicElement	com.~.sae.~.construction.SGeographicElement
+M	IfcGroup	com.~.sae.~.construction.SGroup
 M	IfcHeatExchanger	com.~.sae.~.construction.buildingservices.SHeatExchanger
 M	IfcHumidifier	com.~.sae.~.construction.buildingservices.SHumidifier
 M	IfcInterceptor	com.~.sae.~.construction.buildingservices.SInterceptor
@@ -331,6 +346,7 @@ M	IfcStackTerminal	com.~.sae.~.construction.buildingservices.SStackTerminal
 M	IfcStair	com.~.sae.~.construction.SStair
 M	IfcStairFlight	com.~.sae.~.construction.SStair
 M	IfcSwitchingDevice	com.~.sae.~.construction.buildingservices.SSwitchingDevice
+M	IfcSystem	com.~.sae.~.construction.buildingservices.SSystem
 M	IfcSystemFurnitureElement	com.~.sae.~.construction.SSystemFurnitureElement
 M	IfcTank	com.~.sae.~.construction.buildingservices.STank
 M	IfcTendon	com.~.sae.~.construction.structure.STendon
@@ -348,6 +364,111 @@ M	IfcWallStandardCase	com.~.sae.~.construction.SWall
 M	IfcWasteTerminal	com.~.sae.~.construction.buildingservices.SWasteTerminal
 M	IfcWindow	com.~.sae.~.construction.SWindow
 M	IfcWindowStandardCase	com.~.sae.~.construction.SWindow
+M	IfcZone	com.~.sae.~.construction.SZone
+T	IfcActuatorType	com.~.sae.~.SType
+T	IfcAirTerminalBoxType	com.~.sae.~.SType
+T	IfcAirTerminalType	com.~.sae.~.SType
+T	IfcAirToAirHeatRecoveryType	com.~.sae.~.SType
+T	IfcAlarmType	com.~.sae.~.SType
+T	IfcAudioVisualApplianceType	com.~.sae.~.SType
+T	IfcBeamType	com.~.sae.~.construction.SBeamType
+T	IfcBoilerType	com.~.sae.~.SType
+T	IfcBuildingElementPartType	com.~.sae.~.SType
+T	IfcBuildingElementProxyType	com.~.sae.~.construction.SObjectType
+T	IfcBurnerType	com.~.sae.~.SType
+T	IfcCableCarrierFittingType	com.~.sae.~.SType
+T	IfcCableCarrierSegmentType	com.~.sae.~.SType
+T	IfcCableFittingType	com.~.sae.~.SType
+T	IfcCableSegmentType	com.~.sae.~.SType
+T	IfcChillerType	com.~.sae.~.SType
+T	IfcChimneyType	com.~.sae.~.SType
+T	IfcCivilElementType	com.~.sae.~.SType
+T	IfcCoilType	com.~.sae.~.SType
+T	IfcColumnType	com.~.sae.~.construction.SColumnType
+T	IfcCommunicationsApplianceType	com.~.sae.~.SType
+T	IfcCompressorType	com.~.sae.~.SType
+T	IfcCondenserType	com.~.sae.~.SType
+T	IfcControllerType	com.~.sae.~.SType
+T	IfcCooledBeamType	com.~.sae.~.SType
+T	IfcCoolingTowerType	com.~.sae.~.SType
+T	IfcCoveringType	com.~.sae.~.construction.SCoveringType
+T	IfcCurtainWallType	com.~.sae.~.construction.SWallType
+T	IfcDamperType	com.~.sae.~.SType
+T	IfcDiscreteAccessoryType	com.~.sae.~.SType
+T	IfcDistributionChamberElementType	com.~.sae.~.SType
+T	IfcDistributionElementType	com.~.sae.~.SType
+T	IfcDoorType	com.~.sae.~.construction.SDoorType
+T	IfcDuctFittingType	com.~.sae.~.SType
+T	IfcDuctSegmentType	com.~.sae.~.SType
+T	IfcDuctSilencerType	com.~.sae.~.SType
+T	IfcElectricApplianceType	com.~.sae.~.SType
+T	IfcElectricDistributionBoardType	com.~.sae.~.SType
+T	IfcElectricFlowStorageDeviceType	com.~.sae.~.SType
+T	IfcElectricGeneratorType	com.~.sae.~.SType
+T	IfcElectricMotorType	com.~.sae.~.SType
+T	IfcElectricTimeControlType	com.~.sae.~.SType
+T	IfcElementAssemblyType	com.~.sae.~.SType
+T	IfcEngineType	com.~.sae.~.SType
+T	IfcEvaporativeCoolerType	com.~.sae.~.SType
+T	IfcEvaporatorType	com.~.sae.~.SType
+T	IfcFanType	com.~.sae.~.SType
+T	IfcFastenerType	com.~.sae.~.SType
+T	IfcFilterType	com.~.sae.~.SType
+T	IfcFireSuppressionTerminalType	com.~.sae.~.SType
+T	IfcFlowInstrumentType	com.~.sae.~.SType
+T	IfcFlowMeterType	com.~.sae.~.SType
+T	IfcFootingType	com.~.sae.~.SType
+T	IfcFurnishingElementType	com.~.sae.~.construction.SFurnitureType
+T	IfcFurnitureType	com.~.sae.~.construction.SFurnitureType
+T	IfcGeographicElementType	com.~.sae.~.SType
+T	IfcHeatExchangerType	com.~.sae.~.SType
+T	IfcHumidifierType	com.~.sae.~.SType
+T	IfcInterceptorType	com.~.sae.~.SType
+T	IfcJunctionBoxType	com.~.sae.~.SType
+T	IfcLampType	com.~.sae.~.SType
+T	IfcLightFixtureType	com.~.sae.~.construction.SLightFixtureType
+T	IfcMechanicalFastenerType	com.~.sae.~.SType
+T	IfcMedicalDeviceType	com.~.sae.~.SType
+T	IfcMemberType	com.~.sae.~.SType
+T	IfcMotorConnectionType	com.~.sae.~.SType
+T	IfcOutletType	com.~.sae.~.SType
+T	IfcPileType	com.~.sae.~.SType
+T	IfcPipeFittingType	com.~.sae.~.SType
+T	IfcPipeSegmentType	com.~.sae.~.SType
+T	IfcPlateType	com.~.sae.~.SType
+T	IfcProtectiveDeviceTrippingUnitType	com.~.sae.~.SType
+T	IfcProtectiveDeviceType	com.~.sae.~.SType
+T	IfcPumpType	com.~.sae.~.SType
+T	IfcRailingType	com.~.sae.~.construction.SRailingType
+T	IfcRampFlightType	com.~.sae.~.SType
+T	IfcRampType	com.~.sae.~.SType
+T	IfcReinforcingBarType	com.~.sae.~.SType
+T	IfcReinforcingMeshType	com.~.sae.~.SType
+T	IfcRoofType	com.~.sae.~.construction.SRoofType
+T	IfcSanitaryTerminalType	com.~.sae.~.SType
+T	IfcSensorType	com.~.sae.~.SType
+T	IfcShadingDeviceType	com.~.sae.~.SType
+T	IfcSlabType	com.~.sae.~.construction.SSlabType
+T	IfcSolarDeviceType	com.~.sae.~.SType
+T	IfcSpaceHeaterType	com.~.sae.~.SType
+T	IfcStackTerminalType	com.~.sae.~.SType
+T	IfcStairFlightType	com.~.sae.~.construction.SStairType
+T	IfcStairType	com.~.sae.~.construction.SStairType
+T	IfcSwitchingDeviceType	com.~.sae.~.SType
+T	IfcSystemFurnitureElementType	com.~.sae.~.SType
+T	IfcTankType	com.~.sae.~.SType
+T	IfcTendonAnchorType	com.~.sae.~.SType
+T	IfcTendonType	com.~.sae.~.SType
+T	IfcTransformerType	com.~.sae.~.SType
+T	IfcTransportElementType	com.~.sae.~.SType
+T	IfcTubeBundleType	com.~.sae.~.SType
+T	IfcUnitaryControlElementType	com.~.sae.~.SType
+T	IfcUnitaryEquipmentType	com.~.sae.~.SType
+T	IfcValveType	com.~.sae.~.SType
+T	IfcVibrationIsolatorType	com.~.sae.~.SType
+T	IfcWallType	com.~.sae.~.construction.SWallType
+T	IfcWasteTerminalType	com.~.sae.~.SType
+T	IfcWindowType	com.~.sae.~.construction.SWindowType
 D	com.~.sae.~.construction.SProduct	federatedFloorPopulated	bool false
 D	com.~.sae.~.construction.SProduct	nearestSpacesPopulated	bool false
 D	com.~.sae.~.construction.SProduct	bimToolId	null
@@ -490,3 +611,12 @@ D	com.~.sae.~.construction.structure.SPile	profHeight	prop DoubleProperty 1 1 do
 D	com.~.sae.~.construction.structure.SPile	profWidth	prop DoubleProperty 1 1 double 0.0
 D	com.~.sae.~.construction.SProject	longName	prop StringProperty 4 null
 D	com.~.sae.~.construction.SProject	phase	prop StringProperty 4 null
+D	com.~.sae.~.construction.SWallType	fireRating	prop StringProperty 0 null
+D	com.~.sae.~.construction.SWallType	isExternal	prop BooleanProperty 1 boolean false
+D	com.~.sae.~.construction.SSlabType	fireRating	prop StringProperty 0 null
+D	com.~.sae.~.construction.SRoofType	fireRating	prop StringProperty 0 null
+D	com.~.sae.~.construction.SDoorType	fireRating	prop StringProperty 0 null
+D	com.~.sae.~.construction.SDoorType	isExternal	prop BooleanProperty 1 boolean false
+D	com.~.sae.~.construction.SWindowType	partitioningType	prop StringProperty 4 null
+D	com.~.sae.~.construction.SWindowType	userDefinedPartitioningType	prop StringProperty 4 null
+D	com.~.sae.~.construction.SZone	longName	prop StringProperty 4 null

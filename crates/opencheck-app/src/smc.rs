@@ -62,8 +62,8 @@ impl OpenCheckApp {
             Ok(summary) => {
                 self.notify(format!(
                     "{file} written: {} model{}, {} elements, {} with a shape. Shapes are \
-                     triangles; types, materials, systems and classifications are not \
-                     written (WIP).",
+                     triangles; types, materials, systems and classification codes are \
+                     written by name (WIP).",
                     summary.models,
                     if summary.models == 1 { "" } else { "s" },
                     summary.elements,

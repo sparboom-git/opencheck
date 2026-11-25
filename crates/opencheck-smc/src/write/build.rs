@@ -6,6 +6,9 @@
 //! holds elements, an element has a shape) stand in one list at the root.
 //! Lengths are millimetres. An element is placed by a chain of frames: its
 //! own, its storey's, the building's, the site's and the model's.
+//!
+//! A type, a material and a system belong to their model; a classification
+//! system with its codes belongs to the file, and stands at the root.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -15,6 +18,13 @@ use super::{WriteElement, WriteModel, WriteShape, WriteStorey, WriteSummary, Wri
 
 const OBJECTS: &str = "[Ljava.lang.Object;";
 const ITEMS: &str = "[Lcom.~.sae.redox.Item;";
+/// The class of a type whose IFC class the checker has none of its own for.
+const PLAIN_TYPE: &str = "com.~.sae.~.SType";
+const SYSTEM: &str = "com.~.sae.~.construction.buildingservices.SSystem";
+const CLASSES: &str = "[Ljava.lang.Class;";
+const DISCIPLINES: &str = "[Lcom.~.saf.plugins.modelhandling.BuildingIndustryDomains;";
+const CODE_SOURCE: &str = "com.~.saf.plugins.classificationplugin.ClassificationReference$Source";
+const FILTER_STATE: &str = "com.~.saf.plugins.filteringplugin.ClassAndPropertyFilter$FilterState";
 /// The class of an element whose IFC class the checker has none of its own for.
 const PLAIN_OBJECT: &str = "com.~.sae.~.construction.SObject";
 const FAVORITES: &str =
@@ -27,6 +37,11 @@ pub fn stream(models: &[WriteModel], file_name: &str) -> (Vec<u8>, WriteSummary)
     let table = classes::load(&mut graph);
     let lower = table
         .written_as
+        .iter()
+        .map(|(ifc, class)| (ifc.to_ascii_lowercase(), class.clone()))
+        .collect();
+    let type_lower = table
+        .type_written_as
         .iter()
         .map(|(ifc, class)| (ifc.to_ascii_lowercase(), class.clone()))
         .collect();
@@ -48,6 +63,10 @@ pub fn stream(models: &[WriteModel], file_name: &str) -> (Vec<u8>, WriteSummary)
         g: graph,
         table,
         lower,
+        type_lower,
+        classified: Vec::new(),
+        classified_at: HashMap::new(),
+        constants: HashMap::new(),
         last_id: 0,
         seed,
         now,
@@ -80,11 +99,51 @@ impl Nodes {
     }
 }
 
+/// What a model keeps while its elements are written.
+struct ModelParts {
+    model: Id,
+    /// The model's own frame.
+    frame: Id,
+    /// The types, with the elements of each.
+    types: Vec<(Id, Vec<Id>)>,
+    /// A type by its class and name.
+    type_at: HashMap<(String, String), usize>,
+    /// The systems, with the elements of each.
+    systems: Vec<(Id, Vec<Id>)>,
+    system_at: HashMap<String, usize>,
+    /// The list of materials for each set of material names.
+    materials: HashMap<Vec<String>, Id>,
+}
+
+/// A classification system of the file.
+struct Classified {
+    object: Id,
+    name: String,
+    codes: Vec<Code>,
+    code_at: HashMap<String, usize>,
+    /// The classes of the elements that have a code of the system.
+    classes: Vec<ClassId>,
+}
+
+/// A code of a classification system, with the elements that have it.
+struct Code {
+    code: String,
+    reference: Id,
+    elements: Vec<Id>,
+}
+
 struct Builder {
     g: Graph,
     table: Table,
     /// IFC class in small letters -> the class it is written as.
     lower: HashMap<String, String>,
+    /// IFC type class in small letters -> the class its type is written as.
+    type_lower: HashMap<String, String>,
+    /// The classification systems of the file, in the order they came.
+    classified: Vec<Classified>,
+    classified_at: HashMap<String, usize>,
+    /// The constants of enumerations made so far.
+    constants: HashMap<(ClassId, &'static str), Id>,
     /// The number the last object got; the root remembers it.
     last_id: i32,
     seed: u64,
@@ -541,6 +600,7 @@ impl Builder {
             let id = self.model(model);
             nodes.add(class, id);
         }
+        self.classifications(&mut nodes);
         let classes = self.class_nodes(root, nodes);
         self.g.set(root, "Model", "classes", classes);
         self.model_fields(root, file_name);
@@ -707,14 +767,31 @@ impl Builder {
         self.holds(site, vec![building]);
         self.holds(building, storey_objects.iter().map(|s| s.0).collect());
 
+        let mut parts = ModelParts {
+            model,
+            frame: model_frame,
+            types: Vec::new(),
+            type_at: HashMap::new(),
+            systems: Vec::new(),
+            system_at: HashMap::new(),
+            materials: HashMap::new(),
+        };
         for element in &m.elements {
             let at = element
                 .storey
                 .filter(|k| *k < storey_objects.len())
                 .unwrap_or(0);
             let (_, frame, elevation, _) = storey_objects[at];
-            let id = self.element(&mut nodes, model, element, frame, elevation);
+            let id = self.element(&mut nodes, &mut parts, element, frame, elevation);
             storey_objects[at].3.push(id);
+        }
+        for (kind, elements) in parts.types {
+            let name = self.guid();
+            self.relation("SDefinesByType", kind, Some(&name), elements);
+        }
+        for (system, elements) in parts.systems {
+            let name = self.guid();
+            self.relation("Groups", system, Some(&name), elements);
         }
         for (storey, _, _, elements) in storey_objects {
             self.holds(storey, elements);
@@ -889,11 +966,12 @@ impl Builder {
     fn element(
         &mut self,
         nodes: &mut Nodes,
-        model: Id,
+        parts: &mut ModelParts,
         e: &WriteElement,
         storey_frame: Id,
         storey_elevation: f64,
     ) -> Id {
+        let model = parts.model;
         let class = match self.lower.get(&e.ifc_class.to_ascii_lowercase()) {
             Some(class) => class.clone(),
             None => {
@@ -981,6 +1059,7 @@ impl Builder {
             let all = self.property_set(id, None, None, Some(sets));
             self.g.set(id, "Entity", "extensionPropertySupport", all);
         }
+        self.more(nodes, parts, e, id);
         id
     }
 
@@ -1111,4 +1190,364 @@ fn translation(by: [f64; 3]) -> [f64; 16] {
     [
         1.0, 0.0, 0.0, by[0], 0.0, 1.0, 0.0, by[1], 0.0, 0.0, 1.0, by[2], 0.0, 0.0, 0.0, 1.0,
     ]
+}
+
+/// The grey the checker gives a code it has no colour for.
+const CODE_GREY: f32 = 150.0 / 255.0;
+
+impl Builder {
+    fn constant(&mut self, class: &str, name: &'static str) -> Id {
+        let class = self.class_named(class);
+        if let Some(id) = self.constants.get(&(class, name)) {
+            return *id;
+        }
+        let id = self.g.constant(class, name);
+        self.constants.insert((class, name), id);
+        id
+    }
+
+    /// A map of texts to objects, as `java.util.HashMap` writes itself: the
+    /// number of buckets and of entries, then each key and value.
+    fn map(&mut self, entries: Vec<(Id, Id)>) -> Id {
+        let mut buckets = 16usize;
+        while buckets * 3 / 4 <= entries.len() {
+            buckets *= 2;
+        }
+        let class = self.class("HashMap");
+        let id = self.g.object(class);
+        self.g.set(id, "HashMap", "loadFactor", Val::Float(0.75));
+        self.g.set(
+            id,
+            "HashMap",
+            "threshold",
+            Val::Int((buckets * 3 / 4) as i32),
+        );
+        let mut sizes = (buckets as i32).to_be_bytes().to_vec();
+        sizes.extend((entries.len() as i32).to_be_bytes());
+        self.g.extra(id, "HashMap", Val::Block(sizes));
+        for (key, value) in entries {
+            self.g.extra(id, "HashMap", key);
+            self.g.extra(id, "HashMap", value);
+        }
+        id
+    }
+
+    /// The type, the materials, the systems and the classification codes of
+    /// an element: each is made the first time an element has it.
+    fn more(&mut self, nodes: &mut Nodes, parts: &mut ModelParts, e: &WriteElement, id: Id) {
+        if let Some(name) = e.type_name.as_deref().filter(|n| !n.is_empty()) {
+            let ifc_class = e.type_class.clone().unwrap_or_default();
+            let key = (ifc_class.to_ascii_lowercase(), name.to_string());
+            let at = match parts.type_at.get(&key) {
+                Some(at) => *at,
+                None => {
+                    let kind = self.type_object(nodes, &ifc_class, name);
+                    parts.types.push((kind, Vec::new()));
+                    parts.type_at.insert(key, parts.types.len() - 1);
+                    parts.types.len() - 1
+                }
+            };
+            parts.types[at].1.push(id);
+            let kind = parts.types[at].0;
+            let link = self.prop("ObjectProperty", id, 4, None, None, kind.into());
+            self.g.set(id, "SEntity", "type", link);
+        }
+
+        let materials: Vec<String> = e
+            .materials
+            .iter()
+            .filter(|m| !m.is_empty())
+            .cloned()
+            .collect();
+        if !materials.is_empty() && self.g.has_part(id, "SElement") {
+            let list = match parts.materials.get(&materials) {
+                Some(list) => *list,
+                None => {
+                    let class = self.class("SMaterial");
+                    let mut items = Vec::new();
+                    for name in &materials {
+                        let material = self.entity(class, true);
+                        self.g
+                            .set(material, "SMaterial", "isThicknessNull", Val::Bool(true));
+                        let value = self.text("IfcMaterial");
+                        self.g.set(material, "SMaterial", "ifcType", value);
+                        let value = self.text(name);
+                        let value =
+                            self.prop("StringProperty", material, 1, None, None, value.into());
+                        self.g.set(material, "SMaterial", "name", value);
+                        let zero = self.zero;
+                        let thickness =
+                            self.prop("DoubleProperty", material, 1, None, None, zero.into());
+                        self.g
+                            .set(thickness, "DoubleProperty", "quantityType", Val::Int(1));
+                        self.g.set(material, "SMaterial", "thickness", thickness);
+                        nodes.add(class, material);
+                        items.push(material.into());
+                    }
+                    let list = self.list(items);
+                    parts.materials.insert(materials, list);
+                    list
+                }
+            };
+            let link = self.prop("ObjectProperty", id, 4, None, None, list.into());
+            self.g.set(id, "SElement", "material", link);
+        }
+
+        for name in e.systems.iter().filter(|s| !s.is_empty()) {
+            let at = match parts.system_at.get(name) {
+                Some(at) => *at,
+                None => {
+                    let guid = self.guid();
+                    let system = self.building_object(
+                        nodes,
+                        SYSTEM,
+                        "IfcSystem",
+                        &guid,
+                        Some(name),
+                        None,
+                        None,
+                        None,
+                    );
+                    let frame = self.frame(nodes, Some(system), None, Some(parts.frame));
+                    let children = self.vector(vec![frame.into()]);
+                    self.g.set(system, "Entity", "children", children);
+                    self.g.set(system, "SEntity", "coordinateSystem", frame);
+                    parts.systems.push((system, Vec::new()));
+                    parts
+                        .system_at
+                        .insert(name.clone(), parts.systems.len() - 1);
+                    parts.systems.len() - 1
+                }
+            };
+            if !parts.systems[at].1.contains(&id) {
+                parts.systems[at].1.push(id);
+            }
+        }
+
+        let class = self.g.class_of(id);
+        for c in e.classifications.iter().filter(|c| !c.code.is_empty()) {
+            let system = if c.system.is_empty() {
+                "Classification"
+            } else {
+                c.system.as_str()
+            };
+            let at = match self.classified_at.get(system) {
+                Some(at) => *at,
+                None => {
+                    let of = self.class("Classification");
+                    let object = self.entity(of, true);
+                    self.classified.push(Classified {
+                        object,
+                        name: system.to_string(),
+                        codes: Vec::new(),
+                        code_at: HashMap::new(),
+                        classes: Vec::new(),
+                    });
+                    self.classified_at
+                        .insert(system.to_string(), self.classified.len() - 1);
+                    self.classified.len() - 1
+                }
+            };
+            let code = match self.classified[at].code_at.get(&c.code) {
+                Some(code) => *code,
+                None => {
+                    let reference = self.code_reference(self.classified[at].object, c);
+                    let system = &mut self.classified[at];
+                    system.codes.push(Code {
+                        code: c.code.clone(),
+                        reference,
+                        elements: Vec::new(),
+                    });
+                    system
+                        .code_at
+                        .insert(c.code.clone(), system.codes.len() - 1);
+                    system.codes.len() - 1
+                }
+            };
+            let system = &mut self.classified[at];
+            if !system.codes[code].elements.contains(&id) {
+                system.codes[code].elements.push(id);
+            }
+            if !system.classes.contains(&class) {
+                system.classes.push(class);
+            }
+        }
+    }
+
+    /// The type of elements: its name, and what its class holds by default.
+    fn type_object(&mut self, nodes: &mut Nodes, ifc_class: &str, name: &str) -> Id {
+        let class = self
+            .type_lower
+            .get(&ifc_class.to_ascii_lowercase())
+            .cloned()
+            .unwrap_or_else(|| PLAIN_TYPE.to_string());
+        let class = self.class_named(&class);
+        let id = self.entity(class, true);
+        let value = self.text_prop(id, 4, Some(name));
+        self.g.set(id, "SType", "code", value);
+        for field in ["description", "elementType", "predefinedType"] {
+            let value = self.text_prop(id, 4, None);
+            self.g.set(id, "SType", field, value);
+        }
+        let value = self.text(if ifc_class.is_empty() {
+            "IfcTypeObject"
+        } else {
+            ifc_class
+        });
+        self.g.set(id, "SType", "ifcType", value);
+        let value = self.prop("ObjectProperty", id, 0, None, None, Val::Null);
+        self.g.set(id, "SType", "material", value);
+        let guid = self.guid();
+        let value = self.text(&guid);
+        self.g.set(id, "SType", "uniqueId", value);
+        self.defaults(id);
+        nodes.add(class, id);
+        id
+    }
+
+    /// A code of a classification system.
+    fn code_reference(&mut self, system: Id, c: &super::WriteClassification) -> Id {
+        let class = self.class("ClassificationReference");
+        let id = self.entity(class, true);
+        self.g
+            .set(id, "ClassificationReference", "classification", system);
+        let value = self.text(&c.name);
+        self.g
+            .set(id, "ClassificationReference", "description", value);
+        let grey = {
+            let class = self.class("MaterialInfo");
+            let colour = self.g.object(class);
+            for part in ["red", "green", "blue"] {
+                self.g
+                    .set(colour, "MaterialInfo", part, Val::Float(CODE_GREY));
+            }
+            colour
+        };
+        self.g.set(id, "ClassificationReference", "material", grey);
+        let value = self.text(&c.code);
+        self.g.set(id, "ClassificationReference", "name", value);
+        let from_ifc = self.constant(CODE_SOURCE, "IFC");
+        self.g
+            .set(id, "ClassificationReference", "source", from_ifc);
+        id
+    }
+
+    /// Fills in the classification systems, now that every element has been
+    /// written, and files them and their codes at the root.
+    fn classifications(&mut self, nodes: &mut Nodes) {
+        let systems = std::mem::take(&mut self.classified);
+        let system_class = self.class("Classification");
+        let code_class = self.class("ClassificationReference");
+        for system in systems {
+            let id = system.object;
+            for field in [
+                "imported",
+                "savable",
+                "useFirstMatchMethod",
+                "visualizeSpacesFlat",
+            ] {
+                self.g.set(id, "Classification", field, Val::Bool(true));
+            }
+            // the classes of the elements the system has codes for, as a list
+            // and as the filters that let them in
+            let class_array = self.class_named(CLASSES);
+            let class_objects: Vec<Val> = system
+                .classes
+                .iter()
+                .map(|c| self.g.class_object(*c).into())
+                .collect();
+            let classes = self.g.objects(class_array, class_objects);
+            self.g.set(id, "Classification", "classes", classes);
+            let mut filters = Vec::new();
+            for class in &system.classes {
+                let of = self.class("ClassAndPropertyFilter");
+                let filter = self.g.object(of);
+                self.g.set(
+                    filter,
+                    "ClassAndPropertyFilter",
+                    "serializedVersion",
+                    Val::Int(1),
+                );
+                let class_object = self.g.class_object(*class);
+                self.g
+                    .set(filter, "ClassAndPropertyFilter", "clazz", class_object);
+                let include = self.constant(FILTER_STATE, "include");
+                self.g
+                    .set(filter, "ClassAndPropertyFilter", "filterState", include);
+                self.g.extra(filter, "ClassAndPropertyFilter", Val::Null);
+                filters.push(filter.into());
+            }
+            let filters = self.vector(filters);
+            self.g.set(id, "Classification", "filters", filters);
+
+            // the columns the checker shows a classification with
+            let column = {
+                let class = self.class("ComponentClassificationColumn");
+                let column = self.g.object(class);
+                let name = self.text("Component");
+                self.g.set(column, "ClassificationColumn", "name", name);
+                column
+            };
+            let mut columns = vec![column.into()];
+            for (name, ordinal) in [("Type", 1), ("Layer", 5), ("Name", 4)] {
+                let class = self.class("PropertyClassificationColumn");
+                let column = self.g.object(class);
+                let name = self.text(name);
+                self.g.set(column, "ClassificationColumn", "name", name);
+                let class = self.class("IdentificationType");
+                let kind = self.g.object(class);
+                self.g
+                    .set(kind, "IdentificationType", "ordinal", Val::Int(ordinal));
+                let class = self.class("IdentificationPropertyReference");
+                let reference = self.g.object(class);
+                self.g
+                    .set(reference, "IdentificationPropertyReference", "type", kind);
+                self.g.set(
+                    column,
+                    "PropertyClassificationColumn",
+                    "propertyRef",
+                    reference,
+                );
+                columns.push(column.into());
+            }
+            let columns = self.list(columns);
+            self.g
+                .set(id, "Classification", "classificationColumns", columns);
+
+            let data = self.vector(Vec::new());
+            self.g.set(id, "Classification", "data", data);
+            let mut rows = Vec::new();
+            let mut by_code = Vec::new();
+            for code in &system.codes {
+                let text = self.text(&code.code);
+                let row = self.vector(vec![text.into(), Val::Null]);
+                rows.push(row.into());
+                let list = self.list(vec![code.reference.into()]);
+                by_code.push((text, list));
+            }
+            let rows = self.vector(rows);
+            self.g.set(id, "Classification", "defaultData", rows);
+            let references = self.map(by_code);
+            self.g.set(id, "Classification", "references", references);
+
+            let description = self.text(&format!(
+                "<html><body>Name: {}<br>Location: Undefined<br></body></html>",
+                system.name
+            ));
+            self.g.set(id, "Classification", "description", description);
+            let disciplines = self.class_named(DISCIPLINES);
+            let disciplines = self.g.objects(disciplines, Vec::new());
+            self.g.set(id, "Classification", "disciplines", disciplines);
+            let name = self.text(&system.name);
+            self.g.set(id, "Classification", "name", name);
+            let source = self.text("");
+            self.g.set(id, "Classification", "source", source);
+
+            nodes.add(system_class, id);
+            for code in system.codes {
+                nodes.add(code_class, code.reference);
+                self.relation("Classifies", code.reference, None, code.elements);
+            }
+        }
+    }
 }

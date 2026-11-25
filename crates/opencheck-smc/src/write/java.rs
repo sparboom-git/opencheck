@@ -89,6 +89,11 @@ enum Node {
     Text(String),
     /// A `java.lang.Class` object.
     ClassOf(ClassId),
+    /// A constant of an enumeration: its class and its name.
+    Constant {
+        class: ClassId,
+        name: Id,
+    },
     Object {
         class: ClassId,
         parts: Vec<Part>,
@@ -192,6 +197,23 @@ impl Graph {
     /// The `java.lang.Class` object of a class.
     pub fn class_object(&mut self, class: ClassId) -> Id {
         self.push(Node::ClassOf(class))
+    }
+
+    /// A constant of an enumeration. Java writes one object per constant, so
+    /// keep the one made and use it again.
+    pub fn constant(&mut self, class: ClassId, name: &str) -> Id {
+        let name = self.text(name);
+        self.push(Node::Constant { class, name })
+    }
+
+    /// Whether one of the object's classes is the one of this name.
+    pub fn has_part(&self, object: Id, class: &str) -> bool {
+        match &self.nodes[object.0 as usize] {
+            Node::Object { parts, .. } => {
+                parts.iter().any(|p| self.class(p.class).short() == class)
+            }
+            _ => false,
+        }
     }
 
     /// An object of a class with every field empty: numbers zero, objects null.
@@ -429,6 +451,12 @@ impl Writer<'_> {
                 self.out.push(0x76);
                 self.class_desc(Some(*class));
                 self.nodes[id.0 as usize] = self.handle();
+            }
+            Node::Constant { class, name } => {
+                self.out.push(0x7e);
+                self.class_desc(Some(*class));
+                self.nodes[id.0 as usize] = self.handle();
+                self.node(*name);
             }
             Node::Object { class, parts } => {
                 self.out.push(0x73);

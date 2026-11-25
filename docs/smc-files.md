@@ -130,7 +130,13 @@ written. Written per model:
   type, tag and description, on its storey;
 - its property sets, with texts, numbers, whole numbers and yes/no values;
 - its shape as faces of three points in millimetres, with its colour, or a
-  colour per triangle where it has several.
+  colour per triangle where it has several;
+- its type, by name and IFC class (`IfcWallType`), one type object for the
+  elements that share it;
+- its materials, by name;
+- the systems it belongs to, by name, each with its elements;
+- its classification codes: a classification system per name for the whole
+  file, with its codes and the elements of each.
 
 What to be careful about:
 
@@ -138,10 +144,14 @@ What to be careful about:
   shapes (a profile pulled along a line, a shape cut from another) are not
   written, so what the checker measures from them (a wall's thickness, a
   beam's profile) it has to take from the triangles.
-- **Not written**: type objects, materials, systems, classifications,
-  openings and what fills them, the link to the IFC file a model came from,
-  rulesets, results, issues and presentations. A model cannot be updated in
-  the checker from a new IFC file.
+- **Types, materials and systems are written by name**, which is what
+  OpenCheck keeps of them: a type has no properties and no GlobalId of its
+  own (it gets a new one), a material no layers, thicknesses or category,
+  and a system is a plain system whatever kind it was (distribution system,
+  zone, group). A code on a type is on the elements of the type.
+- **Not written**: openings and what fills them, the link to the IFC file a
+  model came from, rulesets, results, issues and presentations. A model
+  cannot be updated in the checker from a new IFC file.
 - **Numbers in property sets** are written as plain numbers, without a unit.
 - **Storeys get new GlobalIds**; the elements keep theirs.
 - **An IFC class the checker has no class of its own for** (in the table, see
@@ -167,9 +177,10 @@ and must not be: only files it saved are looked at.
 
 The classes with their version numbers and fields, the class each IFC class
 is written as, and what the fields of a class hold by default are in
-`crates/opencheck-smc/src/write/classes.txt`. That table is drawn out of two
-files saved by the checker (one with an element of every IFC4 element class)
-by `testdata/smc-test/make_class_table.py`; the test files and the tools that
+`crates/opencheck-smc/src/write/classes.txt`. That table is drawn out of
+three files saved by the checker (one with an element of every IFC4 element
+class, one with a type of every type class, materials, systems and
+classifications) by `testdata/smc-test/make_class_table.py`; the test files and the tools that
 read them are kept outside the repository. A checker of another version
 reads the file as long as its classes keep their version numbers, which they
 did between 25.9 and 25.12.

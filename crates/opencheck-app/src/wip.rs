@@ -167,8 +167,8 @@ const SMC_EXPORT: Feature = Feature {
     what: "File → Export → Coordination file (.smc): the models of the project put together \
            as one coordination file, for where the federated model has to be delivered in \
            that form. Each model becomes a model in it, with its elements, properties, \
-           storeys, colours and shapes as triangles. Types, materials, systems and \
-           classifications are not written. Desktop app only. Deliver the IFC files with it.",
+           storeys, colours and shapes as triangles, and by name its type, materials, \
+           systems and classification codes. Desktop app only. Deliver the IFC files with it.",
 };
 
 /// The WIP part of File → Settings.

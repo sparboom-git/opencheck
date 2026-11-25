@@ -13,10 +13,13 @@
 //! into. The classes with their version numbers and fields are in
 //! `classes.txt`, drawn out of those files.
 //!
+//! Also written, by name: the type of an element, its materials, the
+//! systems it belongs to and its classification codes.
+//!
 //! What is not written: the checker's own shapes (profiles pulled along a
-//! route, shapes cut from each other), type objects, materials, systems,
-//! classifications, the link to the IFC file a model came from, rulesets,
-//! results and presentations.
+//! route, shapes cut from each other), the layers and thicknesses of
+//! materials, the link to the IFC file a model came from, rulesets, results
+//! and presentations.
 
 mod build;
 mod classes;
@@ -45,8 +48,9 @@ pub struct WriteModel {
     pub elements: Vec<WriteElement>,
 }
 
-/// The discipline the checker files a model under: its own list, in its own
-/// order, which is the number it keeps in the file.
+/// The discipline the checker files a model under, with the number it keeps
+/// in the file. The numbers follow the checker's own list, except that 12 is
+/// a discipline the list does not offer.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[repr(i32)]
 pub enum WriteDiscipline {
@@ -63,7 +67,7 @@ pub enum WriteDiscipline {
     Inventory,
     FacilityManagement,
     Landscape,
-    PrefabConcrete,
+    PrefabConcrete = 13,
     SteelStructure,
     SiteOperations,
     Cooling,
@@ -164,6 +168,25 @@ pub struct WriteElement {
     pub storey: Option<usize>,
     pub property_sets: Vec<WritePropertySet>,
     pub shape: Option<WriteShape>,
+    /// The name of the element's type, when it has one.
+    pub type_name: Option<String>,
+    /// The IFC class of the type, e.g. `IfcWallType`.
+    pub type_class: Option<String>,
+    /// The names of the element's materials.
+    pub materials: Vec<String>,
+    /// The names of the systems the element belongs to.
+    pub systems: Vec<String>,
+    pub classifications: Vec<WriteClassification>,
+}
+
+/// A code of a classification system on an element.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WriteClassification {
+    /// The name of the system, e.g. `BIMTypeCode`; may be empty.
+    pub system: String,
+    pub code: String,
+    /// What the code stands for, e.g. `Ydervægge`.
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -373,6 +396,22 @@ mod tests {
             object_type: Some("Betonvæg 200".into()),
             predefined_type: Some("SOLIDWALL".into()),
             tag: Some("W1".into()),
+            type_name: Some("Betonvæg 200".into()),
+            type_class: Some("IfcWallType".into()),
+            materials: vec!["Beton C30".into(), "Mineraluld".into()],
+            systems: vec!["Bærende system".into()],
+            classifications: vec![
+                WriteClassification {
+                    system: "BIMTypeCode".into(),
+                    code: "211".into(),
+                    name: "Ydervægge".into(),
+                },
+                WriteClassification {
+                    system: "CCS".into(),
+                    code: "%AD".into(),
+                    name: "Vægkonstruktion".into(),
+                },
+            ],
             storey: Some(0),
             property_sets: vec![WritePropertySet {
                 name: "Pset_WallCommon".into(),
@@ -410,6 +449,14 @@ mod tests {
             guid: "04re88i7nULQMBfIiq4xam".into(),
             ifc_class: "IfcSlab".into(),
             name: "Dæk S2".into(),
+            type_name: Some("Etagedæk 200".into()),
+            type_class: Some("IfcSlabType".into()),
+            materials: vec!["Beton C30".into()],
+            classifications: vec![WriteClassification {
+                system: "BIMTypeCode".into(),
+                code: "23".into(),
+                name: "Dæk".into(),
+            }],
             storey: Some(1),
             shape: Some(box_shape(
                 [0.0, 0.0, 2.8],
@@ -422,6 +469,10 @@ mod tests {
             guid: "1CZ1ehIAvJ_w7wD5ZYCC9K".into(),
             ifc_class: "IfcSomethingNew".into(),
             name: "Ukendt klasse".into(),
+            // a type class the table does not know is a plain type
+            type_name: Some("Ny type".into()),
+            type_class: Some("IfcSomethingNewType".into()),
+            systems: vec!["VE01".into()],
             storey: None,
             shape: Some(box_shape(
                 [2.5, 0.5, 0.0],
@@ -455,11 +506,64 @@ mod tests {
     #[test]
     fn the_disciplines_have_the_numbers_of_the_checkers_list() {
         for (k, d) in WriteDiscipline::ALL.iter().enumerate() {
-            assert_eq!(d.number(), k as i32, "{}", d.label());
+            // the list in its order; 12 is left out
+            let number = if k < 12 { k } else { k + 1 };
+            assert_eq!(d.number(), number as i32, "{}", d.label());
         }
         assert_eq!(WriteDiscipline::Structural.number(), 5);
         assert_eq!(WriteDiscipline::Ventilation.number(), 6);
         assert_eq!(WriteDiscipline::Landscape.number(), 11);
+        // seen in the checker: number 13 is shown as Prefab Concrete
+        assert_eq!(WriteDiscipline::PrefabConcrete.number(), 13);
+        assert_eq!(WriteDiscipline::Road.number(), 22);
+        assert_eq!(WriteDiscipline::PortsAndWaterways.number(), 24);
+    }
+
+    /// The stream of a written file, out of its zip.
+    fn stream_of(bytes: Vec<u8>) -> Vec<u8> {
+        use std::io::Read as _;
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut stream = Vec::new();
+        zip.by_index(0).unwrap().read_to_end(&mut stream).unwrap();
+        stream
+    }
+
+    fn holds(stream: &[u8], text: &str) -> usize {
+        let needle = text.as_bytes();
+        stream
+            .windows(needle.len())
+            .filter(|w| *w == needle)
+            .count()
+    }
+
+    #[test]
+    fn types_materials_systems_and_codes_are_written_once_each() {
+        let (bytes, _) = write_smc(&two_models(), "Testhus.smc").unwrap();
+        let stream = stream_of(bytes);
+        // the classes of the objects
+        for class in [
+            "SWallType",
+            "SSlabType",
+            ".SType",
+            "SMaterial",
+            "buildingservices.SSystem",
+            "classificationplugin.Classification",
+            "ClassificationReference$Source",
+            "SDefinesByType",
+            "redox.Groups",
+            "classificationplugin.Classifies",
+        ] {
+            assert!(holds(&stream, class) >= 1, "{class} is missing");
+        }
+        // a name stands once where it is the same object, and again where a
+        // text is written anew
+        assert_eq!(holds(&stream, "IfcSomethingNewType"), 1);
+        assert_eq!(holds(&stream, "Mineraluld"), 1);
+        // the wall and the slab have the material in a list each
+        assert_eq!(holds(&stream, "Beton C30"), 2);
+        assert_eq!(holds(&stream, "Name: BIMTypeCode<br>"), 1);
+        assert_eq!(holds(&stream, "Name: CCS<br>"), 1);
+        assert_eq!(holds(&stream, "VE01"), 1);
     }
 
     #[test]

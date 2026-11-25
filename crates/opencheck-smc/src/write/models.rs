@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use opencheck_core::{Discipline, IfcModel, PropertyValue};
 
 use super::{
-    WriteDiscipline, WriteElement, WriteModel, WriteProperty, WritePropertySet, WriteShape,
-    WriteStorey, WriteValue,
+    WriteClassification, WriteDiscipline, WriteElement, WriteModel, WriteProperty,
+    WritePropertySet, WriteShape, WriteStorey, WriteValue,
 };
 
 /// A model to put in the file, with what the user calls it.
@@ -166,6 +166,19 @@ fn model_to_write(
             storey: e.container.and_then(|c| storey_of.get(&c).copied()),
             property_sets,
             shape: (!shape.triangles.is_empty()).then_some(shape),
+            type_name: e.type_object.as_ref().map(|(_, name)| name.clone()),
+            type_class: e.type_class.clone(),
+            materials: e.materials.clone(),
+            systems: e.systems.clone(),
+            classifications: e
+                .classifications
+                .iter()
+                .map(|c| WriteClassification {
+                    system: c.system.clone(),
+                    code: c.code.clone(),
+                    name: c.name.clone(),
+                })
+                .collect(),
         });
     }
 
