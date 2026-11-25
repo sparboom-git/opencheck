@@ -891,16 +891,24 @@ pub fn draw_levels(app: &OpenCheckApp, ui: &egui::Ui, rect: egui::Rect, aspect: 
     }
 }
 
-/// Length of a fall arrow on screen, points; a pipe shorter than the
-/// minimum on screen gets none, so far-off pipes do not fill the view.
-const ARROW_LENGTH: f32 = 28.0;
-const ARROW_MIN: f32 = 16.0;
-const ARROW_HEAD: f32 = 9.0;
+/// A fall arrow is a thing of the model, not of the screen: so long in
+/// metres (less on a short pipe), and as wide as the pipe. Zoomed out it
+/// shrinks with the pipes until it is too small to draw; zoomed in it is
+/// there to read.
+const ARROW_METRES: f32 = 0.6;
+/// Shorter than this on screen, an arrow is left out.
+const ARROW_MIN_PX: f32 = 9.0;
+/// A mark that explains a problem is never smaller than this on screen, so
+/// a thin pipe far off still shows what is wrong with it.
+const MARKED_MIN_PX: f32 = 20.0;
 
 /// The way the drain pipes fall, as arrows over the 3D view: along each pipe
-/// from its higher end to its lower, white with a dark edge so it shows on
-/// a red, yellow or green pipe alike. Drawn while the fall check's result
-/// is shown, in plan too, for every pipe that is drawn.
+/// from its higher end to its lower, and a ring on a pipe that lies flat.
+/// On a red pipe (the wrong way, or flat) the mark is what explains the
+/// problem, so it is white with a dark edge and never tiny; on the other
+/// pipes it is a faint shadow on the pipe, there when looked for. Drawn
+/// while the fall check's result is shown, in plan too, for every pipe
+/// that is drawn.
 pub fn draw_fall_arrows(app: &OpenCheckApp, ui: &egui::Ui, rect: egui::Rect, aspect: f32) {
     let state = &app.visual;
     let Some(result) = state.shown() else {
@@ -916,47 +924,98 @@ pub fn draw_fall_arrows(app: &OpenCheckApp, ui: &egui::Ui, rect: egui::Rect, asp
         }
         let from = glam::Vec3::from(arrow.from.map(|v| v as f32));
         let to = glam::Vec3::from(arrow.to.map(|v| v as f32));
-        if !app.view.is_visible_point((from + to) / 2.0) {
+        let mid = (from + to) / 2.0;
+        if !app.view.is_visible_point(mid) {
             continue;
         }
-        let (Some(a), Some(b)) = (
-            crate::viewport::project(app, rect, aspect, from),
-            crate::viewport::project(app, rect, aspect, to),
+        // The arrow in the model: centred on the pipe, along it.
+        let along = to - from;
+        let length = along.length();
+        if length < 1e-3 {
+            continue;
+        }
+        let dir = along / length;
+        let shaft = ARROW_METRES.min(length * 0.4);
+        let project = |p: glam::Vec3| crate::viewport::project(app, rect, aspect, p);
+        let (Some(a), Some(b), Some(m), Some(across)) = (
+            project(mid - dir * (shaft / 2.0)),
+            project(mid + dir * (shaft / 2.0)),
+            project(mid),
+            project(mid + glam::Vec3::Z * arrow.size as f32),
         ) else {
             continue;
+        };
+        if !rect.contains(a) && !rect.contains(b) {
+            continue;
+        }
+        // As wide as the pipe looks, within reason.
+        let mut width = ((m - across).length() * 0.45).clamp(1.2, 4.0);
+        if arrow.marked {
+            width = width.max(2.0);
+        }
+        if arrow.flat {
+            // A ring: no way to show.
+            let radius = ((m - across).length() * 0.9).clamp(5.0, 10.0);
+            painter.circle_stroke(
+                m,
+                radius,
+                egui::Stroke::new(width + 2.5, Color32::from_black_alpha(170)),
+            );
+            painter.circle_stroke(m, radius, egui::Stroke::new(width, Color32::WHITE));
+            continue;
+        }
+        let (a, b) = if arrow.marked {
+            at_least(a, b, MARKED_MIN_PX)
+        } else {
+            (a, b)
         };
         let Some(shape) = arrow_shape(a, b) else {
             continue;
         };
-        if !rect.contains(shape[0].0) && !rect.contains(shape[0].1) {
-            continue;
-        }
-        for width_color in [(5.0, Color32::from_black_alpha(170)), (2.5, Color32::WHITE)] {
+        let strokes: &[(f32, Color32)] = if arrow.marked {
+            &[
+                (width + 2.5, Color32::from_black_alpha(170)),
+                (width, Color32::WHITE),
+            ]
+        } else {
+            &[(width * 0.8, Color32::from_black_alpha(80))]
+        };
+        for (w, color) in strokes {
             for (p, q) in shape {
-                painter.line_segment([p, q], egui::Stroke::new(width_color.0, width_color.1));
+                painter.line_segment([p, q], egui::Stroke::new(*w, *color));
             }
         }
     }
 }
 
-/// An arrow on screen along the line from `a` to `b`, centred on it: its
-/// shaft and the two strokes of its head, pointing at `b`. None when the
-/// line is too short to carry one.
+/// The line from `a` to `b` stretched about its middle to at least `min`
+/// long, so a mark stays readable however far off it is.
+fn at_least(a: egui::Pos2, b: egui::Pos2, min: f32) -> (egui::Pos2, egui::Pos2) {
+    let v = b - a;
+    let len = v.length();
+    if len >= min || len < 1e-3 {
+        return (a, b);
+    }
+    let mid = a + v * 0.5;
+    let half = v / len * (min / 2.0);
+    (mid - half, mid + half)
+}
+
+/// An arrow on screen from `a` to `b`: its shaft and the two strokes of its
+/// head, pointing at `b`, the head in proportion to the shaft. None when
+/// it is too short on screen to draw.
 fn arrow_shape(a: egui::Pos2, b: egui::Pos2) -> Option<[(egui::Pos2, egui::Pos2); 3]> {
     let v = b - a;
     let len = v.length();
-    if len < ARROW_MIN {
+    if len < ARROW_MIN_PX {
         return None;
     }
     let dir = v / len;
-    let shaft = (len * 0.6).min(ARROW_LENGTH);
-    let mid = a + v * 0.5;
-    let tail = mid - dir * (shaft / 2.0);
-    let head = mid + dir * (shaft / 2.0);
     let side = egui::vec2(-dir.y, dir.x);
-    let left = head - dir * ARROW_HEAD + side * (ARROW_HEAD * 0.6);
-    let right = head - dir * ARROW_HEAD - side * (ARROW_HEAD * 0.6);
-    Some([(tail, head), (head, left), (head, right)])
+    let wing = (len * 0.35).clamp(4.0, 14.0);
+    let left = b - dir * wing + side * (wing * 0.6);
+    let right = b - dir * wing - side * (wing * 0.6);
+    Some([(a, b), (b, left), (b, right)])
 }
 
 /// The plan shown, while the view still is that plan: its section in place

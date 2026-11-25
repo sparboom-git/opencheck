@@ -312,6 +312,14 @@ pub struct FlowArrow {
     /// Both ends in the shared frame, metres.
     pub from: [f64; 3],
     pub to: [f64; 3],
+    /// The element's size across, metres: the arrow is drawn to it.
+    pub size: f64,
+    /// The arrow explains a problem (a pipe falling the wrong way, or lying
+    /// flat) and is drawn to stand out; the rest are drawn faintly.
+    pub marked: bool,
+    /// The pipe lies flat: there is no way to show, so a ring marks it in
+    /// place of an arrow.
+    pub flat: bool,
 }
 
 /// A plan view of a storey: cut above its floor, seen from above.

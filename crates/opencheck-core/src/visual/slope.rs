@@ -254,17 +254,19 @@ pub(super) fn run(rule: &SlopeRule, models: &[VisualModel]) -> VisualOutcome {
             value: Some((permille * 10.0).round() / 10.0),
             color,
         };
-        // A pipe that falls at all gets an arrow the way it falls; a flat
-        // one has no way to show.
-        let mut falls = true;
-        if directed && permille < -tolerance {
+        // Every judged pipe gets a mark: an arrow the way it falls, or a
+        // ring when it lies flat. The marks of the red pipes, the wrong way
+        // and the flat ones, are the ones that explain something, so they
+        // stand out.
+        let wrong_way = directed && permille < -tolerance;
+        let flat = !wrong_way && permille.abs() <= tolerance;
+        if wrong_way {
             outcome.problems.push(problem(
                 Severity::Critical,
                 format!("Falls the wrong way: {:.1} ‰", permille),
                 ERROR,
             ));
-        } else if permille.abs() <= tolerance {
-            falls = false;
+        } else if flat {
             outcome.problems.push(problem(
                 Severity::Critical,
                 format!("Flat: {:.1} ‰", permille.abs()),
@@ -279,9 +281,13 @@ pub(super) fn run(rule: &SlopeRule, models: &[VisualModel]) -> VisualOutcome {
         } else {
             good.push(node.key);
         }
-        if falls {
-            outcome.arrows.push(fall_arrow(node.key, run.ends));
-        }
+        outcome.arrows.push(fall_arrow(
+            node.key,
+            run.ends,
+            run.size_mm() / 1000.0,
+            wrong_way || flat,
+            flat,
+        ));
     }
     outcome
         .problems
@@ -325,8 +331,14 @@ pub(super) fn run(rule: &SlopeRule, models: &[VisualModel]) -> VisualOutcome {
 }
 
 /// The way a pipe falls: an arrow from its higher end to its lower, whatever
-/// way the water should go.
-fn fall_arrow(element: ElementKey, ends: [DVec3; 2]) -> FlowArrow {
+/// way the water should go; a ring when it lies flat.
+fn fall_arrow(
+    element: ElementKey,
+    ends: [DVec3; 2],
+    size: f64,
+    marked: bool,
+    flat: bool,
+) -> FlowArrow {
     let (top, bottom) = if ends[0].z >= ends[1].z {
         (ends[0], ends[1])
     } else {
@@ -336,6 +348,9 @@ fn fall_arrow(element: ElementKey, ends: [DVec3; 2]) -> FlowArrow {
         element,
         from: top.to_array(),
         to: bottom.to_array(),
+        size,
+        marked,
+        flat,
     }
 }
 
@@ -351,10 +366,15 @@ mod tests {
         };
         let high = DVec3::new(0.0, 0.0, 10.5);
         let low = DVec3::new(4.0, 0.0, 10.4);
-        let arrow = fall_arrow(key, [low, high]);
+        let arrow = fall_arrow(key, [low, high], 0.11, true, false);
         assert_eq!(arrow.from, high.to_array());
         assert_eq!(arrow.to, low.to_array());
-        assert_eq!(fall_arrow(key, [high, low]).to, low.to_array());
+        assert!(arrow.marked && !arrow.flat);
+        assert_eq!(
+            fall_arrow(key, [high, low], 0.11, false, false).to,
+            low.to_array()
+        );
+        assert!(fall_arrow(key, [high, low], 0.11, true, true).flat);
     }
 
     #[test]

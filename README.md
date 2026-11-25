@@ -337,8 +337,10 @@ Each check is added on its own:
 - **Fall of drain pipes** (WIP, as above): drain pipes green with enough
   fall, yellow with
   too little, red when flat or falling the wrong way; least fall overall
-  and by pipe size. An arrow on each pipe shows the way it falls, in 3D
-  and in plan, and in the pictures of a documented check.
+  and by pipe size. An arrow on each pipe shows the way it falls and a
+  ring marks a flat pipe: white on the red pipes and faint on the rest,
+  sized with the model so they show when zoomed in; in 3D, in plan and in
+  the pictures of a documented check.
 - **Storeys**: each storey in its own colour; elements standing on another
   storey than they belong to are red, elements without a storey purple.
 - **Rooms**: rooms (`IfcSpace`) green. Per storey the walls, doors, windows

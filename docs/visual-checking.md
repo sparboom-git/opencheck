@@ -170,9 +170,14 @@ stacks and fittings.
 from its higher end to its lower: the way the water runs in it. On a green
 or yellow pipe the arrow points towards the stack; on a red pipe falling
 the wrong way it points away from it, which is what is wrong. A flat pipe
-has no arrow. The arrows are white with a dark edge, about the same size on
-screen whatever the zoom, left out on pipes too short on screen to carry
-one, and drawn in plan and in the pictures of a documented check too.
+has no way to show and carries a ring instead. The marks of the red pipes,
+the wrong way and the flat ones, are white with a dark edge and never tiny,
+so the problem is seen at once; the arrows of the other pipes are a faint
+shadow on the pipe, there when you look. A mark is a thing of the model,
+an arrow 0.6 m long (less on a short pipe) and as wide as its pipe: zoomed
+out it shrinks with the pipes until it is too small to draw, zoomed in it is
+there to read. The marks are drawn in plan and in the pictures of a
+documented check too.
 
 ## Storeys
 
